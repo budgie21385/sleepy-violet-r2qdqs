@@ -8,6 +8,26 @@ const MATCH_OPTIONS = [1, 2, 3, 4];
 export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState(null);
+
+  useEffect(() => {
+  async function loadVenues() {
+    const { data, error } = await supabase
+      .from("venues")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error loading venues:", error);
+    } else {
+      setVenues(data || []);
+    }
+
+    setLoading(false);
+  }
+
+  loadVenues();
+}, []);
 
   const [screen, setScreen] = useState("filters");
   const [suburb, setSuburb] = useState(ALL);
