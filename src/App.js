@@ -1,147 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink } from "lucide-react";
-
-const VENUES = [
-  {
-    id: 1,
-    name: "Elmo’s",
-    suburb: "Fitzroy North",
-    category: "Restaurant",
-    cuisine: "American",
-    address: "350 St Georges Rd, Fitzroy North VIC 3068",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Elmo%E2%80%99s%20350%20St%20Georges%20Rd%20Fitzroy%20North%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 2,
-    name: "Doju",
-    suburb: "Melbourne",
-    category: "Restaurant",
-    cuisine: "Modern Asian",
-    address: "530 Little Collins St, Melbourne VIC 3000",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Doju%20530%20Little%20Collins%20St%20Melbourne%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 3,
-    name: "Maalu Maalu",
-    suburb: "Brunswick",
-    category: "Restaurant",
-    cuisine: "Sri Lankan",
-    address: "246 Sydney Rd, Brunswick VIC 3056",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Maalu%20Maalu%20246%20Sydney%20Rd%20Brunswick%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 4,
-    name: "Maven by Morgan",
-    suburb: "Fitzroy",
-    category: "Restaurant",
-    cuisine: "Modern Australian",
-    address: "402 Brunswick St, Fitzroy VIC 3065",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Maven%20by%20Morgan%20402%20Brunswick%20St%20Fitzroy%20VIC",
-    partnerLikes: false,
-  },
-  {
-    id: 5,
-    name: "Myrtle Wine Bar",
-    suburb: "Melbourne",
-    category: "Bar",
-    cuisine: "Wine Bar",
-    address: "17 Warburton Ln, Melbourne VIC 3000",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Myrtle%20Wine%20Bar%2017%20Warburton%20Ln%20Melbourne%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 6,
-    name: "Le Pub and Bottle Shop",
-    suburb: "Melbourne",
-    category: "Bar",
-    cuisine: "Pub",
-    address: "380 Little Bourke St, Melbourne VIC 3000",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Le%20Pub%20and%20Bottle%20Shop%20380%20Little%20Bourke%20St%20Melbourne%20VIC",
-    partnerLikes: false,
-  },
-  {
-    id: 7,
-    name: "Noisy Ritual",
-    suburb: "Brunswick East",
-    category: "Bar",
-    cuisine: "Winery",
-    address: "249 Lygon St, Brunswick East VIC 3057",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Noisy%20Ritual%20249%20Lygon%20St%20Brunswick%20East%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 8,
-    name: "Suburbia Bakery",
-    suburb: "Fairfield",
-    category: "Cafe",
-    cuisine: "Bakery",
-    address: "177 Grange Rd, Fairfield VIC 3078",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Suburbia%20Bakery%20177%20Grange%20Rd%20Fairfield%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 9,
-    name: "Outer Circle Social Club",
-    suburb: "Fairfield",
-    category: "Cafe",
-    cuisine: "Cafe",
-    address: "299 Arthur St, Fairfield VIC 3078",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Outer%20Circle%20Social%20Club%20299%20Arthur%20St%20Fairfield%20VIC",
-    partnerLikes: false,
-  },
-  {
-    id: 10,
-    name: "HazelBark Patisserie",
-    suburb: "Preston",
-    category: "Cafe",
-    cuisine: "Patisserie",
-    address: "8A Clinch Ave, Preston VIC 3072",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=HazelBark%20Patisserie%208A%20Clinch%20Ave%20Preston%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 11,
-    name: "Pieman’s Son",
-    suburb: "Heidelberg Heights",
-    category: "Cafe",
-    cuisine: "Bakery",
-    address: "42 Bell St, Heidelberg Heights VIC 3081",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Pieman%E2%80%99s%20Son%2042%20Bell%20St%20Heidelberg%20Heights%20VIC",
-    partnerLikes: false,
-  },
-  {
-    id: 12,
-    name: "Baketico by Wonder Pies Heidelberg",
-    suburb: "Heidelberg Heights",
-    category: "Cafe",
-    cuisine: "Bakery",
-    address: "3/1 Orr St, Heidelberg Heights VIC 3081",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Baketico%20by%20Wonder%20Pies%20Heidelberg%203%2F1%20Orr%20St%20Heidelberg%20Heights%20VIC",
-    partnerLikes: true,
-  },
-  {
-    id: 13,
-    name: "To Be Frank Bakery",
-    suburb: "Collingwood",
-    category: "Cafe",
-    cuisine: "Bakery",
-    address: "Shop%201%2C%204%20Bedford%20St%20Collingwood%20VIC",
-    mapsUrl: "https://www.google.com/maps/search/?api=1&query=To%20Be%20Frank%20Bakery%20Shop%201%204%20Bedford%20St%20Collingwood%20VIC",
-    partnerLikes: true,
-  },
-];
+import { supabase } from "./supabaseClient";
 
 const ALL = "All";
 const MATCH_OPTIONS = [1, 2, 3, 4];
 
-function uniqueValues(key) {
-  return [ALL, ...Array.from(new Set(VENUES.map((venue) => venue[key]))).sort()];
-}
-
 export default function RestaurantSwipeMVP() {
+  const [venues, setVenues] = useState([]);
+  const [loading, setLoading] = useState(true);
+
   const [screen, setScreen] = useState("filters");
   const [suburb, setSuburb] = useState(ALL);
   const [category, setCategory] = useState(ALL);
@@ -152,19 +19,46 @@ export default function RestaurantSwipeMVP() {
   const [passed, setPassed] = useState([]);
   const [picked, setPicked] = useState(null);
 
-  const suburbs = useMemo(() => uniqueValues("suburb"), []);
-  const categories = useMemo(() => uniqueValues("category"), []);
-  const cuisines = useMemo(() => uniqueValues("cuisine"), []);
+  useEffect(() => {
+    async function loadVenues() {
+      const { data, error } = await supabase
+        .from("venues")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error("Error loading venues:", error);
+      } else {
+        setVenues(data || []);
+      }
+
+      setLoading(false);
+    }
+
+    loadVenues();
+  }, []);
+
+  const suburbs = useMemo(() => {
+    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.suburb))).filter(Boolean).sort()];
+  }, [venues]);
+
+  const categories = useMemo(() => {
+    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.category))).filter(Boolean).sort()];
+  }, [venues]);
+
+  const cuisines = useMemo(() => {
+    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.cuisine))).filter(Boolean).sort()];
+  }, [venues]);
 
   const filteredVenues = useMemo(() => {
-    return VENUES.filter((venue) => {
+    return venues.filter((venue) => {
       return (
         (suburb === ALL || venue.suburb === suburb) &&
         (category === ALL || venue.category === category) &&
         (cuisine === ALL || venue.cuisine === cuisine)
       );
     });
-  }, [suburb, category, cuisine]);
+  }, [venues, suburb, category, cuisine]);
 
   const currentVenue = filteredVenues[cardIndex];
 
@@ -196,14 +90,12 @@ export default function RestaurantSwipeMVP() {
   function likeVenue() {
     if (!currentVenue) return;
 
-    if (currentVenue.partnerLikes) {
-      const newMatches = [...matches, currentVenue];
-      setMatches(newMatches);
+    const newMatches = [...matches, currentVenue];
+    setMatches(newMatches);
 
-      if (newMatches.length >= matchLimit) {
-        setScreen("matches");
-        return;
-      }
+    if (newMatches.length >= matchLimit) {
+      setScreen("matches");
+      return;
     }
 
     nextCard();
@@ -219,6 +111,14 @@ export default function RestaurantSwipeMVP() {
     if (!matches.length) return;
     const randomMatch = matches[Math.floor(Math.random() * matches.length)];
     setPicked(randomMatch);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] text-[#111111] flex items-center justify-center p-4">
+        Loading venues...
+      </div>
+    );
   }
 
   return (
@@ -292,7 +192,7 @@ export default function RestaurantSwipeMVP() {
                 <p className="mb-2 text-sm text-neutral-600">Tonight’s pick</p>
                 <h3 className="text-xl font-semibold">{picked.name}</h3>
                 <p className="mt-1 text-sm text-neutral-600">{picked.suburb} · {picked.category} · {picked.cuisine}</p>
-                <OpenMapsButton url={picked.mapsUrl} />
+                <OpenMapsButton url={picked.maps_url} />
               </div>
             ) : null}
 
@@ -304,7 +204,7 @@ export default function RestaurantSwipeMVP() {
                       <h3 className="font-semibold">{venue.name}</h3>
                       <p className="text-sm text-neutral-600">{venue.suburb} · {venue.category} · {venue.cuisine}</p>
                     </div>
-                    <a href={venue.mapsUrl} target="_blank" rel="noreferrer" className="rounded-full bg-white p-2 shadow-sm">
+                    <a href={venue.maps_url} target="_blank" rel="noreferrer" className="rounded-full bg-white p-2 shadow-sm">
                       <ExternalLink size={16} />
                     </a>
                   </div>
@@ -381,7 +281,7 @@ function VenueCard({ venue, onLike, onPass }) {
         <p className="mt-4 text-sm leading-6 text-neutral-500">{venue.address}</p>
       </div>
 
-      <OpenMapsButton url={venue.mapsUrl} />
+      <OpenMapsButton url={venue.maps_url} />
 
       <div className="mt-5 grid grid-cols-2 gap-3">
         <button onClick={onPass} className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition">
