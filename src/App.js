@@ -10,25 +10,6 @@ export default function RestaurantSwipeMVP() {
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState(null);
 
-  useEffect(() => {
-  async function loadVenues() {
-    const { data, error } = await supabase
-      .from("venues")
-      .select("*")
-      .order("name", { ascending: true });
-
-    if (error) {
-      console.error("Error loading venues:", error);
-    } else {
-      setVenues(data || []);
-    }
-
-    setLoading(false);
-  }
-
-  loadVenues();
-}, []);
-
   const [screen, setScreen] = useState("filters");
   const [suburb, setSuburb] = useState(ALL);
   const [category, setCategory] = useState(ALL);
@@ -37,8 +18,7 @@ export default function RestaurantSwipeMVP() {
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
-  const [picked, setPicked] = useState(null);
-
+  
   useEffect(() => {
     async function loadVenues() {
       const { data, error } = await supabase
