@@ -115,14 +115,14 @@ export default function RestaurantSwipeMVP() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAFAFA] text-[#111111] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
         Loading venues...
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] text-[#111111] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="mb-5 flex items-center justify-between">
           <div>
@@ -155,7 +155,7 @@ export default function RestaurantSwipeMVP() {
               <button
                 onClick={startSwiping}
                 disabled={!filteredVenues.length}
-                className="w-full rounded-2xl bg-[#4CAF50] py-4 font-medium text-white disabled:bg-neutral-300"
+                className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
               >
                 Start swiping
               </button>
@@ -188,7 +188,7 @@ export default function RestaurantSwipeMVP() {
             </div>
 
             {picked ? (
-              <div className="mb-5 rounded-3xl bg-[#F0F8F0] p-5 border border-[#DCEEDC]">
+              <div className="mb-5 rounded-3xl bg-[#edf2eb] p-5 border border-[#c5d4c2]">
                 <p className="mb-2 text-sm text-neutral-600">Tonight’s pick</p>
                 <h3 className="text-xl font-semibold">{picked.name}</h3>
                 <p className="mt-1 text-sm text-neutral-600">{picked.suburb} · {picked.category} · {picked.cuisine}</p>
@@ -257,7 +257,7 @@ function MatchLimitField({ value, onChange }) {
             onClick={() => onChange(option)}
             className={`rounded-2xl py-3 font-medium transition ${
               value === option
-                ? "bg-[#4CAF50] text-white"
+                ? "bg-[#455d3b] text-white"
                 : "bg-neutral-50 text-neutral-700 border border-neutral-100"
             }`}
           >
@@ -287,7 +287,7 @@ function VenueCard({ venue, onLike, onPass }) {
         <button onClick={onPass} className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition">
           <span className="inline-flex items-center justify-center gap-2"><X size={18} /> Pass</span>
         </button>
-        <button onClick={onLike} className="rounded-2xl bg-[#EEF8EE] py-4 font-medium text-[#2E7D32] active:scale-[0.98] transition">
+        <button onClick={onLike} className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition">
           <span className="inline-flex items-center justify-center gap-2"><Heart size={18} /> Like</span>
         </button>
       </div>
