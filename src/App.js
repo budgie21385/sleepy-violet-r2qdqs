@@ -12,6 +12,7 @@ const AREA_CHIPS = [
   { name: "Brunswick", lat: -37.7663, lng: 144.9614 },
   { name: "Northcote", lat: -37.7699, lng: 144.9998 },
   { name: "Fairfield", lat: -37.7797, lng: 145.0174 },
+  { name: "Thornbury", lat: -37.759603621460016, lng: 145.00023000954627 },
 ];
 
 const RADIUS_OPTIONS = [1, 3, 5, 10];
@@ -33,6 +34,7 @@ export default function RestaurantSwipeMVP() {
   const [areaSearch, setAreaSearch] = useState("");
   const [selectedArea, setSelectedArea] = useState(null);
   const [radiusKm, setRadiusKm] = useState(5);
+  const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [matchLimit, setMatchLimit] = useState(3);
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
@@ -219,7 +221,9 @@ function passVenue() {
                 setSelectedArea={setSelectedArea}
                 radiusKm={radiusKm}
                 setRadiusKm={setRadiusKm}
-                />
+                showAreaDropdown={showAreaDropdown}
+                setShowAreaDropdown={setShowAreaDropdown}
+              />
               <SelectField label="Type" value={category} onChange={setCategory} options={categories} />
               <SelectField label="Cuisine" value={cuisine} onChange={setCuisine} options={cuisines} />
               <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
@@ -363,6 +367,8 @@ function AreaFilter({
   setSelectedArea,
   radiusKm,
   setRadiusKm,
+  showAreaDropdown,
+  setShowAreaDropdown,
 }) {
   const matchingAreas = AREA_CHIPS.filter((area) =>
     area.name.toLowerCase().includes(areaSearch.toLowerCase())
@@ -376,19 +382,25 @@ function AreaFilter({
 
       <input
         value={areaSearch}
-        onChange={(event) => setAreaSearch(event.target.value)}
+        onFocus={() => setShowAreaDropdown(true)}
+        onChange={(event) => {
+          setAreaSearch(event.target.value);
+          setShowAreaDropdown(true);
+       }}
         placeholder="Search suburb or area..."
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
 
+      {showAreaDropdown && (
       <div className="mt-3 flex flex-wrap gap-2">
         {matchingAreas.map((area) => (
           <button
             key={area.name}
             type="button"
-            onClick={() => {
+             onClick={() => {
               setSelectedArea(area);
               setAreaSearch(area.name);
+              setShowAreaDropdown(false);
             }}
             className={`rounded-full px-4 py-2 text-sm font-medium border ${
               selectedArea?.name === area.name
@@ -400,6 +412,7 @@ function AreaFilter({
           </button>
         ))}
       </div>
+)}
 
       {selectedArea && (
         <button
