@@ -61,14 +61,27 @@ export default function RestaurantSwipeMVP() {
     });
   }, [venues, suburb, category, cuisine]);
 
-  const currentVenue = filteredVenues[cardIndex];
+const currentUserSwipedIds = currentUser === "mark"
+  ? [...markLikes, ...markPasses]
+  : [...partnerLikes, ...partnerPasses];
 
+const currentVenue = filteredVenues.find(
+  (venue) => !currentUserSwipedIds.includes(venue.id)
+);
+
+const currentUserSwipedCount = currentUserSwipedIds.length;
   function resetSwipe() {
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
     setPicked(null);
     setScreen("filters");
+
+    setCurrentUser("mark");
+    setMarkLikes([]);
+    setPartnerLikes([]);
+    setMarkPasses([]);
+    setPartnerPasses([]);
   }
 
   function startSwiping() {
@@ -88,25 +101,41 @@ export default function RestaurantSwipeMVP() {
     setCardIndex(nextIndex);
   }
 
-  function likeVenue() {
-    if (!currentVenue) return;
+ function likeVenue() {
+  if (!currentVenue) return;
 
+  const venueId = currentVenue.id;
+
+  const otherUserLikes = currentUser === "mark" ? partnerLikes : markLikes;
+  const isMatch = otherUserLikes.includes(venueId);
+
+  if (currentUser === "mark") {
+    setMarkLikes((prev) => [...prev, venueId]);
+  } else {
+    setPartnerLikes((prev) => [...prev, venueId]);
+  }
+
+  if (isMatch && !matches.some((match) => match.id === venueId)) {
     const newMatches = [...matches, currentVenue];
     setMatches(newMatches);
 
     if (newMatches.length >= matchLimit) {
       setScreen("matches");
-      return;
     }
-
-    nextCard();
   }
+}
 
-  function passVenue() {
-    if (!currentVenue) return;
-    setPassed([...passed, currentVenue]);
-    nextCard();
+function passVenue() {
+  if (!currentVenue) return;
+
+  const venueId = currentVenue.id;
+
+  if (currentUser === "mark") {
+    setMarkPasses((prev) => [...prev, venueId]);
+  } else {
+    setPartnerPasses((prev) => [...prev, venueId]);
   }
+}
 
   function pickForUs() {
     if (!matches.length) return;
@@ -166,9 +195,10 @@ export default function RestaurantSwipeMVP() {
 
         {screen === "swipe" && (
           <div>
+          <UserToggle currentUser={currentUser} setCurrentUser={setCurrentUser} />
             <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
               <span>Matches: {matches.length} / {matchLimit}</span>
-              <span>{cardIndex + 1} of {filteredVenues.length}</span>
+              <span>{currentUserSwipedCount + 1} of {filteredVenues.length}</span>
             </div>
 
             {currentVenue ? (
@@ -219,11 +249,44 @@ export default function RestaurantSwipeMVP() {
               </button>
             ) : (
               <button onClick={resetSwipe} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
-                Try different filters
+               Try different filters
               </button>
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function UserToggle({ currentUser, setCurrentUser }) {
+  return (
+    <div className="mb-4 rounded-3xl bg-white p-3 shadow-sm border border-neutral-100">
+      <p className="mb-2 text-sm font-medium text-neutral-700">Who is swiping?</p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setCurrentUser("mark")}
+          className={`rounded-2xl py-3 font-medium transition ${
+            currentUser === "mark"
+              ? "bg-[#4CAF50] text-white"
+              : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+          }`}
+        >
+          Mark
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCurrentUser("partner")}
+          className={`rounded-2xl py-3 font-medium transition ${
+            currentUser === "partner"
+              ? "bg-[#4CAF50] text-white"
+              : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+          }`}
+        >
+          Partner
+        </button>
       </div>
     </div>
   );
