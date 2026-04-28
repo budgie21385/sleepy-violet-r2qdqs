@@ -68,8 +68,40 @@ export default function RestaurantSwipeMVP() {
   }, [venues]);
 
   const cuisines = useMemo(() => {
-    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.cuisine))).filter(Boolean).sort()];
-  }, [venues]);
+  const availableVenues = venues.filter((venue) => {
+    const matchesCategory =
+      category === ALL || venue.category === category;
+
+    let matchesArea = true;
+
+    if (selectedArea && venue.lat && venue.lng) {
+      const distance = getDistanceKm(
+        selectedArea.lat,
+        selectedArea.lng,
+        venue.lat,
+        venue.lng
+      );
+
+      matchesArea = distance <= radiusKm;
+    }
+
+    return matchesCategory && matchesArea;
+  });
+
+  return [
+    ALL,
+    ...Array.from(
+      new Set(availableVenues.map((venue) => venue.cuisine))
+    )
+      .filter(Boolean)
+      .sort(),
+  ];
+}, [venues, category, selectedArea, radiusKm]);
+  useEffect(() => {
+  setSelectedCuisines((currentSelected) =>
+    currentSelected.filter((cuisine) => cuisines.includes(cuisine))
+  );
+}, [cuisines]);
 
 const filteredVenues = useMemo(() => {
   return venues.filter((venue) => {
