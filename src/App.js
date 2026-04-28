@@ -342,7 +342,7 @@ function UserToggle({ currentUser, setCurrentUser }) {
           onClick={() => setCurrentUser("mark")}
           className={`rounded-2xl py-3 font-medium transition ${
             currentUser === "mark"
-              ? "bg-[#4CAF50] text-white"
+              ? "bg-[#455d3b] text-white"
               : "bg-neutral-50 text-neutral-700 border border-neutral-100"
           }`}
         >
@@ -354,7 +354,7 @@ function UserToggle({ currentUser, setCurrentUser }) {
           onClick={() => setCurrentUser("partner")}
           className={`rounded-2xl py-3 font-medium transition ${
             currentUser === "partner"
-              ? "bg-[#4CAF50] text-white"
+              ? "bg-[#455d3b] text-white"
               : "bg-neutral-50 text-neutral-700 border border-neutral-100"
           }`}
         >
