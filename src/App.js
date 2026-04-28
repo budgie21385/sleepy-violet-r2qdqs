@@ -459,7 +459,15 @@ function AreaFilter({
 }
 
 function MultiSelectChips({ label, options, selected, setSelected }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   function toggleOption(option) {
+    if (option === ALL) {
+      setSelected([]);
+      setIsOpen(false);
+      return;
+    }
+
     if (selected.includes(option)) {
       setSelected(selected.filter((item) => item !== option));
     } else {
@@ -467,37 +475,56 @@ function MultiSelectChips({ label, options, selected, setSelected }) {
     }
   }
 
+  const buttonText =
+    selected.length === 0
+      ? "All"
+      : selected.length === 1
+      ? selected[0]
+      : `${selected.length} selected`;
+
   return (
     <div>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
         {label}
       </span>
 
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-left text-base border border-neutral-100"
+      >
+        {buttonText} <span className="float-right">⌄</span>
+      </button>
+
+      {isOpen && (
+        <div className="mt-3 flex flex-wrap gap-2 rounded-2xl bg-white p-3 border border-neutral-100 shadow-sm">
           <button
-            key={option}
             type="button"
-            onClick={() => toggleOption(option)}
+            onClick={() => toggleOption(ALL)}
             className={`rounded-full px-4 py-2 text-sm font-medium border ${
-              selected.includes(option)
+              selected.length === 0
                 ? "bg-[#455d3b] text-white border-[#455d3b]"
                 : "bg-neutral-50 text-neutral-700 border-neutral-100"
             }`}
           >
-            {option}
+            All
           </button>
-        ))}
-      </div>
 
-      {selected.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setSelected([])}
-          className="mt-2 text-sm text-neutral-500 underline"
-        >
-          Clear cuisines
-        </button>
+          {options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => toggleOption(option)}
+              className={`rounded-full px-4 py-2 text-sm font-medium border ${
+                selected.includes(option)
+                  ? "bg-[#455d3b] text-white border-[#455d3b]"
+                  : "bg-neutral-50 text-neutral-700 border-neutral-100"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
