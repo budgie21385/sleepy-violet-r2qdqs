@@ -30,7 +30,7 @@ export default function RestaurantSwipeMVP() {
   const [screen, setScreen] = useState("filters");
   const [suburb, setSuburb] = useState(ALL);
   const [category, setCategory] = useState(ALL);
-  const [cuisine, setCuisine] = useState(ALL);
+  const [selectedCuisines, setSelectedCuisines] = useState([]);
   const [areaSearch, setAreaSearch] = useState("");
   const [selectedArea, setSelectedArea] = useState(null);
   const [radiusKm, setRadiusKm] = useState(5);
@@ -77,7 +77,7 @@ const filteredVenues = useMemo(() => {
       category === ALL || venue.category === category;
 
     const matchesCuisine =
-      cuisine === ALL || venue.cuisine === cuisine;
+        selectedCuisines.length === 0 || selectedCuisines.includes(venue.cuisine);
 
     let matchesArea = true;
 
@@ -94,7 +94,7 @@ const filteredVenues = useMemo(() => {
 
     return matchesArea && matchesCategory && matchesCuisine;
   });
-}, [venues, selectedArea, radiusKm, category, cuisine]);
+}, [venues, selectedArea, radiusKm, category, selectedCuisines]);
 
 const currentUserSwipedIds = currentUser === "mark"
   ? [...markLikes, ...markPasses]
@@ -225,7 +225,12 @@ function passVenue() {
                 setShowAreaDropdown={setShowAreaDropdown}
               />
               <SelectField label="Type" value={category} onChange={setCategory} options={categories} />
-              <SelectField label="Cuisine" value={cuisine} onChange={setCuisine} options={cuisines} />
+              <MultiSelectChips
+                label="Cuisine"
+                options={cuisines.filter((item) => item !== ALL)}
+                selected={selectedCuisines}
+                setSelected={setSelectedCuisines}
+              />
               <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
 
               <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600">
@@ -449,6 +454,51 @@ function AreaFilter({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function MultiSelectChips({ label, options, selected, setSelected }) {
+  function toggleOption(option) {
+    if (selected.includes(option)) {
+      setSelected(selected.filter((item) => item !== option));
+    } else {
+      setSelected([...selected, option]);
+    }
+  }
+
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-medium text-neutral-700">
+        {label}
+      </span>
+
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => toggleOption(option)}
+            className={`rounded-full px-4 py-2 text-sm font-medium border ${
+              selected.includes(option)
+                ? "bg-[#455d3b] text-white border-[#455d3b]"
+                : "bg-neutral-50 text-neutral-700 border-neutral-100"
+            }`}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+
+      {selected.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setSelected([])}
+          className="mt-2 text-sm text-neutral-500 underline"
+        >
+          Clear cuisines
+        </button>
+      )}
     </div>
   );
 }
