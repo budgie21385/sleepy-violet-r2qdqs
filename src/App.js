@@ -5,6 +5,16 @@ import { supabase } from "./supabaseClient";
 
 const ALL = "All";
 const MATCH_OPTIONS = [1, 2, 3, 4];
+const AREA_CHIPS = [
+  { name: "Melbourne", lat: -37.8136, lng: 144.9631 },
+  { name: "Fitzroy", lat: -37.7984, lng: 144.9783 },
+  { name: "Collingwood", lat: -37.8021, lng: 144.9882 },
+  { name: "Brunswick", lat: -37.7663, lng: 144.9614 },
+  { name: "Northcote", lat: -37.7699, lng: 144.9998 },
+  { name: "Fairfield", lat: -37.7797, lng: 145.0174 },
+];
+
+const RADIUS_OPTIONS = [1, 3, 5, 10];
 
 export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
@@ -20,6 +30,9 @@ export default function RestaurantSwipeMVP() {
   const [suburb, setSuburb] = useState(ALL);
   const [category, setCategory] = useState(ALL);
   const [cuisine, setCuisine] = useState(ALL);
+  const [areaSearch, setAreaSearch] = useState("");
+  const [selectedArea, setSelectedArea] = useState(null);
+  const [radiusKm, setRadiusKm] = useState(5);
   const [matchLimit, setMatchLimit] = useState(3);
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
@@ -56,15 +69,30 @@ export default function RestaurantSwipeMVP() {
     return [ALL, ...Array.from(new Set(venues.map((venue) => venue.cuisine))).filter(Boolean).sort()];
   }, [venues]);
 
-  const filteredVenues = useMemo(() => {
-    return venues.filter((venue) => {
-      return (
-        (suburb === ALL || venue.suburb === suburb) &&
-        (category === ALL || venue.category === category) &&
-        (cuisine === ALL || venue.cuisine === cuisine)
+const filteredVenues = useMemo(() => {
+  return venues.filter((venue) => {
+    const matchesCategory =
+      category === ALL || venue.category === category;
+
+    const matchesCuisine =
+      cuisine === ALL || venue.cuisine === cuisine;
+
+    let matchesArea = true;
+
+    if (selectedArea && venue.lat && venue.lng) {
+      const distance = getDistanceKm(
+        selectedArea.lat,
+        selectedArea.lng,
+        venue.lat,
+        venue.lng
       );
-    });
-  }, [venues, suburb, category, cuisine]);
+
+      matchesArea = distance <= radiusKm;
+    }
+
+    return matchesArea && matchesCategory && matchesCuisine;
+  });
+}, [venues, selectedArea, radiusKm, category, cuisine]);
 
 const currentUserSwipedIds = currentUser === "mark"
   ? [...markLikes, ...markPasses]
@@ -184,7 +212,14 @@ function passVenue() {
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="space-y-5">
-              <SelectField label="Area" value={suburb} onChange={setSuburb} options={suburbs} />
+              <AreaFilter
+                areaSearch={areaSearch}
+                setAreaSearch={setAreaSearch}
+                selectedArea={selectedArea}
+                setSelectedArea={setSelectedArea}
+                radiusKm={radiusKm}
+                setRadiusKm={setRadiusKm}
+                />
               <SelectField label="Type" value={category} onChange={setCategory} options={categories} />
               <SelectField label="Cuisine" value={cuisine} onChange={setCuisine} options={cuisines} />
               <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
@@ -270,6 +305,24 @@ function passVenue() {
   );
 }
 
+function getDistanceKm(lat1, lng1, lat2, lng2) {
+  const earthRadiusKm = 6371;
+
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadiusKm * c;
+}
+
 function UserToggle({ currentUser, setCurrentUser }) {
   return (
     <div className="mb-4 rounded-3xl bg-white p-3 shadow-sm border border-neutral-100">
@@ -298,6 +351,90 @@ function UserToggle({ currentUser, setCurrentUser }) {
         >
           Partner
         </button>
+      </div>
+    </div>
+  );
+}
+
+function AreaFilter({
+  areaSearch,
+  setAreaSearch,
+  selectedArea,
+  setSelectedArea,
+  radiusKm,
+  setRadiusKm,
+}) {
+  const matchingAreas = AREA_CHIPS.filter((area) =>
+    area.name.toLowerCase().includes(areaSearch.toLowerCase())
+  );
+
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-medium text-neutral-700">
+        Where are we going?
+      </span>
+
+      <input
+        value={areaSearch}
+        onChange={(event) => setAreaSearch(event.target.value)}
+        placeholder="Search suburb or area..."
+        className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
+      />
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {matchingAreas.map((area) => (
+          <button
+            key={area.name}
+            type="button"
+            onClick={() => {
+              setSelectedArea(area);
+              setAreaSearch(area.name);
+            }}
+            className={`rounded-full px-4 py-2 text-sm font-medium border ${
+              selectedArea?.name === area.name
+                ? "bg-[#455d3b] text-white border-[#455d3b]"
+                : "bg-neutral-50 text-neutral-700 border-neutral-100"
+            }`}
+          >
+            {area.name}
+          </button>
+        ))}
+      </div>
+
+      {selectedArea && (
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedArea(null);
+            setAreaSearch("");
+          }}
+          className="mt-2 text-sm text-neutral-500 underline"
+        >
+          Clear area
+        </button>
+      )}
+
+      <div className="mt-5">
+        <span className="mb-2 block text-sm font-medium text-neutral-700">
+          Radius
+        </span>
+
+        <div className="grid grid-cols-4 gap-2">
+          {RADIUS_OPTIONS.map((radius) => (
+            <button
+              key={radius}
+              type="button"
+              onClick={() => setRadiusKm(radius)}
+              className={`rounded-2xl py-3 font-medium transition ${
+                radiusKm === radius
+                  ? "bg-[#455d3b] text-white"
+                  : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+              }`}
+            >
+              {radius}km
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
