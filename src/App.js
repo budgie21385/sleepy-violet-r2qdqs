@@ -10,6 +10,11 @@ export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState(null);
+  const [currentUser, setCurrentUser] = useState("mark");
+  const [markLikes, setMarkLikes] = useState([]);
+  const [partnerLikes, setPartnerLikes] = useState([]);
+  const [markPasses, setMarkPasses] = useState([]);
+  const [partnerPasses, setPartnerPasses] = useState([]);
 
   const [screen, setScreen] = useState("filters");
   const [suburb, setSuburb] = useState(ALL);
@@ -89,7 +94,13 @@ const currentUserSwipedCount = currentUserSwipedIds.length;
     setMatches([]);
     setPassed([]);
     setPicked(null);
+    setMarkLikes([]);
+    setPartnerLikes([]);
+    setMarkPasses([]);
+    setPartnerPasses([]);
+    setCurrentUser("mark");
     setScreen("swipe");
+    
   }
 
   function nextCard() {
