@@ -46,6 +46,9 @@ export default function RestaurantSwipeMVP() {
       .from("venues")
       .select("*");
 
+    console.log("Supabase venues data:", data);
+    console.log("Supabase venues error:", error);
+
     if (error) {
       console.error("Error loading venues:", error);
     } else {
