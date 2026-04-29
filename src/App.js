@@ -41,45 +41,44 @@ export default function RestaurantSwipeMVP() {
   const [passed, setPassed] = useState([]);
   
   useEffect(() => {
-    async function loadVenues() {
-      const { data, error } = await supabase
-        .from("venues")
-        .select("*")
-        .order("name", { ascending: true });
+  async function loadVenues() {
+    const { data, error } = await supabase
+      .from("venues")
+      .select("*");
 
-      if (error) {
-        console.error("Error loading venues:", error);
-      } else {
-        setVenues(data || []);
-      }
-
-      setLoading(false);
+    if (error) {
+      console.error("Error loading venues:", error);
+    } else {
+      const shuffled = [...(data || [])].sort(() => Math.random() - 0.5);
+      setVenues(shuffled);
     }
 
-    loadVenues();
-  }, []);
+    setLoading(false);
+  }
 
+  loadVenues();
+}, []);
   const suburbs = useMemo(() => {
     return [ALL, ...Array.from(new Set(venues.map((venue) => venue.suburb))).filter(Boolean).sort()];
   }, [venues]);
 
   const categories = useMemo(() => {
-    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.category))).filter(Boolean).sort()];
+    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.type))).filter(Boolean).sort()];
   }, [venues]);
 
   const cuisines = useMemo(() => {
   const availableVenues = venues.filter((venue) => {
     const matchesCategory =
-      category === ALL || venue.category === category;
+      category === ALL || venue.type === category;
 
     let matchesArea = true;
 
-    if (selectedArea && venue.lat && venue.lng) {
+    if (selectedArea && venue.latitude && venue.longitude) {
       const distance = getDistanceKm(
         selectedArea.lat,
         selectedArea.lng,
-        venue.lat,
-        venue.lng
+        venue.latitude,
+        venue.longitude
       );
 
       matchesArea = distance <= radiusKm;
@@ -106,19 +105,19 @@ export default function RestaurantSwipeMVP() {
 const filteredVenues = useMemo(() => {
   return venues.filter((venue) => {
     const matchesCategory =
-      category === ALL || venue.category === category;
+      category === ALL || venue.type === category;
 
     const matchesCuisine =
         selectedCuisines.length === 0 || selectedCuisines.includes(venue.cuisine);
 
     let matchesArea = true;
 
-    if (selectedArea && venue.lat && venue.lng) {
+    if (selectedArea && venue.latitude && venue.longitude) {
       const distance = getDistanceKm(
         selectedArea.lat,
         selectedArea.lng,
-        venue.lat,
-        venue.lng
+        venue.latitude,
+        venue.longitude
       );
 
       matchesArea = distance <= radiusKm;
@@ -174,6 +173,12 @@ const currentUserSwipedCount = currentUserSwipedIds.length;
     setCardIndex(nextIndex);
   }
 
+function getMapsUrl(venue) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    `${venue.name} ${venue.address}`
+  )}`;
+}
+  
  function likeVenue() {
   if (!currentVenue) return;
 
@@ -320,7 +325,7 @@ function passVenue() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-semibold">{venue.name}</h3>
-                      <p className="text-sm text-neutral-600">{venue.suburb} · {venue.category} · {venue.cuisine}</p>
+                      <p className="text-sm text-neutral-600">{venue.suburb} · {venue.type} · {venue.cuisine}</p>
                     </div>
                     <a href={venue.maps_url} target="_blank" rel="noreferrer" className="rounded-full bg-white p-2 shadow-sm">
                       <ExternalLink size={16} />
@@ -607,7 +612,7 @@ function VenueCard({ venue, onLike, onPass }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <div className="mb-12">
-        <p className="mb-2 text-sm text-neutral-500">{venue.category} · {venue.cuisine}</p>
+        <p className="mb-2 text-sm text-neutral-500">{venue.type} · {venue.cuisine}</p>
         <h2 className="text-3xl font-semibold tracking-tight">{venue.name}</h2>
         <p className="mt-3 flex items-center gap-2 text-neutral-600">
           <MapPin size={17} /> {venue.suburb}
@@ -615,7 +620,7 @@ function VenueCard({ venue, onLike, onPass }) {
         <p className="mt-4 text-sm leading-6 text-neutral-500">{venue.address}</p>
       </div>
 
-      <OpenMapsButton url={venue.maps_url} />
+      <OpenMapsButton url={getMapsUrl(venue)} />
 
       <div className="mt-5 grid grid-cols-2 gap-3">
         <button onClick={onPass} className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition">
