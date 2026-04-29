@@ -61,6 +61,9 @@ export default function RestaurantSwipeMVP() {
 
   loadVenues();
 }, []);
+
+}
+  
   const suburbs = useMemo(() => {
     return [ALL, ...Array.from(new Set(venues.map((venue) => venue.suburb))).filter(Boolean).sort()];
   }, [venues]);
@@ -360,6 +363,14 @@ function passVenue() {
       </div>
     </div>
   );
+}
+
+function getMapsUrl(venue) {
+  if (venue.maps_url) return venue.maps_url;
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    `${venue.name || ""} ${venue.address || ""}`.trim()
+  )}`;
 }
 
 function getDistanceKm(lat1, lng1, lat2, lng2) {
