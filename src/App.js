@@ -108,19 +108,27 @@ const filteredVenues = useMemo(() => {
       category === ALL || venue.type === category;
 
     const matchesCuisine =
-        selectedCuisines.length === 0 || selectedCuisines.includes(venue.cuisine);
+      selectedCuisines.length === 0 ||
+      selectedCuisines.includes(venue.cuisine);
 
     let matchesArea = true;
 
-    if (selectedArea && venue.latitude && venue.longitude) {
-      const distance = getDistanceKm(
-        selectedArea.lat,
-        selectedArea.lng,
-        venue.latitude,
-        venue.longitude
-      );
+    if (selectedArea) {
+      const lat = Number(venue.latitude);
+      const lng = Number(venue.longitude);
 
-      matchesArea = distance <= radiusKm;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        matchesArea = false;
+      } else {
+        const distance = getDistanceKm(
+          selectedArea.lat,
+          selectedArea.lng,
+          lat,
+          lng
+        );
+
+        matchesArea = distance <= radiusKm;
+      }
     }
 
     return matchesArea && matchesCategory && matchesCuisine;
