@@ -626,25 +626,105 @@ function MatchLimitField({ value, onChange }) {
 function VenueCard({ venue, onLike, onPass }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
-      <div className="mb-12">
-        <p className="mb-2 text-sm text-neutral-500">{venue.type} · {venue.cuisine}</p>
+      <div className="mb-8">
+        <p className="mb-2 text-sm text-neutral-500">
+          {venue.type} · {venue.cuisine}
+        </p>
+
         <h2 className="text-3xl font-semibold tracking-tight">{venue.name}</h2>
+
         <p className="mt-3 flex items-center gap-2 text-neutral-600">
           <MapPin size={17} /> {venue.suburb}
         </p>
-        <p className="mt-4 text-sm leading-6 text-neutral-500">{venue.address}</p>
+
+        <p className="mt-4 text-sm leading-6 text-neutral-500">
+          {venue.address}
+        </p>
+
+        <VenueRating venue={venue} />
+
+        <OpeningHours venue={venue} />
       </div>
 
       <OpenMapsButton url={getMapsUrl(venue)} />
 
       <div className="mt-5 grid grid-cols-2 gap-3">
-        <button onClick={onPass} className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition">
-          <span className="inline-flex items-center justify-center gap-2"><X size={18} /> Pass</span>
+        <button
+          onClick={onPass}
+          className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
+        >
+          <span className="inline-flex items-center justify-center gap-2">
+            <X size={18} /> Pass
+          </span>
         </button>
-        <button onClick={onLike} className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition">
-          <span className="inline-flex items-center justify-center gap-2"><Heart size={18} /> Like</span>
+
+        <button
+          onClick={onLike}
+          className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition"
+        >
+          <span className="inline-flex items-center justify-center gap-2">
+            <Heart size={18} /> Like
+          </span>
         </button>
       </div>
+    </div>
+  );
+}
+
+function VenueRating({ venue }) {
+  if (!venue.rating && !venue.review_count) return null;
+
+  return (
+    <p className="mt-4 text-sm font-medium text-neutral-700">
+    ⭐ {venue.rating || "No rating"}
+    {venue.review_count
+      ? ` · ${venue.review_count} ${
+          Number(venue.review_count) === 1 ? "review" : "reviews"
+        }`
+      : ""}
+  </p>
+  );
+}
+
+function OpeningHours({ venue }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const days = [
+    { label: "Mon", value: venue.monday_hours },
+    { label: "Tue", value: venue.tuesday_hours },
+    { label: "Wed", value: venue.wednesday_hours },
+    { label: "Thu", value: venue.thursday_hours },
+    { label: "Fri", value: venue.friday_hours },
+    { label: "Sat", value: venue.saturday_hours },
+    { label: "Sun", value: venue.sunday_hours },
+  ];
+
+  const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
+  const today = days[todayIndex];
+
+  return (
+    <div className="mt-3 text-sm text-neutral-600">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex w-full items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3 text-left"
+      >
+        <span>
+          <strong>Today:</strong> {today.value || "Hours unavailable"}
+        </span>
+        <span>{isOpen ? "⌃" : "⌄"}</span>
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 rounded-2xl bg-neutral-50 px-4 py-3">
+          {days.map((day) => (
+            <div key={day.label} className="flex justify-between py-1">
+              <span className="font-medium">{day.label}</span>
+              <span>{day.value || "Hours unavailable"}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
