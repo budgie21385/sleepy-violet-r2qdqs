@@ -626,12 +626,27 @@ function MatchLimitField({ value, onChange }) {
 function VenueCard({ venue, onLike, onPass }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
+
+      {/* 👇 ADD IMAGE HERE */}
+      {venue?.primary_image && (
+        <img
+          src={`/api/place-photo?url=${encodeURIComponent(venue.primary_image)}`}
+          alt={venue.name}
+          className="w-full h-[250px] object-cover rounded-xl mb-6"
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+          }}
+        />
+      )}
+
       <div className="mb-8">
         <p className="mb-2 text-sm text-neutral-500">
           {venue.type} · {venue.cuisine}
         </p>
 
-        <h2 className="text-3xl font-semibold tracking-tight">{venue.name}</h2>
+        <h2 className="text-3xl font-semibold tracking-tight">
+          {venue.name}
+        </h2>
 
         <p className="mt-3 flex items-center gap-2 text-neutral-600">
           <MapPin size={17} /> {venue.suburb}
