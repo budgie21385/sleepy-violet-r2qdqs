@@ -623,41 +623,115 @@ function MatchLimitField({ value, onChange }) {
   );
 }
 
+function VenueHeroCarousel({ venue }) {
+  const images = venue?.image_urls?.length
+    ? venue.image_urls
+    : venue?.primary_image
+      ? [venue.primary_image]
+      : [];
+
+  const [imageIndex, setImageIndex] = useState(0);
+
+  if (!images.length) return null;
+
+  const currentImage = images[imageIndex];
+
+  function nextImage(e) {
+    e.stopPropagation();
+    setImageIndex((current) =>
+      current === images.length - 1 ? 0 : current + 1
+    );
+  }
+
+  function previousImage(e) {
+    e.stopPropagation();
+    setImageIndex((current) =>
+      current === 0 ? images.length - 1 : current - 1
+    );
+  }
+
+  return (
+  <div className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100">
+    <img
+      src={`/api/place-photo?url=${encodeURIComponent(currentImage)}`}
+      alt={venue.name}
+      className="h-full w-full object-cover"
+      onError={(e) => {
+        e.currentTarget.style.display = "none";
+      }}
+    />
+
+    {/* gradient overlay */}
+    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
+
+    {/* arrows */}
+    {images.length > 1 && (
+      <>
+        <button
+          type="button"
+          onClick={previousImage}
+          className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/85 px-3 py-2 text-lg"
+        >
+          ‹
+        </button>
+
+        <button
+          type="button"
+          onClick={nextImage}
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/85 px-3 py-2 text-lg"
+        >
+          ›
+        </button>
+
+        <div className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1 text-xs text-white">
+          {imageIndex + 1} / {images.length}
+        </div>
+      </>
+    )}
+
+    {/* overlay text */}
+    <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
+      <p className="mb-1 text-sm opacity-90">
+        {venue.type} · {venue.cuisine}
+      </p>
+
+      <h2 className="text-3xl font-semibold tracking-tight">
+        {venue.name}
+      </h2>
+
+      <p className="mt-2 flex items-center gap-2 text-sm opacity-90">
+        <MapPin size={16} /> {venue.suburb}
+      </p>
+    </div>
+  </div>
+);
+}
+
 function VenueCard({ venue, onLike, onPass }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
+      <VenueHeroCarousel venue={venue} />
 
-      {/* 👇 ADD IMAGE HERE */}
-      {venue?.primary_image && (
-        <img
-          src={`/api/place-photo?url=${encodeURIComponent(venue.primary_image)}`}
-          alt={venue.name}
-          className="w-full h-[250px] object-cover rounded-xl mb-6"
-          onError={(e) => {
-            e.currentTarget.style.display = "none";
-          }}
-        />
-      )}
-
-      <div className="mb-8">
-        <p className="mb-2 text-sm text-neutral-500">
-          {venue.type} · {venue.cuisine}
-        </p>
-
-        <h2 className="text-3xl font-semibold tracking-tight">
+      <div className="mb-6 space-y-2">
+        <h2 className="text-2xl font-semibold tracking-tight">
           {venue.name}
         </h2>
 
-        <p className="mt-3 flex items-center gap-2 text-neutral-600">
-          <MapPin size={17} /> {venue.suburb}
+        <p className="text-sm text-neutral-500">
+          {venue.type} · {venue.cuisine}
         </p>
 
-        <p className="mt-4 text-sm leading-6 text-neutral-500">
+        <p className="flex items-center gap-2 text-neutral-600">
+          <MapPin size={17} /> {venue.suburb}
+        </p>
+      </div>
+
+      <div className="mb-8 space-y-3">
+        <p className="text-sm leading-6 text-neutral-500">
           {venue.address}
         </p>
 
         <VenueRating venue={venue} />
-
         <OpeningHours venue={venue} />
       </div>
 
@@ -665,6 +739,7 @@ function VenueCard({ venue, onLike, onPass }) {
 
       <div className="mt-5 grid grid-cols-2 gap-3">
         <button
+          type="button"
           onClick={onPass}
           className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
         >
@@ -674,6 +749,7 @@ function VenueCard({ venue, onLike, onPass }) {
         </button>
 
         <button
+          type="button"
           onClick={onLike}
           className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition"
         >
@@ -689,8 +765,8 @@ function VenueCard({ venue, onLike, onPass }) {
 function VenueRating({ venue }) {
   if (!venue.rating && !venue.review_count) return null;
 
-  return (
-    <p className="mt-4 text-sm font-medium text-neutral-700">
+return (
+  <p className="mt-4 text-sm font-medium text-neutral-700">
     ⭐ {venue.rating || "No rating"}
     {venue.review_count
       ? ` · ${venue.review_count} ${
@@ -698,7 +774,7 @@ function VenueRating({ venue }) {
         }`
       : ""}
   </p>
-  );
+);
 }
 
 function OpeningHours({ venue }) {
