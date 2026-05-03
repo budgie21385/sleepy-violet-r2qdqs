@@ -670,17 +670,16 @@ function VenueHeroCarousel({ venue }) {
         <button
           type="button"
           onClick={previousImage}
-          className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-white/85 px-3 py-2 text-lg"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
         >
-          ‹
+        ‹
         </button>
-
         <button
-          type="button"
-          onClick={nextImage}
-          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-white/85 px-3 py-2 text-lg"
+         type="button"
+         onClick={nextImage}
+         className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
         >
-          ›
+        ›
         </button>
 
         <div className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1 text-xs text-white">
