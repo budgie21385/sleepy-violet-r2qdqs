@@ -712,21 +712,7 @@ function VenueCard({ venue, onLike, onPass }) {
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
 
-      <div className="mb-6 space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight">
-          {venue.name}
-        </h2>
-
-        <p className="text-sm text-neutral-500">
-          {venue.type} · {venue.cuisine}
-        </p>
-
-        <p className="flex items-center gap-2 text-neutral-600">
-          <MapPin size={17} /> {venue.suburb}
-        </p>
-      </div>
-
-      <div className="mb-8 space-y-3">
+        <div className="mb-8 space-y-3">
         <p className="text-sm leading-6 text-neutral-500">
           {venue.address}
         </p>
