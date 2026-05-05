@@ -631,84 +631,103 @@ function VenueHeroCarousel({ venue }) {
       : [];
 
   const [imageIndex, setImageIndex] = useState(0);
+  const [isFading, setIsFading] = useState(false);
 
   if (!images.length) return null;
 
   const currentImage = images[imageIndex];
 
-  function nextImage(e) {
+  function changeImage(direction, e) {
     e.stopPropagation();
-    setImageIndex((current) =>
-      current === images.length - 1 ? 0 : current + 1
-    );
+
+    if (images.length <= 1 || isFading) return;
+
+    setIsFading(true);
+
+    setTimeout(() => {
+      setImageIndex((current) => {
+        if (direction === "next") {
+          return current === images.length - 1 ? 0 : current + 1;
+        }
+
+        return current === 0 ? images.length - 1 : current - 1;
+      });
+
+      setIsFading(false);
+    }, 150);
+  }
+
+  function nextImage(e) {
+    changeImage("next", e);
   }
 
   function previousImage(e) {
-    e.stopPropagation();
-    setImageIndex((current) =>
-      current === 0 ? images.length - 1 : current - 1
-    );
+    changeImage("previous", e);
   }
 
   return (
-  <div className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100">
-    <img
-      src={`/api/place-photo?url=${encodeURIComponent(currentImage)}`}
-      alt={venue.name}
-      className="h-full w-full object-cover"
-      onError={(e) => {
-        e.currentTarget.style.display = "none";
-      }}
-    />
+    <div className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100">
+      <img
+        key={currentImage}
+        src={`/api/place-photo?url=${encodeURIComponent(currentImage)}`}
+        alt={venue.name}
+        className={`h-full w-full object-cover transition-opacity duration-300 ease-in-out ${
+          isFading ? "opacity-0" : "opacity-100"
+        }`}
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+        }}
+      />
 
-    {/* gradient overlay */}
-    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
+      {/* gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
 
-    {/* ⭐ rating badge (always visible) */}
-    <div className="absolute left-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
-    ⭐ {venue.rating}
-    </div>
+      {/* rating badge */}
+      <div className="absolute left-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
+        ⭐ {venue.rating}
+      </div>
 
-    {/* arrows */}
-    {images.length > 1 && (
-    <>
-    <button
-      type="button"
-      onClick={previousImage}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
-        >
-        ‹
-        </button>
-        <button
-         type="button"
-         onClick={nextImage}
-         className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
-        >
-        ›
-        </button>
+      {/* arrows */}
+      {images.length > 1 && (
+        <>
+          <button
+            type="button"
+            onClick={previousImage}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
+          >
+            ‹
+          </button>
 
-        <div className="absolute right-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
-          {imageIndex + 1} / {images.length}
+          <button
+            type="button"
+            onClick={nextImage}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
+          >
+            ›
+          </button>
+
+          <div className="absolute right-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
+            {imageIndex + 1} / {images.length}
+          </div>
+        </>
+      )}
+
+      <div className="absolute bottom-0 left-0 right-0 p-5 text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]">
+        <p className="text-sm text-white/80 mb-1">
+          {venue.type}
+        </p>
+
+        <h2 className="text-[28px] font-semibold leading-tight mb-1">
+          {venue.name}
+        </h2>
+
+        <div className="flex items-center gap-2 text-sm text-white/90">
+          <MapPin size={14} className="opacity-80" />
+          {venue.suburb}
         </div>
-      </>
-    )}
-
- <div className="absolute bottom-0 left-0 right-0 p-5 text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]">
-  <p className="text-sm text-white/80 mb-1">
-    {venue.type}
-  </p>
-
-  <h2 className="text-[28px] font-semibold leading-tight mb-1">
-    {venue.name}
-  </h2>
-
-  <div className="flex items-center gap-2 text-sm text-white/90">
-    <MapPin size={14} className="opacity-80" />
-    {venue.suburb}
-  </div>
-</div>
-</div>
-);
+      </div>
+    </div>
+  );
 }
 
 function VenueCard({ venue, onLike, onPass }) {
