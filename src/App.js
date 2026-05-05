@@ -707,6 +707,7 @@ function VenueHeroCarousel({ venue }) {
     {venue.suburb}
   </div>
 </div>
+</div>
 );
 }
 
