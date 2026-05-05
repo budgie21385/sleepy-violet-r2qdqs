@@ -664,12 +664,17 @@ function VenueHeroCarousel({ venue }) {
     {/* gradient overlay */}
     <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
 
+    {/* ⭐ rating badge (always visible) */}
+    <div className="absolute left-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
+    ⭐ {venue.rating}
+    </div>
+
     {/* arrows */}
     {images.length > 1 && (
-      <>
-        <button
-          type="button"
-          onClick={previousImage}
+    <>
+    <button
+      type="button"
+      onClick={previousImage}
           className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50 text-3xl font-light leading-none hover:text-white/80 transition"
         >
         ‹
@@ -682,27 +687,26 @@ function VenueHeroCarousel({ venue }) {
         ›
         </button>
 
-        <div className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1 text-xs text-white">
+        <div className="absolute right-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
           {imageIndex + 1} / {images.length}
         </div>
       </>
     )}
 
-    {/* overlay text */}
-    <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
-      <p className="mb-1 text-sm opacity-90">
-        {venue.type} · {venue.cuisine}
-      </p>
+ <div className="absolute bottom-0 left-0 right-0 p-5 text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]">
+  <p className="text-sm text-white/80 mb-1">
+    {venue.type}
+  </p>
 
-      <h2 className="text-3xl font-semibold tracking-tight">
-        {venue.name}
-      </h2>
+  <h2 className="text-[28px] font-semibold leading-tight mb-1">
+    {venue.name}
+  </h2>
 
-      <p className="mt-2 flex items-center gap-2 text-sm opacity-90">
-        <MapPin size={16} /> {venue.suburb}
-      </p>
-    </div>
+  <div className="flex items-center gap-2 text-sm text-white/90">
+    <MapPin size={14} className="opacity-80" />
+    {venue.suburb}
   </div>
+</div>
 );
 }
 
