@@ -632,6 +632,33 @@ function VenueHeroCarousel({ venue }) {
 
   const [imageIndex, setImageIndex] = useState(0);
   const [isFading, setIsFading] = useState(false);
+  const [touchStartX, setTouchStartX] = useState(null);
+  const [touchEndX, setTouchEndX] = useState(null);
+
+  function handleTouchStart(e) {
+  setTouchStartX(e.targetTouches[0].clientX);
+}
+
+function handleTouchMove(e) {
+  setTouchEndX(e.targetTouches[0].clientX);
+}
+
+function handleTouchEnd() {
+  if (touchStartX === null || touchEndX === null) return;
+
+  const distance = touchStartX - touchEndX;
+
+  if (distance > 50) {
+    nextImage({ stopPropagation: () => {} });
+  }
+
+  if (distance < -50) {
+    previousImage({ stopPropagation: () => {} });
+  }
+
+  setTouchStartX(null);
+  setTouchEndX(null);
+}
 
   if (!images.length) return null;
 
@@ -666,7 +693,12 @@ function VenueHeroCarousel({ venue }) {
   }
 
   return (
-    <div className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100">
+    <div
+      className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+       onTouchEnd={handleTouchEnd}
+         >
       <img
         key={currentImage}
         src={`/api/place-photo?url=${encodeURIComponent(currentImage)}`}
