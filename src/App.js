@@ -532,6 +532,20 @@ function AreaFilter({
  
       {showAreaDropdown && !areasLoading && (
         <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
+          {selectedAreas.length > 0 && (
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-neutral-50 px-4 py-2.5 border-b border-neutral-100">
+              <span className="text-xs text-neutral-600">
+                {selectedAreas.length} selected
+              </span>
+              <button
+                type="button"
+                onClick={clearAll}
+                className="text-xs font-medium text-[#455d3b]"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
           {areaSearch.trim() ? (
             searchedAreas.length === 0 ? (
               <div className="px-4 py-3 text-sm text-neutral-500">
