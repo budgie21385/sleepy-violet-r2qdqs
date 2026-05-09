@@ -783,23 +783,6 @@ function AreaFilter({
     setAreaSearch("");
   }
  
-  const pickerRef = useRef(null);
- 
-  useEffect(() => {
-    if (!showAreaDropdown) return;
-    function onClick(e) {
-      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
-        setShowAreaDropdown(false);
-      }
-    }
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("touchstart", onClick);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("touchstart", onClick);
-    };
-  }, [showAreaDropdown, setShowAreaDropdown]);
- 
   let placeholderText;
   if (areasLoading) {
     placeholderText = "Loading suburbs...";
@@ -812,7 +795,7 @@ function AreaFilter({
   }
  
   return (
-    <div ref={pickerRef}>
+    <div>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
         Where are we going?
       </span>
@@ -827,23 +810,30 @@ function AreaFilter({
         disabled={areasLoading}
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
- 
+
+      {selectedAreas.length > 0 && (
+        <button
+          type="button"
+          onClick={clearAll}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#edf2eb] px-3 py-1 text-sm font-medium text-[#455d3b] border border-[#c5d4c2]"
+        >
+          {selectedAreas.length} selected
+          <X size={14} />
+        </button>
+      )}
+
       {showAreaDropdown && !areasLoading && (
         <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
-          {selectedAreas.length > 0 && (
-            <div className="sticky top-0 z-10 flex items-center justify-between bg-neutral-50 px-4 py-2.5 border-b border-neutral-100">
-              <span className="text-xs text-neutral-600">
-                {selectedAreas.length} selected
-              </span>
-              <button
-                type="button"
-                onClick={clearAll}
-                className="text-xs font-medium text-[#455d3b]"
-              >
-                Clear all
-              </button>
-            </div>
-          )}
+          <div className="sticky top-0 z-10 flex items-center justify-end bg-white border-b border-neutral-100 px-2 py-2">
+            <button
+              type="button"
+              onClick={() => setShowAreaDropdown(false)}
+              aria-label="Close"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100"
+            >
+              <X size={16} />
+            </button>
+          </div>
           {areaSearch.trim() ? (
             searchedAreas.length === 0 ? (
               <div className="px-4 py-3 text-sm text-neutral-500">
