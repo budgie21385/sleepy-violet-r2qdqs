@@ -1,5 +1,5 @@
 import './styles.css';
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink } from "lucide-react";
 import { supabase } from "./supabaseClient";
  
@@ -99,9 +99,9 @@ export default function RestaurantSwipeMVP() {
       }
       setAreasLoading(false);
     }
-    loadAreas();
+loadAreas();
   }, []);
- 
+
   const cuisines = useMemo(() => {
     const availableVenues = venues.filter((venue) =>
       venueMatchesAreas(venue, selectedAreas, radiusKm)
@@ -113,7 +113,70 @@ export default function RestaurantSwipeMVP() {
         .sort(),
     ];
   }, [venues, selectedAreas, radiusKm]);
- 
+
+  const availableTimes = useMemo(() => {
+    const todayKey = getTodayDayKey();
+    const candidates = venues.filter((venue) => {
+      if (!venueMatchesAreas(venue, selectedAreas, radiusKm)) return false;
+      if (
+        selectedCuisines.length > 0 &&
+        !selectedCuisines.includes(venue.cuisine)
+      )
+        return false;
+      if (openNow && !isVenueOpenNow(venue)) return false;
+      if (selectedVibes.length > 0) {
+        if (!selectedVibes.some((vibe) => venueMatchesVibe(venue, vibe, todayKey)))
+          return false;
+      }
+      return true;
+    });
+    const computed = TIME_BANDS.filter((band) =>
+      candidates.some((v) => venueOpenInBand(v, todayKey, band))
+    ).map((b) => b.key);
+    return Array.from(new Set([...computed, ...selectedTimes]));
+  }, [
+    venues,
+    selectedAreas,
+    radiusKm,
+    selectedCuisines,
+    openNow,
+    selectedVibes,
+    selectedTimes,
+  ]);
+
+  const availableVibes = useMemo(() => {
+    const todayKey = getTodayDayKey();
+    const candidates = venues.filter((venue) => {
+      if (!venueMatchesAreas(venue, selectedAreas, radiusKm)) return false;
+      if (
+        selectedCuisines.length > 0 &&
+        !selectedCuisines.includes(venue.cuisine)
+      )
+        return false;
+      if (openNow && !isVenueOpenNow(venue)) return false;
+      if (selectedTimes.length > 0) {
+        const anyBandMatches = selectedTimes.some((label) => {
+          const band = TIME_BANDS.find((b) => b.key === label);
+          return band && venueOpenInBand(venue, todayKey, band);
+        });
+        if (!anyBandMatches) return false;
+      }
+      return true;
+    });
+    const computed = VIBE_OPTIONS.filter((vibe) =>
+      candidates.some((v) => venueMatchesVibe(v, vibe, todayKey))
+    );
+    return Array.from(new Set([...computed, ...selectedVibes]));
+  }, [
+    venues,
+    selectedAreas,
+    radiusKm,
+    selectedCuisines,
+    openNow,
+    selectedTimes,
+    selectedVibes,
+  ]);
+
   useEffect(() => {
     setSelectedCuisines((currentSelected) =>
       currentSelected.filter((cuisine) => cuisines.includes(cuisine))
@@ -287,18 +350,22 @@ export default function RestaurantSwipeMVP() {
                 setExpandedRegions={setExpandedRegions}
               />
               <OpenNowToggle openNow={openNow} setOpenNow={setOpenNow} />
-              <MultiSelectChips
-                label="Time of day"
-                options={TIME_BAND_LABELS}
-                selected={selectedTimes}
-                setSelected={setSelectedTimes}
-              />
-              <MultiSelectChips
-                label="Vibe"
-                options={VIBE_OPTIONS}
-                selected={selectedVibes}
-                setSelected={setSelectedVibes}
-              />
+            {availableTimes.length > 0 && (
+                <MultiSelectChips
+                  label="Time of day"
+                  options={availableTimes}
+                  selected={selectedTimes}
+                  setSelected={setSelectedTimes}
+                />
+              )}
+              {availableVibes.length > 0 && (
+                <MultiSelectChips
+                  label="Vibe"
+                  options={availableVibes}
+                  selected={selectedVibes}
+                  setSelected={setSelectedVibes}
+                />
+              )}
               <MultiSelectChips
                 label="Cuisine"
                 options={cuisines.filter((item) => item !== ALL)}
@@ -796,9 +863,21 @@ function AreaFilter({
  
   return (
     <div>
-      <span className="mb-2 block text-sm font-medium text-neutral-700">
-        Where are we going?
-      </span>
+       <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-neutral-700">
+          Where are we going?
+        </span>
+        {selectedAreas.length > 0 && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#edf2eb] px-3 py-1 text-xs font-medium text-[#455d3b] border border-[#c5d4c2]"
+          >
+            {selectedAreas.length} selected
+            <X size={12} />
+          </button>
+        )}
+      </div>
       <input
         value={areaSearch}
         onFocus={() => setShowAreaDropdown(true)}
@@ -810,17 +889,6 @@ function AreaFilter({
         disabled={areasLoading}
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
-
-      {selectedAreas.length > 0 && (
-        <button
-          type="button"
-          onClick={clearAll}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#edf2eb] px-3 py-1 text-sm font-medium text-[#455d3b] border border-[#c5d4c2]"
-        >
-          {selectedAreas.length} selected
-          <X size={14} />
-        </button>
-      )}
 
       {showAreaDropdown && !areasLoading && (
         <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
@@ -1154,12 +1222,31 @@ function VenueHeroCarousel({ venue }) {
   );
 }
  
+function VenueVibes({ venue }) {
+  const todayKey = getTodayDayKey();
+  const vibes = VIBE_OPTIONS.filter((v) => venueMatchesVibe(venue, v, todayKey));
+  if (vibes.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {vibes.map((v) => (
+        <span
+          key={v}
+          className="rounded-full bg-[#edf2eb] px-2.5 py-1 text-xs font-medium text-[#455d3b] border border-[#c5d4c2]"
+        >
+          {v}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function VenueCard({ venue, onLike, onPass }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
       <div className="mb-8 space-y-3">
         <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
+        <VenueVibes venue={venue} />
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
       </div>
