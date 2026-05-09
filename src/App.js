@@ -504,13 +504,30 @@ function AreaFilter({
     });
   }
  
-  function clearAll() {
+   function clearAll() {
     setSelectedAreas([]);
     setAreaSearch("");
   }
+
+  const pickerRef = useRef(null);
+
+  useEffect(() => {
+    if (!showAreaDropdown) return;
+    function onClick(e) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowAreaDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("touchstart", onClick);
+    };
+  }, [showAreaDropdown, setShowAreaDropdown]);
  
   return (
-    <div>
+    <div ref={pickerRef}>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
         Where are we going?
       </span>
