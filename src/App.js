@@ -2,21 +2,11 @@ import './styles.css';
 import React, { useEffect, useMemo, useState } from "react";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink } from "lucide-react";
 import { supabase } from "./supabaseClient";
-
+ 
 const ALL = "All";
 const MATCH_OPTIONS = [1, 2, 3, 4];
-const AREA_CHIPS = [
-  { name: "Melbourne", lat: -37.8136, lng: 144.9631 },
-  { name: "Fitzroy", lat: -37.7984, lng: 144.9783 },
-  { name: "Collingwood", lat: -37.8021, lng: 144.9882 },
-  { name: "Brunswick", lat: -37.7663, lng: 144.9614 },
-  { name: "Northcote", lat: -37.7699, lng: 144.9998 },
-  { name: "Fairfield", lat: -37.7797, lng: 145.0174 },
-  { name: "Thornbury", lat: -37.759603621460016, lng: 145.00023000954627 },
-];
-
 const RADIUS_OPTIONS = [1, 3, 5, 10];
-
+ 
 export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,11 +16,13 @@ export default function RestaurantSwipeMVP() {
   const [partnerLikes, setPartnerLikes] = useState([]);
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
-
   const [screen, setScreen] = useState("filters");
   const [suburb, setSuburb] = useState(ALL);
   const [category, setCategory] = useState(ALL);
   const [selectedCuisines, setSelectedCuisines] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [areasLoading, setAreasLoading] = useState(true);
+  const [expandedRegions, setExpandedRegions] = useState(() => new Set());
   const [areaSearch, setAreaSearch] = useState("");
   const [selectedArea, setSelectedArea] = useState(null);
   const [radiusKm, setRadiusKm] = useState(5);
@@ -39,130 +31,132 @@ export default function RestaurantSwipeMVP() {
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
-  
+ 
   useEffect(() => {
-  async function loadVenues() {
-    const { data, error } = await supabase
-      .from("venues")
-      .select("*");
-
-    console.log("Supabase venues data:", data);
-    console.log("Supabase venues error:", error);
-
-    if (error) {
-      console.error("Error loading venues:", error);
-    } else {
-      const shuffled = [...(data || [])].sort(() => Math.random() - 0.5);
-      setVenues(shuffled);
+    async function loadVenues() {
+      const { data, error } = await supabase
+        .from("venues")
+        .select("*");
+      console.log("Supabase venues data:", data);
+      console.log("Supabase venues error:", error);
+      if (error) {
+        console.error("Error loading venues:", error);
+      } else {
+        const shuffled = [...(data || [])].sort(() => Math.random() - 0.5);
+        setVenues(shuffled);
+      }
+      setLoading(false);
     }
-
-    setLoading(false);
-  }
-
-  loadVenues();
-}, []);
-
-  
+    loadVenues();
+  }, []);
+ 
+  useEffect(() => {
+    async function loadAreas() {
+      const { data, error } = await supabase
+        .from("areas")
+        .select("id, name, state, region, lat, lng")
+        .order("region", { ascending: true })
+        .order("name", { ascending: true });
+      if (error) {
+        console.error("Error loading areas:", error);
+      } else {
+        setAreas(data || []);
+      }
+      setAreasLoading(false);
+    }
+    loadAreas();
+  }, []);
+ 
   const suburbs = useMemo(() => {
     return [ALL, ...Array.from(new Set(venues.map((venue) => venue.suburb))).filter(Boolean).sort()];
   }, [venues]);
-
+ 
   const categories = useMemo(() => {
     return [ALL, ...Array.from(new Set(venues.map((venue) => venue.type))).filter(Boolean).sort()];
   }, [venues]);
-
+ 
   const cuisines = useMemo(() => {
-  const availableVenues = venues.filter((venue) => {
-    const matchesCategory =
-      category === ALL || venue.type === category;
-
-    let matchesArea = true;
-
-    if (selectedArea && venue.latitude && venue.longitude) {
-      const distance = getDistanceKm(
-        selectedArea.lat,
-        selectedArea.lng,
-        venue.latitude,
-        venue.longitude
-      );
-
-      matchesArea = distance <= radiusKm;
-    }
-
-    return matchesCategory && matchesArea;
-  });
-
-  return [
-    ALL,
-    ...Array.from(
-      new Set(availableVenues.map((venue) => venue.cuisine))
-    )
-      .filter(Boolean)
-      .sort(),
-  ];
-}, [venues, category, selectedArea, radiusKm]);
-  useEffect(() => {
-  setSelectedCuisines((currentSelected) =>
-    currentSelected.filter((cuisine) => cuisines.includes(cuisine))
-  );
-}, [cuisines]);
-
-const filteredVenues = useMemo(() => {
-  return venues.filter((venue) => {
-    const matchesCategory =
-      category === ALL || venue.type === category;
-
-    const matchesCuisine =
-      selectedCuisines.length === 0 ||
-      selectedCuisines.includes(venue.cuisine);
-
-    let matchesArea = true;
-
-    if (selectedArea) {
-      const lat = Number(venue.latitude);
-      const lng = Number(venue.longitude);
-
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        matchesArea = false;
-      } else {
+    const availableVenues = venues.filter((venue) => {
+      const matchesCategory =
+        category === ALL || venue.type === category;
+      let matchesArea = true;
+      if (selectedArea && venue.latitude && venue.longitude) {
         const distance = getDistanceKm(
           selectedArea.lat,
           selectedArea.lng,
-          lat,
-          lng
+          venue.latitude,
+          venue.longitude
         );
-
         matchesArea = distance <= radiusKm;
       }
-    }
-
-    return matchesArea && matchesCategory && matchesCuisine;
-  });
-}, [venues, selectedArea, radiusKm, category, selectedCuisines]);
-
-const currentUserSwipedIds = currentUser === "mark"
-  ? [...markLikes, ...markPasses]
-  : [...partnerLikes, ...partnerPasses];
-
-const currentVenue = filteredVenues.find(
-  (venue) => !currentUserSwipedIds.includes(venue.id)
-);
-
-const currentUserSwipedCount = currentUserSwipedIds.length;
+      return matchesCategory && matchesArea;
+    });
+    return [
+      ALL,
+      ...Array.from(
+        new Set(availableVenues.map((venue) => venue.cuisine))
+      )
+        .filter(Boolean)
+        .sort(),
+    ];
+  }, [venues, category, selectedArea, radiusKm]);
+ 
+  useEffect(() => {
+    setSelectedCuisines((currentSelected) =>
+      currentSelected.filter((cuisine) => cuisines.includes(cuisine))
+    );
+  }, [cuisines]);
+ 
+  const filteredVenues = useMemo(() => {
+    return venues.filter((venue) => {
+      const matchesCategory =
+        category === ALL || venue.type === category;
+      const matchesCuisine =
+        selectedCuisines.length === 0 ||
+        selectedCuisines.includes(venue.cuisine);
+      let matchesArea = true;
+      if (selectedArea) {
+        const lat = Number(venue.latitude);
+        const lng = Number(venue.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          matchesArea = false;
+        } else {
+          const distance = getDistanceKm(
+            selectedArea.lat,
+            selectedArea.lng,
+            lat,
+            lng
+          );
+          matchesArea = distance <= radiusKm;
+        }
+      }
+      return matchesArea && matchesCategory && matchesCuisine;
+    });
+  }, [venues, selectedArea, radiusKm, category, selectedCuisines]);
+ 
+  const currentUserSwipedIds = currentUser === "mark"
+    ? [...markLikes, ...markPasses]
+    : [...partnerLikes, ...partnerPasses];
+ 
+  const currentVenue = filteredVenues.find(
+    (venue) => !currentUserSwipedIds.includes(venue.id)
+  );
+ 
+  const currentUserSwipedCount = currentUserSwipedIds.length;
+ 
   function resetSwipe() {
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
     setPicked(null);
     setScreen("filters");
-
     setCurrentUser("mark");
     setMarkLikes([]);
     setPartnerLikes([]);
     setMarkPasses([]);
     setPartnerPasses([]);
   }
-
+ 
   function startSwiping() {
     setCardIndex(0);
     setMatches([]);
@@ -174,9 +168,8 @@ const currentUserSwipedCount = currentUserSwipedIds.length;
     setPartnerPasses([]);
     setCurrentUser("mark");
     setScreen("swipe");
-    
   }
-
+ 
   function nextCard() {
     const nextIndex = cardIndex + 1;
     if (nextIndex >= filteredVenues.length) {
@@ -185,49 +178,42 @@ const currentUserSwipedCount = currentUserSwipedIds.length;
     }
     setCardIndex(nextIndex);
   }
-
- function likeVenue() {
-  if (!currentVenue) return;
-
-  const venueId = currentVenue.id;
-
-  const otherUserLikes = currentUser === "mark" ? partnerLikes : markLikes;
-  const isMatch = otherUserLikes.includes(venueId);
-
-  if (currentUser === "mark") {
-    setMarkLikes((prev) => [...prev, venueId]);
-  } else {
-    setPartnerLikes((prev) => [...prev, venueId]);
-  }
-
-  if (isMatch && !matches.some((match) => match.id === venueId)) {
-    const newMatches = [...matches, currentVenue];
-    setMatches(newMatches);
-
-    if (newMatches.length >= matchLimit) {
-      setScreen("matches");
+ 
+  function likeVenue() {
+    if (!currentVenue) return;
+    const venueId = currentVenue.id;
+    const otherUserLikes = currentUser === "mark" ? partnerLikes : markLikes;
+    const isMatch = otherUserLikes.includes(venueId);
+    if (currentUser === "mark") {
+      setMarkLikes((prev) => [...prev, venueId]);
+    } else {
+      setPartnerLikes((prev) => [...prev, venueId]);
+    }
+    if (isMatch && !matches.some((match) => match.id === venueId)) {
+      const newMatches = [...matches, currentVenue];
+      setMatches(newMatches);
+      if (newMatches.length >= matchLimit) {
+        setScreen("matches");
+      }
     }
   }
-}
-
-function passVenue() {
-  if (!currentVenue) return;
-
-  const venueId = currentVenue.id;
-
-  if (currentUser === "mark") {
-    setMarkPasses((prev) => [...prev, venueId]);
-  } else {
-    setPartnerPasses((prev) => [...prev, venueId]);
+ 
+  function passVenue() {
+    if (!currentVenue) return;
+    const venueId = currentVenue.id;
+    if (currentUser === "mark") {
+      setMarkPasses((prev) => [...prev, venueId]);
+    } else {
+      setPartnerPasses((prev) => [...prev, venueId]);
+    }
   }
-}
-
+ 
   function pickForUs() {
     if (!matches.length) return;
     const randomMatch = matches[Math.floor(Math.random() * matches.length)];
     setPicked(randomMatch);
   }
-
+ 
   if (loading) {
     return (
       <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
@@ -235,7 +221,7 @@ function passVenue() {
       </div>
     );
   }
-
+ 
   return (
     <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
@@ -254,7 +240,6 @@ function passVenue() {
             </button>
           )}
         </div>
-
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="space-y-5">
@@ -267,6 +252,10 @@ function passVenue() {
                 setRadiusKm={setRadiusKm}
                 showAreaDropdown={showAreaDropdown}
                 setShowAreaDropdown={setShowAreaDropdown}
+                areas={areas}
+                areasLoading={areasLoading}
+                expandedRegions={expandedRegions}
+                setExpandedRegions={setExpandedRegions}
               />
               <SelectField label="Type" value={category} onChange={setCategory} options={categories} />
               <MultiSelectChips
@@ -276,11 +265,9 @@ function passVenue() {
                 setSelected={setSelectedCuisines}
               />
               <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
-
               <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600">
                 {filteredVenues.length} places available with these filters.
               </div>
-
               <button
                 onClick={startSwiping}
                 disabled={!filteredVenues.length}
@@ -291,15 +278,13 @@ function passVenue() {
             </div>
           </div>
         )}
-
         {screen === "swipe" && (
           <div>
-          <UserToggle currentUser={currentUser} setCurrentUser={setCurrentUser} />
+            <UserToggle currentUser={currentUser} setCurrentUser={setCurrentUser} />
             <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
               <span>Matches: {matches.length} / {matchLimit}</span>
               <span>{currentUserSwipedCount + 1} of {filteredVenues.length}</span>
             </div>
-
             {currentVenue ? (
               <VenueCard venue={currentVenue} onLike={likeVenue} onPass={passVenue} />
             ) : (
@@ -307,7 +292,6 @@ function passVenue() {
             )}
           </div>
         )}
-
         {screen === "matches" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="mb-5">
@@ -316,7 +300,6 @@ function passVenue() {
                 {matches.length ? `You’ve got ${matches.length} match${matches.length > 1 ? "es" : ""}` : "No matches yet"}
               </h2>
             </div>
-
             {picked ? (
               <div className="mb-5 rounded-3xl bg-[#edf2eb] p-5 border border-[#c5d4c2]">
                 <p className="mb-2 text-sm text-neutral-600">Tonight’s pick</p>
@@ -325,7 +308,6 @@ function passVenue() {
                 <OpenMapsButton url={picked.maps_url} />
               </div>
             ) : null}
-
             <div className="space-y-3">
               {matches.map((venue) => (
                 <div key={venue.id} className="rounded-2xl bg-neutral-50 p-4">
@@ -341,14 +323,13 @@ function passVenue() {
                 </div>
               ))}
             </div>
-
             {matches.length ? (
               <button onClick={pickForUs} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
                 <span className="inline-flex items-center gap-2"><Shuffle size={18} /> Pick for us</span>
               </button>
             ) : (
               <button onClick={resetSwipe} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
-               Try different filters
+                Try different filters
               </button>
             )}
           </div>
@@ -357,33 +338,28 @@ function passVenue() {
     </div>
   );
 }
-
+ 
 function getMapsUrl(venue) {
   if (venue.maps_url) return venue.maps_url;
-
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     `${venue.name || ""} ${venue.address || ""}`.trim()
   )}`;
 }
-
+ 
 function getDistanceKm(lat1, lng1, lat2, lng2) {
   const earthRadiusKm = 6371;
-
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
-
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
-
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
   return earthRadiusKm * c;
 }
-
+ 
 function UserToggle({ currentUser, setCurrentUser }) {
   return (
     <div className="mb-4 rounded-3xl bg-white p-3 shadow-sm border border-neutral-100">
@@ -400,7 +376,6 @@ function UserToggle({ currentUser, setCurrentUser }) {
         >
           Mark
         </button>
-
         <button
           type="button"
           onClick={() => setCurrentUser("partner")}
@@ -416,7 +391,7 @@ function UserToggle({ currentUser, setCurrentUser }) {
     </div>
   );
 }
-
+ 
 function AreaFilter({
   areaSearch,
   setAreaSearch,
@@ -426,69 +401,158 @@ function AreaFilter({
   setRadiusKm,
   showAreaDropdown,
   setShowAreaDropdown,
+  areas,
+  areasLoading,
+  expandedRegions,
+  setExpandedRegions,
 }) {
-  const matchingAreas = AREA_CHIPS.filter((area) =>
-    area.name.toLowerCase().includes(areaSearch.toLowerCase())
-  );
-
+  const areasByRegion = useMemo(() => {
+    const groups = new Map();
+    for (const a of areas) {
+      const region = a.region || "Other";
+      if (!groups.has(region)) groups.set(region, []);
+      groups.get(region).push(a);
+    }
+    return Array.from(groups.entries()).map(([region, items]) => ({
+      region,
+      items,
+    }));
+  }, [areas]);
+ 
+  const searchedAreas = useMemo(() => {
+    const q = areaSearch.trim().toLowerCase();
+    if (!q) return [];
+    return areas
+      .filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          (a.region || "").toLowerCase().includes(q)
+      )
+      .slice(0, 50);
+  }, [areas, areaSearch]);
+ 
+  function toggleRegion(region) {
+    setExpandedRegions((prev) => {
+      const next = new Set(prev);
+      if (next.has(region)) next.delete(region);
+      else next.add(region);
+      return next;
+    });
+  }
+ 
+  function pickArea(area) {
+    setSelectedArea({ name: area.name, lat: area.lat, lng: area.lng });
+    setAreaSearch(area.name);
+    setShowAreaDropdown(false);
+    setExpandedRegions(new Set());
+  }
+ 
   return (
     <div>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
         Where are we going?
       </span>
-
       <input
         value={areaSearch}
         onFocus={() => setShowAreaDropdown(true)}
         onChange={(event) => {
           setAreaSearch(event.target.value);
           setShowAreaDropdown(true);
-       }}
-        placeholder="Search suburb or area..."
+        }}
+        placeholder={areasLoading ? "Loading suburbs..." : "Search suburb or region"}
+        disabled={areasLoading}
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
-
-      {showAreaDropdown && (
-      <div className="mt-3 flex flex-wrap gap-2">
-        {matchingAreas.map((area) => (
-          <button
-            key={area.name}
-            type="button"
-             onClick={() => {
-              setSelectedArea(area);
-              setAreaSearch(area.name);
-              setShowAreaDropdown(false);
-            }}
-            className={`rounded-full px-4 py-2 text-sm font-medium border ${
-              selectedArea?.name === area.name
-                ? "bg-[#455d3b] text-white border-[#455d3b]"
-                : "bg-neutral-50 text-neutral-700 border-neutral-100"
-            }`}
-          >
-            {area.name}
-          </button>
-        ))}
-      </div>
-)}
-
+ 
+      {showAreaDropdown && !areasLoading && (
+        <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
+          {areaSearch.trim() ? (
+            searchedAreas.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-neutral-500">
+                No matching suburbs
+              </div>
+            ) : (
+              <ul>
+                {searchedAreas.map((a) => (
+                  <li key={a.id}>
+                    <button
+                      type="button"
+                      onClick={() => pickArea(a)}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-neutral-50"
+                    >
+                      <span className="font-medium text-neutral-800">{a.name}</span>
+                      <span className="text-xs text-neutral-500">{a.region}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : (
+            <ul>
+              {areasByRegion.map(({ region, items }) => {
+                const open = expandedRegions.has(region);
+                return (
+                  <li key={region} className="border-b border-neutral-100 last:border-b-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleRegion(region)}
+                      aria-expanded={open}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                    >
+                      <span>{region}</span>
+                      <span
+                        className={`text-neutral-500 transition-transform ${
+                          open ? "rotate-180" : ""
+                        }`}
+                      >
+                        ⌄
+                      </span>
+                    </button>
+                    {open && (
+                      <ul className="bg-neutral-50">
+                        {items.map((a) => (
+                          <li key={a.id}>
+                            <button
+                              type="button"
+                              onClick={() => pickArea(a)}
+                              className={`flex w-full items-center px-6 py-2 text-left text-sm hover:bg-neutral-100 ${
+                                selectedArea?.name === a.name
+                                  ? "text-[#455d3b] font-medium"
+                                  : "text-neutral-700"
+                              }`}
+                            >
+                              {a.name}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+ 
       {selectedArea && (
         <button
           type="button"
           onClick={() => {
             setSelectedArea(null);
             setAreaSearch("");
+            setShowAreaDropdown(false);
           }}
           className="mt-2 text-sm text-neutral-500 underline"
         >
           Clear area
         </button>
       )}
-
+ 
       <div className="mt-5">
         <span className="mb-2 block text-sm font-medium text-neutral-700">
           Radius
         </span>
-
         <div className="grid grid-cols-4 gap-2">
           {RADIUS_OPTIONS.map((radius) => (
             <button
@@ -509,37 +573,32 @@ function AreaFilter({
     </div>
   );
 }
-
+ 
 function MultiSelectChips({ label, options, selected, setSelected }) {
   const [isOpen, setIsOpen] = useState(false);
-
   function toggleOption(option) {
     if (option === ALL) {
       setSelected([]);
       setIsOpen(false);
       return;
     }
-
     if (selected.includes(option)) {
       setSelected(selected.filter((item) => item !== option));
     } else {
       setSelected([...selected, option]);
     }
   }
-
   const buttonText =
     selected.length === 0
       ? "All"
       : selected.length === 1
       ? selected[0]
       : `${selected.length} selected`;
-
   return (
     <div>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
         {label}
       </span>
-
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -547,7 +606,6 @@ function MultiSelectChips({ label, options, selected, setSelected }) {
       >
         {buttonText} <span className="float-right">⌄</span>
       </button>
-
       {isOpen && (
         <div className="mt-3 flex flex-wrap gap-2 rounded-2xl bg-white p-3 border border-neutral-100 shadow-sm">
           <button
@@ -561,7 +619,6 @@ function MultiSelectChips({ label, options, selected, setSelected }) {
           >
             All
           </button>
-
           {options.map((option) => (
             <button
               key={option}
@@ -581,7 +638,7 @@ function MultiSelectChips({ label, options, selected, setSelected }) {
     </div>
   );
 }
-
+ 
 function SelectField({ label, value, onChange, options }) {
   return (
     <label className="block">
@@ -598,7 +655,7 @@ function SelectField({ label, value, onChange, options }) {
     </label>
   );
 }
-
+ 
 function MatchLimitField({ value, onChange }) {
   return (
     <div>
@@ -622,83 +679,64 @@ function MatchLimitField({ value, onChange }) {
     </div>
   );
 }
-
+ 
 function VenueHeroCarousel({ venue }) {
   const images = venue?.image_urls?.length
     ? venue.image_urls
     : venue?.primary_image
       ? [venue.primary_image]
       : [];
-
   const [imageIndex, setImageIndex] = useState(0);
   const [isFading, setIsFading] = useState(false);
   const [touchStartX, setTouchStartX] = useState(null);
   const [touchEndX, setTouchEndX] = useState(null);
-
   function handleTouchStart(e) {
-  setTouchStartX(e.targetTouches[0].clientX);
-}
-
-function handleTouchMove(e) {
-  setTouchEndX(e.targetTouches[0].clientX);
-}
-
-function handleTouchEnd() {
-  if (touchStartX === null || touchEndX === null) return;
-
-  const distance = touchStartX - touchEndX;
-
-  if (distance > 50) {
-    nextImage({ stopPropagation: () => {} });
+    setTouchStartX(e.targetTouches[0].clientX);
   }
-
-  if (distance < -50) {
-    previousImage({ stopPropagation: () => {} });
+  function handleTouchMove(e) {
+    setTouchEndX(e.targetTouches[0].clientX);
   }
-
-  setTouchStartX(null);
-  setTouchEndX(null);
-}
-
+  function handleTouchEnd() {
+    if (touchStartX === null || touchEndX === null) return;
+    const distance = touchStartX - touchEndX;
+    if (distance > 50) {
+      nextImage({ stopPropagation: () => {} });
+    }
+    if (distance < -50) {
+      previousImage({ stopPropagation: () => {} });
+    }
+    setTouchStartX(null);
+    setTouchEndX(null);
+  }
   if (!images.length) return null;
-
   const currentImage = images[imageIndex];
-
   function changeImage(direction, e) {
     e.stopPropagation();
-
     if (images.length <= 1 || isFading) return;
-
     setIsFading(true);
-
     setTimeout(() => {
       setImageIndex((current) => {
         if (direction === "next") {
           return current === images.length - 1 ? 0 : current + 1;
         }
-
         return current === 0 ? images.length - 1 : current - 1;
       });
-
       setIsFading(false);
     }, 150);
   }
-
   function nextImage(e) {
     changeImage("next", e);
   }
-
   function previousImage(e) {
     changeImage("previous", e);
   }
-
   return (
     <div
       className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
-       onTouchEnd={handleTouchEnd}
-         >
+      onTouchEnd={handleTouchEnd}
+    >
       <img
         key={currentImage}
         src={`/api/place-photo?url=${encodeURIComponent(currentImage)}`}
@@ -710,16 +748,10 @@ function handleTouchEnd() {
           e.currentTarget.style.display = "none";
         }}
       />
-
-      {/* gradient overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
-
-      {/* rating badge */}
       <div className="absolute left-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
         ⭐ {venue.rating}
       </div>
-
-      {/* arrows */}
       {images.length > 1 && (
         <>
           <button
@@ -729,7 +761,6 @@ function handleTouchEnd() {
           >
             ‹
           </button>
-
           <button
             type="button"
             onClick={nextImage}
@@ -737,22 +768,18 @@ function handleTouchEnd() {
           >
             ›
           </button>
-
           <div className="absolute right-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
             {imageIndex + 1} / {images.length}
           </div>
         </>
       )}
-
       <div className="absolute bottom-0 left-0 right-0 p-5 text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]">
         <p className="text-sm text-white/80 mb-1">
           {venue.type}
         </p>
-
         <h2 className="text-[28px] font-semibold leading-tight mb-1">
           {venue.name}
         </h2>
-
         <div className="flex items-center gap-2 text-sm text-white/90">
           <MapPin size={14} className="opacity-80" />
           {venue.suburb}
@@ -761,23 +788,19 @@ function handleTouchEnd() {
     </div>
   );
 }
-
+ 
 function VenueCard({ venue, onLike, onPass }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
-
-        <div className="mb-8 space-y-3">
+      <div className="mb-8 space-y-3">
         <p className="text-sm leading-6 text-neutral-500">
           {venue.address}
         </p>
-
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
       </div>
-
       <OpenMapsButton url={getMapsUrl(venue)} />
-
       <div className="mt-5 grid grid-cols-2 gap-3">
         <button
           type="button"
@@ -788,7 +811,6 @@ function VenueCard({ venue, onLike, onPass }) {
             <X size={18} /> Pass
           </span>
         </button>
-
         <button
           type="button"
           onClick={onLike}
@@ -802,25 +824,23 @@ function VenueCard({ venue, onLike, onPass }) {
     </div>
   );
 }
-
+ 
 function VenueRating({ venue }) {
   if (!venue.rating && !venue.review_count) return null;
-
-return (
-  <p className="mt-4 text-sm font-medium text-neutral-700">
-    ⭐ {venue.rating || "No rating"}
-    {venue.review_count
-      ? ` · ${venue.review_count} ${
-          Number(venue.review_count) === 1 ? "review" : "reviews"
-        }`
-      : ""}
-  </p>
-);
+  return (
+    <p className="mt-4 text-sm font-medium text-neutral-700">
+      ⭐ {venue.rating || "No rating"}
+      {venue.review_count
+        ? ` · ${venue.review_count} ${
+            Number(venue.review_count) === 1 ? "review" : "reviews"
+          }`
+        : ""}
+    </p>
+  );
 }
-
+ 
 function OpeningHours({ venue }) {
   const [isOpen, setIsOpen] = useState(false);
-
   const days = [
     { label: "Mon", value: venue.monday_hours },
     { label: "Tue", value: venue.tuesday_hours },
@@ -830,10 +850,8 @@ function OpeningHours({ venue }) {
     { label: "Sat", value: venue.saturday_hours },
     { label: "Sun", value: venue.sunday_hours },
   ];
-
   const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
   const today = days[todayIndex];
-
   return (
     <div className="mt-3 text-sm text-neutral-600">
       <button
@@ -846,7 +864,6 @@ function OpeningHours({ venue }) {
         </span>
         <span>{isOpen ? "⌃" : "⌄"}</span>
       </button>
-
       {isOpen && (
         <div className="mt-2 rounded-2xl bg-neutral-50 px-4 py-3">
           {days.map((day) => (
@@ -860,7 +877,7 @@ function OpeningHours({ venue }) {
     </div>
   );
 }
-
+ 
 function OpenMapsButton({ url }) {
   return (
     <a
@@ -873,7 +890,7 @@ function OpenMapsButton({ url }) {
     </a>
   );
 }
-
+ 
 function EmptyState({ title, text, action, actionText }) {
   return (
     <div className="rounded-3xl bg-white p-6 text-center shadow-sm border border-neutral-100">
