@@ -1,5 +1,5 @@
 import './styles.css';
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink } from "lucide-react";
 import { supabase } from "./supabaseClient";
  
