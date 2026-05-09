@@ -24,7 +24,7 @@ export default function RestaurantSwipeMVP() {
   const [areasLoading, setAreasLoading] = useState(true);
   const [expandedRegions, setExpandedRegions] = useState(() => new Set());
   const [areaSearch, setAreaSearch] = useState("");
-  const [selectedArea, setSelectedArea] = useState(null);
+  const [selectedAreas, setSelectedAreas] = useState([]);
   const [radiusKm, setRadiusKm] = useState(5);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [matchLimit, setMatchLimit] = useState(3);
@@ -79,16 +79,7 @@ export default function RestaurantSwipeMVP() {
     const availableVenues = venues.filter((venue) => {
       const matchesCategory =
         category === ALL || venue.type === category;
-      let matchesArea = true;
-      if (selectedArea && venue.latitude && venue.longitude) {
-        const distance = getDistanceKm(
-          selectedArea.lat,
-          selectedArea.lng,
-          venue.latitude,
-          venue.longitude
-        );
-        matchesArea = distance <= radiusKm;
-      }
+      const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
       return matchesCategory && matchesArea;
     });
     return [
@@ -99,7 +90,7 @@ export default function RestaurantSwipeMVP() {
         .filter(Boolean)
         .sort(),
     ];
-  }, [venues, category, selectedArea, radiusKm]);
+  }, [venues, category, selectedAreas, radiusKm]);
  
   useEffect(() => {
     setSelectedCuisines((currentSelected) =>
@@ -114,25 +105,10 @@ export default function RestaurantSwipeMVP() {
       const matchesCuisine =
         selectedCuisines.length === 0 ||
         selectedCuisines.includes(venue.cuisine);
-      let matchesArea = true;
-      if (selectedArea) {
-        const lat = Number(venue.latitude);
-        const lng = Number(venue.longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          matchesArea = false;
-        } else {
-          const distance = getDistanceKm(
-            selectedArea.lat,
-            selectedArea.lng,
-            lat,
-            lng
-          );
-          matchesArea = distance <= radiusKm;
-        }
-      }
+      const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
       return matchesArea && matchesCategory && matchesCuisine;
     });
-  }, [venues, selectedArea, radiusKm, category, selectedCuisines]);
+  }, [venues, selectedAreas, radiusKm, category, selectedCuisines]);
  
   const currentUserSwipedIds = currentUser === "mark"
     ? [...markLikes, ...markPasses]
@@ -246,8 +222,8 @@ export default function RestaurantSwipeMVP() {
               <AreaFilter
                 areaSearch={areaSearch}
                 setAreaSearch={setAreaSearch}
-                selectedArea={selectedArea}
-                setSelectedArea={setSelectedArea}
+                selectedAreas={selectedAreas}
+                setSelectedAreas={setSelectedAreas}
                 radiusKm={radiusKm}
                 setRadiusKm={setRadiusKm}
                 showAreaDropdown={showAreaDropdown}
@@ -339,6 +315,16 @@ export default function RestaurantSwipeMVP() {
   );
 }
  
+function venueMatchesAreas(venue, selectedAreas, radiusKm) {
+  if (!selectedAreas || selectedAreas.length === 0) return true;
+  const lat = Number(venue.latitude);
+  const lng = Number(venue.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  return selectedAreas.some(
+    (area) => getDistanceKm(area.lat, area.lng, lat, lng) <= radiusKm
+  );
+}
+ 
 function getMapsUrl(venue) {
   if (venue.maps_url) return venue.maps_url;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
@@ -392,11 +378,40 @@ function UserToggle({ currentUser, setCurrentUser }) {
   );
 }
  
+function AreaCheckbox({ state }) {
+  return (
+    <span
+      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 ${
+        state === "all"
+          ? "border-[#455d3b] bg-[#455d3b]"
+          : state === "some"
+          ? "border-[#455d3b] bg-white"
+          : "border-neutral-300 bg-white"
+      }`}
+    >
+      {state === "all" && (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path
+            d="M2 6L5 9L10 3"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+      {state === "some" && (
+        <span className="block h-0.5 w-2.5 bg-[#455d3b]" />
+      )}
+    </span>
+  );
+}
+ 
 function AreaFilter({
   areaSearch,
   setAreaSearch,
-  selectedArea,
-  setSelectedArea,
+  selectedAreas,
+  setSelectedAreas,
   radiusKm,
   setRadiusKm,
   showAreaDropdown,
@@ -431,7 +446,56 @@ function AreaFilter({
       .slice(0, 50);
   }, [areas, areaSearch]);
  
-  function toggleRegion(region) {
+  const selectedIds = useMemo(
+    () => new Set(selectedAreas.map((a) => a.id)),
+    [selectedAreas]
+  );
+ 
+  function toggleSuburb(area) {
+    if (selectedIds.has(area.id)) {
+      setSelectedAreas((prev) => prev.filter((a) => a.id !== area.id));
+    } else {
+      setSelectedAreas((prev) => [
+        ...prev,
+        {
+          id: area.id,
+          name: area.name,
+          lat: area.lat,
+          lng: area.lng,
+          region: area.region,
+        },
+      ]);
+    }
+  }
+ 
+  function toggleRegion(items) {
+    const allSelected = items.every((a) => selectedIds.has(a.id));
+    if (allSelected) {
+      const itemIds = new Set(items.map((a) => a.id));
+      setSelectedAreas((prev) => prev.filter((a) => !itemIds.has(a.id)));
+    } else {
+      const missing = items.filter((a) => !selectedIds.has(a.id));
+      setSelectedAreas((prev) => [
+        ...prev,
+        ...missing.map((a) => ({
+          id: a.id,
+          name: a.name,
+          lat: a.lat,
+          lng: a.lng,
+          region: a.region,
+        })),
+      ]);
+    }
+  }
+ 
+  function getRegionState(items) {
+    const selectedCount = items.filter((a) => selectedIds.has(a.id)).length;
+    if (selectedCount === 0) return "none";
+    if (selectedCount === items.length) return "all";
+    return "some";
+  }
+ 
+  function toggleExpand(region) {
     setExpandedRegions((prev) => {
       const next = new Set(prev);
       if (next.has(region)) next.delete(region);
@@ -440,11 +504,9 @@ function AreaFilter({
     });
   }
  
-  function pickArea(area) {
-    setSelectedArea({ name: area.name, lat: area.lat, lng: area.lng });
-    setAreaSearch(area.name);
-    setShowAreaDropdown(false);
-    setExpandedRegions(new Set());
+  function clearAll() {
+    setSelectedAreas([]);
+    setAreaSearch("");
   }
  
   return (
@@ -459,10 +521,39 @@ function AreaFilter({
           setAreaSearch(event.target.value);
           setShowAreaDropdown(true);
         }}
-        placeholder={areasLoading ? "Loading suburbs..." : "Search suburb or region"}
+        placeholder={
+          areasLoading
+            ? "Loading suburbs..."
+            : "Search suburb or region"
+        }
         disabled={areasLoading}
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
+ 
+      {selectedAreas.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {selectedAreas.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() =>
+                setSelectedAreas((prev) => prev.filter((x) => x.id !== a.id))
+              }
+              className="inline-flex items-center gap-1 rounded-full bg-[#edf2eb] px-3 py-1 text-sm text-[#455d3b] border border-[#c5d4c2]"
+            >
+              {a.name}
+              <X size={14} />
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={clearAll}
+            className="rounded-full bg-neutral-100 px-3 py-1 text-sm text-neutral-700"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
  
       {showAreaDropdown && !areasLoading && (
         <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
@@ -473,58 +564,80 @@ function AreaFilter({
               </div>
             ) : (
               <ul>
-                {searchedAreas.map((a) => (
-                  <li key={a.id}>
-                    <button
-                      type="button"
-                      onClick={() => pickArea(a)}
-                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-neutral-50"
-                    >
-                      <span className="font-medium text-neutral-800">{a.name}</span>
-                      <span className="text-xs text-neutral-500">{a.region}</span>
-                    </button>
-                  </li>
-                ))}
+                {searchedAreas.map((a) => {
+                  const state = selectedIds.has(a.id) ? "all" : "none";
+                  return (
+                    <li key={a.id}>
+                      <button
+                        type="button"
+                        onClick={() => toggleSuburb(a)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-neutral-50"
+                      >
+                        <AreaCheckbox state={state} />
+                        <span className="flex-1 font-medium text-neutral-800">
+                          {a.name}
+                        </span>
+                        <span className="text-xs text-neutral-500">{a.region}</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )
           ) : (
             <ul>
               {areasByRegion.map(({ region, items }) => {
                 const open = expandedRegions.has(region);
+                const state = getRegionState(items);
+                const selectedCount = items.filter((a) => selectedIds.has(a.id)).length;
                 return (
                   <li key={region} className="border-b border-neutral-100 last:border-b-0">
-                    <button
-                      type="button"
-                      onClick={() => toggleRegion(region)}
-                      aria-expanded={open}
-                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-                    >
-                      <span>{region}</span>
-                      <span
-                        className={`text-neutral-500 transition-transform ${
-                          open ? "rotate-180" : ""
-                        }`}
+                    <div className="flex items-stretch">
+                      <button
+                        type="button"
+                        onClick={() => toggleRegion(items)}
+                        className="flex flex-1 items-center gap-3 px-4 py-3 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                        aria-label={`Select all in ${region}`}
                       >
-                        ⌄
-                      </span>
-                    </button>
+                        <AreaCheckbox state={state} />
+                        <span className="flex-1">{region}</span>
+                        <span className="text-xs text-neutral-500">
+                          {selectedCount}/{items.length}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(region)}
+                        aria-expanded={open}
+                        aria-label={`Expand ${region}`}
+                        className="flex w-10 items-center justify-center text-neutral-500 hover:bg-neutral-50"
+                      >
+                        <span
+                          className={`transition-transform ${
+                            open ? "rotate-180" : ""
+                          }`}
+                        >
+                          ⌄
+                        </span>
+                      </button>
+                    </div>
                     {open && (
                       <ul className="bg-neutral-50">
-                        {items.map((a) => (
-                          <li key={a.id}>
-                            <button
-                              type="button"
-                              onClick={() => pickArea(a)}
-                              className={`flex w-full items-center px-6 py-2 text-left text-sm hover:bg-neutral-100 ${
-                                selectedArea?.name === a.name
-                                  ? "text-[#455d3b] font-medium"
-                                  : "text-neutral-700"
-                              }`}
-                            >
-                              {a.name}
-                            </button>
-                          </li>
-                        ))}
+                        {items.map((a) => {
+                          const subState = selectedIds.has(a.id) ? "all" : "none";
+                          return (
+                            <li key={a.id}>
+                              <button
+                                type="button"
+                                onClick={() => toggleSuburb(a)}
+                                className="flex w-full items-center gap-3 px-6 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100"
+                              >
+                                <AreaCheckbox state={subState} />
+                                <span>{a.name}</span>
+                              </button>
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </li>
@@ -533,20 +646,6 @@ function AreaFilter({
             </ul>
           )}
         </div>
-      )}
- 
-      {selectedArea && (
-        <button
-          type="button"
-          onClick={() => {
-            setSelectedArea(null);
-            setAreaSearch("");
-            setShowAreaDropdown(false);
-          }}
-          className="mt-2 text-sm text-neutral-500 underline"
-        >
-          Clear area
-        </button>
       )}
  
       <div className="mt-5">
