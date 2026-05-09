@@ -522,10 +522,21 @@ function AreaFilter({
     document.addEventListener("touchstart", onClick);
     return () => {
       document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("touchstart", onClick);
+ document.removeEventListener("touchstart", onClick);
     };
   }, [showAreaDropdown, setShowAreaDropdown]);
- 
+
+  let placeholderText;
+  if (areasLoading) {
+    placeholderText = "Loading suburbs...";
+  } else if (selectedAreas.length === 0) {
+    placeholderText = "Search suburb or region";
+  } else {
+    const names = selectedAreas.map((a) => a.name).join(", ");
+    const truncated = names.length > 32 ? names.slice(0, 30) + "..." : names;
+    placeholderText = `${selectedAreas.length} selected · ${truncated}`;
+  }
+
   return (
     <div ref={pickerRef}>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
