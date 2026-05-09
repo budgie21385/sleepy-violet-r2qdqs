@@ -530,31 +530,6 @@ function AreaFilter({
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
  
-      {selectedAreas.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {selectedAreas.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() =>
-                setSelectedAreas((prev) => prev.filter((x) => x.id !== a.id))
-              }
-              className="inline-flex items-center gap-1 rounded-full bg-[#edf2eb] px-3 py-1 text-sm text-[#455d3b] border border-[#c5d4c2]"
-            >
-              {a.name}
-              <X size={14} />
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={clearAll}
-            className="rounded-full bg-neutral-100 px-3 py-1 text-sm text-neutral-700"
-          >
-            Clear all
-          </button>
-        </div>
-      )}
- 
       {showAreaDropdown && !areasLoading && (
         <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
           {areaSearch.trim() ? (
@@ -596,24 +571,23 @@ function AreaFilter({
                       <button
                         type="button"
                         onClick={() => toggleRegion(items)}
-                        className="flex flex-1 items-center gap-3 px-4 py-3 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
                         aria-label={`Select all in ${region}`}
+                        className="flex items-center justify-center pl-4 pr-2 hover:bg-neutral-50"
                       >
                         <AreaCheckbox state={state} />
-                        <span className="flex-1">{region}</span>
-                        <span className="text-xs text-neutral-500">
-                          {selectedCount}/{items.length}
-                        </span>
                       </button>
                       <button
                         type="button"
                         onClick={() => toggleExpand(region)}
                         aria-expanded={open}
-                        aria-label={`Expand ${region}`}
-                        className="flex w-10 items-center justify-center text-neutral-500 hover:bg-neutral-50"
+                        className="flex flex-1 items-center gap-3 py-3 pr-4 text-left text-sm font-medium text-neutral-800 hover:bg-neutral-50"
                       >
+                        <span className="flex-1">{region}</span>
+                        <span className="text-xs text-neutral-500">
+                          {selectedCount}/{items.length}
+                        </span>
                         <span
-                          className={`transition-transform ${
+                          className={`text-neutral-500 transition-transform ${
                             open ? "rotate-180" : ""
                           }`}
                         >
