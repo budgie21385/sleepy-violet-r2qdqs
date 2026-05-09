@@ -549,11 +549,7 @@ function AreaFilter({
           setAreaSearch(event.target.value);
           setShowAreaDropdown(true);
         }}
-        placeholder={
-          areasLoading
-            ? "Loading suburbs..."
-            : "Search suburb or region"
-        }
+         placeholder={placeholderText}
         disabled={areasLoading}
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
