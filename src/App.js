@@ -7,6 +7,40 @@ const ALL = "All";
 const MATCH_OPTIONS = [1, 2, 3, 4];
 const RADIUS_OPTIONS = [1, 3, 5, 10];
  
+const DAY_KEYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+ 
+const TIME_BANDS = [
+  { key: "Morning", start: 6 * 60, end: 11 * 60 },
+  { key: "Lunch", start: 11 * 60, end: 14 * 60 + 30 },
+  { key: "Afternoon", start: 14 * 60 + 30, end: 17 * 60 },
+  { key: "Dinner", start: 17 * 60, end: 22 * 60 },
+  { key: "Late night", start: 22 * 60, end: 2 * 60 },
+];
+ 
+const TIME_BAND_LABELS = TIME_BANDS.map((b) => b.key);
+ 
+const VIBE_OPTIONS = [
+  "Coffee",
+  "Breakfast",
+  "Pastry",
+  "Sit down dinner",
+  "Drinks",
+  "Afternoon drinks",
+  "Cocktails",
+  "Wine bar",
+  "Quick bite",
+  "Dessert",
+  "Date",
+];
+ 
 export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,8 +51,6 @@ export default function RestaurantSwipeMVP() {
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
   const [screen, setScreen] = useState("filters");
-  const [suburb, setSuburb] = useState(ALL);
-  const [category, setCategory] = useState(ALL);
   const [selectedCuisines, setSelectedCuisines] = useState([]);
   const [areas, setAreas] = useState([]);
   const [areasLoading, setAreasLoading] = useState(true);
@@ -27,6 +59,9 @@ export default function RestaurantSwipeMVP() {
   const [selectedAreas, setSelectedAreas] = useState([]);
   const [radiusKm, setRadiusKm] = useState(5);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
+  const [openNow, setOpenNow] = useState(false);
+  const [selectedTimes, setSelectedTimes] = useState([]);
+  const [selectedVibes, setSelectedVibes] = useState([]);
   const [matchLimit, setMatchLimit] = useState(3);
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
@@ -67,30 +102,17 @@ export default function RestaurantSwipeMVP() {
     loadAreas();
   }, []);
  
-  const suburbs = useMemo(() => {
-    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.suburb))).filter(Boolean).sort()];
-  }, [venues]);
- 
-  const categories = useMemo(() => {
-    return [ALL, ...Array.from(new Set(venues.map((venue) => venue.type))).filter(Boolean).sort()];
-  }, [venues]);
- 
   const cuisines = useMemo(() => {
-    const availableVenues = venues.filter((venue) => {
-      const matchesCategory =
-        category === ALL || venue.type === category;
-      const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
-      return matchesCategory && matchesArea;
-    });
+    const availableVenues = venues.filter((venue) =>
+      venueMatchesAreas(venue, selectedAreas, radiusKm)
+    );
     return [
       ALL,
-      ...Array.from(
-        new Set(availableVenues.map((venue) => venue.cuisine))
-      )
+      ...Array.from(new Set(availableVenues.map((venue) => venue.cuisine)))
         .filter(Boolean)
         .sort(),
     ];
-  }, [venues, category, selectedAreas, radiusKm]);
+  }, [venues, selectedAreas, radiusKm]);
  
   useEffect(() => {
     setSelectedCuisines((currentSelected) =>
@@ -99,20 +121,49 @@ export default function RestaurantSwipeMVP() {
   }, [cuisines]);
  
   const filteredVenues = useMemo(() => {
+    const todayKey = getTodayDayKey();
     return venues.filter((venue) => {
-      const matchesCategory =
-        category === ALL || venue.type === category;
+      const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
+      if (!matchesArea) return false;
+ 
       const matchesCuisine =
         selectedCuisines.length === 0 ||
         selectedCuisines.includes(venue.cuisine);
-      const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
-      return matchesArea && matchesCategory && matchesCuisine;
-    });
-  }, [venues, selectedAreas, radiusKm, category, selectedCuisines]);
+      if (!matchesCuisine) return false;
  
-  const currentUserSwipedIds = currentUser === "mark"
-    ? [...markLikes, ...markPasses]
-    : [...partnerLikes, ...partnerPasses];
+      if (openNow && !isVenueOpenNow(venue)) return false;
+ 
+      if (selectedTimes.length > 0) {
+        const anyBandMatches = selectedTimes.some((label) => {
+          const band = TIME_BANDS.find((b) => b.key === label);
+          return band && venueOpenInBand(venue, todayKey, band);
+        });
+        if (!anyBandMatches) return false;
+      }
+ 
+      if (selectedVibes.length > 0) {
+        const anyVibeMatches = selectedVibes.some((vibe) =>
+          venueMatchesVibe(venue, vibe, todayKey)
+        );
+        if (!anyVibeMatches) return false;
+      }
+ 
+      return true;
+    });
+  }, [
+    venues,
+    selectedAreas,
+    radiusKm,
+    selectedCuisines,
+    openNow,
+    selectedTimes,
+    selectedVibes,
+  ]);
+ 
+  const currentUserSwipedIds =
+    currentUser === "mark"
+      ? [...markLikes, ...markPasses]
+      : [...partnerLikes, ...partnerPasses];
  
   const currentVenue = filteredVenues.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
@@ -204,7 +255,9 @@ export default function RestaurantSwipeMVP() {
         <div className="mb-5 flex items-center justify-between">
           <div>
             <p className="text-sm text-neutral-500">Dinner picker</p>
-            <h1 className="text-2xl font-semibold tracking-tight">Where should we go?</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Where should we go?
+            </h1>
           </div>
           {screen !== "filters" && (
             <button
@@ -233,7 +286,19 @@ export default function RestaurantSwipeMVP() {
                 expandedRegions={expandedRegions}
                 setExpandedRegions={setExpandedRegions}
               />
-              <SelectField label="Type" value={category} onChange={setCategory} options={categories} />
+              <OpenNowToggle openNow={openNow} setOpenNow={setOpenNow} />
+              <MultiSelectChips
+                label="Time of day"
+                options={TIME_BAND_LABELS}
+                selected={selectedTimes}
+                setSelected={setSelectedTimes}
+              />
+              <MultiSelectChips
+                label="Vibe"
+                options={VIBE_OPTIONS}
+                selected={selectedVibes}
+                setSelected={setSelectedVibes}
+              />
               <MultiSelectChips
                 label="Cuisine"
                 options={cuisines.filter((item) => item !== ALL)}
@@ -258,13 +323,22 @@ export default function RestaurantSwipeMVP() {
           <div>
             <UserToggle currentUser={currentUser} setCurrentUser={setCurrentUser} />
             <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
-              <span>Matches: {matches.length} / {matchLimit}</span>
-              <span>{currentUserSwipedCount + 1} of {filteredVenues.length}</span>
+              <span>
+                Matches: {matches.length} / {matchLimit}
+              </span>
+              <span>
+                {currentUserSwipedCount + 1} of {filteredVenues.length}
+              </span>
             </div>
             {currentVenue ? (
               <VenueCard venue={currentVenue} onLike={likeVenue} onPass={passVenue} />
             ) : (
-              <EmptyState title="No more places" text="You’ve reached the end of this list." action={() => setScreen("matches")} actionText="View matches" />
+              <EmptyState
+                title="No more places"
+                text="You’ve reached the end of this list."
+                action={() => setScreen("matches")}
+                actionText="View matches"
+              />
             )}
           </div>
         )}
@@ -273,14 +347,18 @@ export default function RestaurantSwipeMVP() {
             <div className="mb-5">
               <p className="text-sm text-neutral-500">Finished</p>
               <h2 className="text-2xl font-semibold tracking-tight">
-                {matches.length ? `You’ve got ${matches.length} match${matches.length > 1 ? "es" : ""}` : "No matches yet"}
+                {matches.length
+                  ? `You’ve got ${matches.length} match${matches.length > 1 ? "es" : ""}`
+                  : "No matches yet"}
               </h2>
             </div>
             {picked ? (
               <div className="mb-5 rounded-3xl bg-[#edf2eb] p-5 border border-[#c5d4c2]">
                 <p className="mb-2 text-sm text-neutral-600">Tonight’s pick</p>
                 <h3 className="text-xl font-semibold">{picked.name}</h3>
-                <p className="mt-1 text-sm text-neutral-600">{picked.suburb} · {picked.category} · {picked.cuisine}</p>
+                <p className="mt-1 text-sm text-neutral-600">
+                  {picked.suburb} · {picked.type} · {picked.cuisine}
+                </p>
                 <OpenMapsButton url={picked.maps_url} />
               </div>
             ) : null}
@@ -290,9 +368,16 @@ export default function RestaurantSwipeMVP() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-semibold">{venue.name}</h3>
-                      <p className="text-sm text-neutral-600">{venue.suburb} · {venue.type} · {venue.cuisine}</p>
+                      <p className="text-sm text-neutral-600">
+                        {venue.suburb} · {venue.type} · {venue.cuisine}
+                      </p>
                     </div>
-                    <a href={venue.maps_url} target="_blank" rel="noreferrer" className="rounded-full bg-white p-2 shadow-sm">
+                    <a
+                      href={venue.maps_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full bg-white p-2 shadow-sm"
+                    >
                       <ExternalLink size={16} />
                     </a>
                   </div>
@@ -300,11 +385,19 @@ export default function RestaurantSwipeMVP() {
               ))}
             </div>
             {matches.length ? (
-              <button onClick={pickForUs} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
-                <span className="inline-flex items-center gap-2"><Shuffle size={18} /> Pick for us</span>
+              <button
+                onClick={pickForUs}
+                className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Shuffle size={18} /> Pick for us
+                </span>
               </button>
             ) : (
-              <button onClick={resetSwipe} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
+              <button
+                onClick={resetSwipe}
+                className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white"
+              >
                 Try different filters
               </button>
             )}
@@ -346,6 +439,157 @@ function getDistanceKm(lat1, lng1, lat2, lng2) {
   return earthRadiusKm * c;
 }
  
+function getTodayDayKey() {
+  return DAY_KEYS[new Date().getDay()];
+}
+ 
+function getYesterdayDayKey() {
+  return DAY_KEYS[(new Date().getDay() + 6) % 7];
+}
+ 
+function timeStringToMinutes(value) {
+  if (!value) return NaN;
+  const trimmed = String(value).trim();
+  const [h, m] = trimmed.split(":").map((part) => Number(part));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
+  return h * 60 + m;
+}
+ 
+function expandRange(start, end) {
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return [];
+  if (end > start) return [{ start, end }];
+  if (end === start) return [];
+  return [
+    { start, end: 1440 },
+    { start: 0, end },
+  ];
+}
+ 
+function venueDayIntervals(venue, dayKey) {
+  if (!venue || !dayKey) return [];
+  const value = venue[`${dayKey}_hours`];
+  if (!value || typeof value !== "string") return [];
+  const lower = value.toLowerCase();
+  if (lower.includes("closed") || lower.includes("unavailable")) return [];
+  const out = [];
+  for (const part of value.split(",")) {
+    const piece = part.trim();
+    if (!piece) continue;
+    const [s, e] = piece.split("-").map((t) => (t || "").trim());
+    const start = timeStringToMinutes(s);
+    const end = timeStringToMinutes(e);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    out.push(...expandRange(start, end));
+  }
+  return out;
+}
+ 
+function intervalsOverlap(a, b) {
+  return a.start < b.end && b.start < a.end;
+}
+ 
+function venueOpenInBand(venue, dayKey, band) {
+  const venueIntervals = venueDayIntervals(venue, dayKey);
+  if (venueIntervals.length === 0) return false;
+  const bandIntervals = expandRange(band.start, band.end);
+  return venueIntervals.some((vi) =>
+    bandIntervals.some((bi) => intervalsOverlap(vi, bi))
+  );
+}
+ 
+function isVenueOpenNow(venue) {
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const todayKey = DAY_KEYS[now.getDay()];
+  const todayIntervals = venueDayIntervals(venue, todayKey);
+  if (todayIntervals.some((r) => minutes >= r.start && minutes < r.end)) {
+    return true;
+  }
+  const yesterdayKey = getYesterdayDayKey();
+  const yesterdayValue = venue[`${yesterdayKey}_hours`];
+  if (!yesterdayValue || typeof yesterdayValue !== "string") return false;
+  for (const part of yesterdayValue.split(",")) {
+    const [s, e] = part.trim().split("-").map((t) => (t || "").trim());
+    const start = timeStringToMinutes(s);
+    const end = timeStringToMinutes(e);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    if (end < start && minutes >= 0 && minutes < end) return true;
+  }
+  return false;
+}
+ 
+function venueMatchesVibe(venue, vibe, dayKey) {
+  const type = (venue.type || "").toLowerCase();
+  const cuisine = (venue.cuisine || "").toLowerCase();
+  const name = (venue.name || "").toLowerCase();
+  const price = Number(venue.price_level);
+  const rating = Number(venue.rating);
+  const isCafe = type.includes("cafe") || type.includes("coffee");
+  const isBar = type.includes("bar") || type.includes("pub");
+  const isRestaurant = type.includes("restaurant");
+  const afternoonBand = TIME_BANDS.find((b) => b.key === "Afternoon");
+  const lateBand = TIME_BANDS.find((b) => b.key === "Late night");
+  const hasFiniteRating = Number.isFinite(rating);
+  const hasFinitePrice = Number.isFinite(price);
+ 
+  switch (vibe) {
+    case "Coffee":
+      return isCafe;
+    case "Breakfast":
+      return (
+        isCafe ||
+        cuisine.includes("breakfast") ||
+        cuisine.includes("brunch")
+      );
+    case "Pastry":
+      return (
+        cuisine.includes("bakery") ||
+        cuisine.includes("pastry") ||
+        cuisine.includes("patisserie") ||
+        name.includes("bakery") ||
+        name.includes("patisserie")
+      );
+    case "Sit down dinner":
+      return isRestaurant && hasFinitePrice && price >= 2;
+    case "Drinks":
+      return isBar || cuisine.includes("wine");
+    case "Afternoon drinks":
+      return (
+        isBar &&
+        (afternoonBand ? venueOpenInBand(venue, dayKey, afternoonBand) : true)
+      );
+    case "Cocktails":
+      return (
+        type.includes("cocktail") ||
+        (isBar && (lateBand ? venueOpenInBand(venue, dayKey, lateBand) : true))
+      );
+    case "Wine bar":
+      return (
+        name.includes("wine bar") ||
+        cuisine.includes("wine bar") ||
+        type.includes("wine")
+      );
+    case "Quick bite":
+      return hasFinitePrice && price <= 2 && !type.includes("fine");
+    case "Dessert":
+      return (
+        cuisine.includes("dessert") ||
+        cuisine.includes("ice cream") ||
+        cuisine.includes("gelato")
+      );
+    case "Date":
+      return (
+        isRestaurant &&
+        hasFiniteRating &&
+        rating >= 4.3 &&
+        hasFinitePrice &&
+        price >= 2
+      );
+    default:
+      return false;
+  }
+}
+ 
 function UserToggle({ currentUser, setCurrentUser }) {
   return (
     <div className="mb-4 rounded-3xl bg-white p-3 shadow-sm border border-neutral-100">
@@ -378,6 +622,38 @@ function UserToggle({ currentUser, setCurrentUser }) {
   );
 }
  
+function OpenNowToggle({ openNow, setOpenNow }) {
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-medium text-neutral-700">When?</span>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setOpenNow(false)}
+          className={`rounded-2xl py-3 font-medium transition ${
+            !openNow
+              ? "bg-[#455d3b] text-white"
+              : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+          }`}
+        >
+          Any time
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpenNow(true)}
+          className={`rounded-2xl py-3 font-medium transition ${
+            openNow
+              ? "bg-[#455d3b] text-white"
+              : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+          }`}
+        >
+          Open now
+        </button>
+      </div>
+    </div>
+  );
+}
+ 
 function AreaCheckbox({ state }) {
   return (
     <span
@@ -400,9 +676,7 @@ function AreaCheckbox({ state }) {
           />
         </svg>
       )}
-      {state === "some" && (
-        <span className="block h-0.5 w-2.5 bg-[#455d3b]" />
-      )}
+      {state === "some" && <span className="block h-0.5 w-2.5 bg-[#455d3b]" />}
     </span>
   );
 }
@@ -504,13 +778,13 @@ function AreaFilter({
     });
   }
  
-   function clearAll() {
+  function clearAll() {
     setSelectedAreas([]);
     setAreaSearch("");
   }
-
+ 
   const pickerRef = useRef(null);
-
+ 
   useEffect(() => {
     if (!showAreaDropdown) return;
     function onClick(e) {
@@ -522,10 +796,10 @@ function AreaFilter({
     document.addEventListener("touchstart", onClick);
     return () => {
       document.removeEventListener("mousedown", onClick);
- document.removeEventListener("touchstart", onClick);
+      document.removeEventListener("touchstart", onClick);
     };
   }, [showAreaDropdown, setShowAreaDropdown]);
-
+ 
   let placeholderText;
   if (areasLoading) {
     placeholderText = "Loading suburbs...";
@@ -536,7 +810,7 @@ function AreaFilter({
     const truncated = names.length > 32 ? names.slice(0, 30) + "..." : names;
     placeholderText = `${selectedAreas.length} selected · ${truncated}`;
   }
-
+ 
   return (
     <div ref={pickerRef}>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
@@ -549,7 +823,7 @@ function AreaFilter({
           setAreaSearch(event.target.value);
           setShowAreaDropdown(true);
         }}
-         placeholder={placeholderText}
+        placeholder={placeholderText}
         disabled={areasLoading}
         className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
       />
@@ -590,7 +864,9 @@ function AreaFilter({
                         <span className="flex-1 font-medium text-neutral-800">
                           {a.name}
                         </span>
-                        <span className="text-xs text-neutral-500">{a.region}</span>
+                        <span className="text-xs text-neutral-500">
+                          {a.region}
+                        </span>
                       </button>
                     </li>
                   );
@@ -602,9 +878,14 @@ function AreaFilter({
               {areasByRegion.map(({ region, items }) => {
                 const open = expandedRegions.has(region);
                 const state = getRegionState(items);
-                const selectedCount = items.filter((a) => selectedIds.has(a.id)).length;
+                const selectedCount = items.filter((a) =>
+                  selectedIds.has(a.id)
+                ).length;
                 return (
-                  <li key={region} className="border-b border-neutral-100 last:border-b-0">
+                  <li
+                    key={region}
+                    className="border-b border-neutral-100 last:border-b-0"
+                  >
                     <div className="flex items-stretch">
                       <button
                         type="button"
@@ -750,27 +1031,12 @@ function MultiSelectChips({ label, options, selected, setSelected }) {
   );
 }
  
-function SelectField({ label, value, onChange, options }) {
-  return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-medium text-neutral-700">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full appearance-none rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
- 
 function MatchLimitField({ value, onChange }) {
   return (
     <div>
-      <span className="mb-2 block text-sm font-medium text-neutral-700">How many matches?</span>
+      <span className="mb-2 block text-sm font-medium text-neutral-700">
+        How many matches?
+      </span>
       <div className="grid grid-cols-4 gap-2">
         {MATCH_OPTIONS.map((option) => (
           <button
@@ -885,9 +1151,7 @@ function VenueHeroCarousel({ venue }) {
         </>
       )}
       <div className="absolute bottom-0 left-0 right-0 p-5 text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]">
-        <p className="text-sm text-white/80 mb-1">
-          {venue.type}
-        </p>
+        <p className="text-sm text-white/80 mb-1">{venue.type}</p>
         <h2 className="text-[28px] font-semibold leading-tight mb-1">
           {venue.name}
         </h2>
@@ -905,9 +1169,7 @@ function VenueCard({ venue, onLike, onPass }) {
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
       <div className="mb-8 space-y-3">
-        <p className="text-sm leading-6 text-neutral-500">
-          {venue.address}
-        </p>
+        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
       </div>
@@ -1007,7 +1269,10 @@ function EmptyState({ title, text, action, actionText }) {
     <div className="rounded-3xl bg-white p-6 text-center shadow-sm border border-neutral-100">
       <h2 className="text-xl font-semibold">{title}</h2>
       <p className="mt-2 text-neutral-600">{text}</p>
-      <button onClick={action} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
+      <button
+        onClick={action}
+        className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white"
+      >
         {actionText}
       </button>
     </div>
