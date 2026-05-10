@@ -676,13 +676,16 @@ function venueMatchesVibe(venue, vibe, dayKey) {
       );
     case "Sit down meal":
       return isRestaurant || type.includes("pub");
-    case "Pub":
-      return (
-        type.includes("pub") ||
-        type.includes("hotel") ||
-        name.includes("hotel") ||
-        name.includes("tavern")
-      );
+    case "Pub": {
+      if (type.includes("pub")) return true;
+      if (name.includes("tavern") || name.includes("public house")) return true;
+      const trimmedName = name.trim();
+      const endsWithHotel =
+        trimmedName.endsWith(" hotel") ||
+        trimmedName.endsWith("hotel"); // covers single-word names
+      if (endsWithHotel) return isBar || isRestaurant;
+      return false;
+    }
     case "Drinks":
       return isBar || cuisine.includes("wine");
     case "Afternoon drinks":
@@ -693,7 +696,8 @@ function venueMatchesVibe(venue, vibe, dayKey) {
     case "Cocktails":
       return (
         type.includes("cocktail") ||
-        (isBar && (lateBand ? venueOpenInBand(venue, dayKey, lateBand) : true))
+        name.includes("cocktail") ||
+        cuisine.includes("cocktail")
       );
     case "Wine bar":
       return (
@@ -1338,7 +1342,7 @@ function MapVenueSheet({ venue, onClose }) {
   return (
     <div
       className="absolute bottom-3 left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
-      style={{ maxHeight: "calc(100% - 60px)", zIndex: 1000 }}
+      style={{ maxHeight: "calc(100% - 24px)", zIndex: 2500 }}
     >
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100">
         <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
