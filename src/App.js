@@ -31,11 +31,12 @@ const VIBE_OPTIONS = [
   "Coffee",
   "Breakfast",
   "Pastry",
-  "Sit down dinner",
+  "Sit down meal",
   "Drinks",
   "Afternoon drinks",
   "Cocktails",
   "Wine bar",
+  "Pub",
   "Quick bite",
   "Dessert",
   "Date",
@@ -620,8 +621,10 @@ function venueMatchesVibe(venue, vibe, dayKey) {
         name.includes("bakery") ||
         name.includes("patisserie")
       );
-    case "Sit down dinner":
-      return isRestaurant && hasFinitePrice && price >= 2;
+    case "Sit down meal":
+      return isRestaurant || type.includes("pub");
+    case "Pub":
+      return type.includes("pub");
     case "Drinks":
       return isBar || cuisine.includes("wine");
     case "Afternoon drinks":
