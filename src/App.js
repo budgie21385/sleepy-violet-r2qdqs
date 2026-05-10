@@ -92,6 +92,7 @@ export default function RestaurantSwipeMVP() {
   const [partnerLikes, setPartnerLikes] = useState([]);
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
+  const [tab, setTab] = useState("matches");
   const [screen, setScreen] = useState("filters");
   const [selectedCuisines, setSelectedCuisines] = useState([]);
   const [areas, setAreas] = useState([]);
@@ -359,10 +360,11 @@ loadAreas();
   }
  
   return (
-    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        {screen !== "map" && (
-          <div className="mb-5 flex items-center justify-between">
+    <div className="min-h-screen bg-[#fdf6f0] text-[#111111]">
+      {tab === "matches" && (
+        <div className="flex items-start justify-center p-4 pb-24">
+          <div className="w-full max-w-sm">
+        <div className="mb-5 flex items-center justify-between">
             <div>
               <p className="text-sm text-neutral-500">Dinner picker</p>
               <h1 className="text-2xl font-semibold tracking-tight">
@@ -379,7 +381,6 @@ loadAreas();
               </button>
             )}
           </div>
-        )}
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="space-y-5">
@@ -432,7 +433,7 @@ loadAreas();
                 Start swiping
               </button>
               <button
-                onClick={() => setScreen("map")}
+                onClick={() => setTab("map")}
                 disabled={!filteredVenues.length}
                 className="w-full rounded-2xl border border-[#455d3b] bg-white py-4 font-medium text-[#455d3b] disabled:border-neutral-300 disabled:text-neutral-300"
               >
@@ -464,9 +465,7 @@ loadAreas();
             )}
           </div>
         )}
-        {screen === "map" && (
-          <MapScreen venues={filteredVenues} onBack={() => setScreen("filters")} />
-        )}
+        
         {screen === "matches" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="mb-5">
@@ -519,16 +518,19 @@ loadAreas();
                 </span>
               </button>
             ) : (
-              <button
-                onClick={resetSwipe}
-                className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white"
-              >
+             <button onClick={resetSwipe} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
                 Try different filters
               </button>
             )}
           </div>
         )}
-      </div>
+          </div>
+        </div>
+      )}
+      {tab === "map" && (
+        <MapScreen venues={filteredVenues} />
+      )}
+      <BottomTabBar tab={tab} setTab={setTab} />
     </div>
   );
 }
@@ -1341,8 +1343,8 @@ function VenueVibes({ venue }) {
 function MapVenueSheet({ venue, onClose }) {
   return (
     <div
-      className="absolute bottom-3 left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
-      style={{ maxHeight: "calc(100% - 24px)", zIndex: 2500 }}
+      className="absolute left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
+      style={{ bottom: 80, maxHeight: "calc(100% - 100px)", zIndex: 2500 }}
     >
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100">
         <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
@@ -1369,7 +1371,42 @@ function MapVenueSheet({ venue, onClose }) {
   );
 }
 
-function MapScreen({ venues, onBack }) {
+function BottomTabBar({ tab, setTab }) {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-[3000] bg-white border-t border-neutral-100 shadow-lg">
+      <div className="flex max-w-md mx-auto">
+        <button
+          type="button"
+          onClick={() => setTab("matches")}
+          className={`flex-1 flex flex-col items-center gap-1 py-3 transition ${
+            tab === "matches" ? "text-[#455d3b]" : "text-neutral-400"
+          }`}
+        >
+          <Heart
+            size={20}
+            fill={tab === "matches" ? "#455d3b" : "none"}
+          />
+          <span className="text-xs font-medium">Matches</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("map")}
+          className={`flex-1 flex flex-col items-center gap-1 py-3 transition ${
+            tab === "map" ? "text-[#455d3b]" : "text-neutral-400"
+          }`}
+        >
+          <MapPin
+            size={20}
+            fill={tab === "map" ? "#455d3b" : "none"}
+          />
+          <span className="text-xs font-medium">Map</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MapScreen({ venues }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const plottable = venues.filter(
     (v) =>
@@ -1387,19 +1424,10 @@ function MapScreen({ venues, onBack }) {
 
   return (
     <div className="fixed inset-0 z-[1500] bg-white">
-      <div className="absolute top-0 left-0 right-0 z-[2000] flex items-center justify-between bg-white/95 backdrop-blur px-4 py-3 border-b border-neutral-100">
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="Back to filters"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-neutral-700 shadow-sm border border-neutral-100"
-        >
-          <X size={18} />
-        </button>
+      <div className="absolute top-0 left-0 right-0 z-[2000] flex items-center justify-center bg-white/95 backdrop-blur px-4 py-3 border-b border-neutral-100">
         <span className="text-sm font-medium text-neutral-700">
           {plottable.length} places on the map
         </span>
-        <div className="w-9" />
       </div>
       <div className="absolute top-14 left-0 right-0 bottom-0">
         <MapContainer
