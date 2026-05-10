@@ -1332,7 +1332,39 @@ function VenueVibes({ venue }) {
   );
 }
 
+function MapVenueSheet({ venue, onClose }) {
+  return (
+    <div
+      className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl border-t border-neutral-100 shadow-2xl overflow-y-auto"
+      style={{ maxHeight: "85%", zIndex: 1000 }}
+    >
+      <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100">
+        <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
+          {venue.name}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="p-4 space-y-3">
+        <VenueHeroCarousel venue={venue} />
+        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
+        <VenueRating venue={venue} />
+        <VenueVibes venue={venue} />
+        <OpeningHours venue={venue} />
+        <OpenMapsButton url={getMapsUrl(venue)} />
+      </div>
+    </div>
+  );
+}
+
 function MapScreen({ venues }) {
+  const [selectedVenue, setSelectedVenue] = useState(null);
   const plottable = venues.filter(
     (v) =>
       Number.isFinite(Number(v.latitude)) &&
@@ -1341,7 +1373,7 @@ function MapScreen({ venues }) {
 
   return (
     <div
-      className="rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden"
+      className="relative rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden"
       style={{ height: "75vh" }}
     >
       <div className="px-4 py-2 border-b border-neutral-100 text-sm text-neutral-600">
@@ -1357,27 +1389,32 @@ function MapScreen({ venues }) {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <MarkerClusterGroup chunkedLoading>
+          <MarkerClusterGroup
+            chunkedLoading
+            disableClusteringAtZoom={17}
+            spiderfyOnMaxZoom={true}
+            showCoverageOnHover={false}
+            maxClusterRadius={60}
+          >
             {plottable.map((venue) => (
               <Marker
                 key={venue.id}
                 position={[Number(venue.latitude), Number(venue.longitude)]}
                 icon={createEmojiIcon(getVenueEmoji(venue))}
-              >
-                <Popup>
-                  <div style={{ fontSize: "14px", lineHeight: 1.4 }}>
-                    <div style={{ fontWeight: 600 }}>{venue.name}</div>
-                    <div style={{ color: "#666", fontSize: "12px" }}>
-                      {venue.type}
-                      {venue.suburb ? ` · ${venue.suburb}` : ""}
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
+                eventHandlers={{
+                  click: () => setSelectedVenue(venue),
+                }}
+              />
             ))}
           </MarkerClusterGroup>
         </MapContainer>
       </div>
+      {selectedVenue && (
+        <MapVenueSheet
+          venue={selectedVenue}
+          onClose={() => setSelectedVenue(null)}
+        />
+      )}
     </div>
   );
 }
