@@ -1306,9 +1306,9 @@ function VenueHeroCarousel({ venue }) {
         <h2 className="text-[28px] font-semibold leading-tight mb-1">
           {venue.name}
         </h2>
-        <div className="flex items-center gap-2 text-sm text-white/90">
-          <MapPin size={14} className="opacity-80" />
-          {venue.suburb}
+       <div className="flex items-center gap-2 text-sm text-white/90">
+          <MapPin size={14} className="opacity-80 shrink-0" />
+          <span className="truncate">{venue.suburb}</span>
         </div>
       </div>
     </div>
