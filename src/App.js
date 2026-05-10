@@ -1335,8 +1335,8 @@ function VenueVibes({ venue }) {
 function MapVenueSheet({ venue, onClose }) {
   return (
     <div
-      className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl border-t border-neutral-100 shadow-2xl overflow-y-auto"
-      style={{ maxHeight: "85%", zIndex: 1000 }}
+      className="absolute bottom-3 left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
+      style={{ maxHeight: "calc(100% - 60px)", zIndex: 1000 }}
     >
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100">
         <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
@@ -1385,9 +1385,9 @@ function MapScreen({ venues }) {
           zoom={MELBOURNE_ZOOM}
           style={{ height: "100%", width: "100%" }}
         >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+         <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
           <MarkerClusterGroup
             chunkedLoading
