@@ -624,7 +624,12 @@ function venueMatchesVibe(venue, vibe, dayKey) {
     case "Sit down meal":
       return isRestaurant || type.includes("pub");
     case "Pub":
-      return type.includes("pub");
+      return (
+        type.includes("pub") ||
+        type.includes("hotel") ||
+        name.includes("hotel") ||
+        name.includes("tavern")
+      );
     case "Drinks":
       return isBar || cuisine.includes("wine");
     case "Afternoon drinks":
