@@ -1,6 +1,6 @@
 import './styles.css';
-import React, { useEffect, useMemo, useState } from "react";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search } from "lucide-react";
 import { supabase } from "./supabaseClient";
  
 const ALL = "All";
@@ -774,6 +774,19 @@ function AreaFilter({
   expandedRegions,
   setExpandedRegions,
 }) {
+  const [searchActive, setSearchActive] = useState(false);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (searchActive) {
+      searchInputRef.current?.focus();
+    }
+  }, [searchActive]);
+
+  useEffect(() => {
+    if (!showAreaDropdown) setSearchActive(false);
+  }, [showAreaDropdown]);
+
   const areasByRegion = useMemo(() => {
     const groups = new Map();
     for (const a of areas) {
@@ -891,7 +904,10 @@ function AreaFilter({
         )}
       </div>
       <input
+        ref={searchInputRef}
         value={areaSearch}
+        readOnly={!searchActive}
+        inputMode={searchActive ? "text" : "none"}
         onFocus={() => setShowAreaDropdown(true)}
         onChange={(event) => {
           setAreaSearch(event.target.value);
@@ -904,7 +920,20 @@ function AreaFilter({
 
       {showAreaDropdown && !areasLoading && (
         <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
-          <div className="sticky top-0 z-10 flex items-center justify-end bg-white border-b border-neutral-100 px-2 py-2">
+          <div className="sticky top-0 z-10 flex items-center justify-end gap-1 bg-white border-b border-neutral-100 px-2 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSearchActive(true);
+                setTimeout(() => searchInputRef.current?.focus(), 0);
+              }}
+              aria-label="Search"
+              className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 ${
+                searchActive ? "text-[#455d3b]" : "text-neutral-500"
+              }`}
+            >
+              <Search size={16} />
+            </button>
             <button
               type="button"
               onClick={() => setShowAreaDropdown(false)}
