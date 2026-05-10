@@ -1,7 +1,13 @@
+import 'leaflet/dist/leaflet.css';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+import MarkerClusterGroup from "react-leaflet-cluster";
  
 const ALL = "All";
 const MATCH_OPTIONS = [1, 2, 3, 4];
@@ -41,6 +47,41 @@ const VIBE_OPTIONS = [
   "Dessert",
   "Date",
 ];
+
+const MELBOURNE_CENTER = [-37.8136, 144.9631];
+const MELBOURNE_ZOOM = 12;
+
+const VIBE_EMOJI_PRIORITY = [
+  ["Coffee", "☕"],
+  ["Pastry", "🥐"],
+  ["Breakfast", "🥞"],
+  ["Wine bar", "🍷"],
+  ["Cocktails", "🍸"],
+  ["Pub", "🍺"],
+  ["Dessert", "🍦"],
+  ["Date", "🌹"],
+  ["Sit down meal", "🍴"],
+  ["Drinks", "🍻"],
+  ["Quick bite", "🥪"],
+  ["Afternoon drinks", "🍻"],
+];
+
+function getVenueEmoji(venue) {
+  const todayKey = getTodayDayKey();
+  for (const [vibe, emoji] of VIBE_EMOJI_PRIORITY) {
+    if (venueMatchesVibe(venue, vibe, todayKey)) return emoji;
+  }
+  return "📍";
+}
+
+function createEmojiIcon(emoji) {
+  return L.divIcon({
+    html: `<div style="font-size:24px;line-height:1;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.25));">${emoji}</div>`,
+    className: "venue-emoji-icon",
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+  });
+}
  
 export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
@@ -388,6 +429,13 @@ loadAreas();
               >
                 Start swiping
               </button>
+              <button
+                onClick={() => setScreen("map")}
+                disabled={!filteredVenues.length}
+                className="w-full rounded-2xl border border-[#455d3b] bg-white py-4 font-medium text-[#455d3b] disabled:border-neutral-300 disabled:text-neutral-300"
+              >
+                View on map
+              </button>
             </div>
           </div>
         )}
@@ -413,6 +461,9 @@ loadAreas();
               />
             )}
           </div>
+        )}
+        {screen === "map" && (
+          <MapScreen venues={filteredVenues} />
         )}
         {screen === "matches" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
@@ -1277,6 +1328,56 @@ function VenueVibes({ venue }) {
           {v}
         </span>
       ))}
+    </div>
+  );
+}
+
+function MapScreen({ venues }) {
+  const plottable = venues.filter(
+    (v) =>
+      Number.isFinite(Number(v.latitude)) &&
+      Number.isFinite(Number(v.longitude))
+  );
+
+  return (
+    <div
+      className="rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden"
+      style={{ height: "75vh" }}
+    >
+      <div className="px-4 py-2 border-b border-neutral-100 text-sm text-neutral-600">
+        {plottable.length} places on the map
+      </div>
+      <div style={{ height: "calc(100% - 36px)", width: "100%" }}>
+        <MapContainer
+          center={MELBOURNE_CENTER}
+          zoom={MELBOURNE_ZOOM}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <MarkerClusterGroup chunkedLoading>
+            {plottable.map((venue) => (
+              <Marker
+                key={venue.id}
+                position={[Number(venue.latitude), Number(venue.longitude)]}
+                icon={createEmojiIcon(getVenueEmoji(venue))}
+              >
+                <Popup>
+                  <div style={{ fontSize: "14px", lineHeight: 1.4 }}>
+                    <div style={{ fontWeight: 600 }}>{venue.name}</div>
+                    <div style={{ color: "#666", fontSize: "12px" }}>
+                      {venue.type}
+                      {venue.suburb ? ` · ${venue.suburb}` : ""}
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+          </MarkerClusterGroup>
+        </MapContainer>
+      </div>
     </div>
   );
 }
