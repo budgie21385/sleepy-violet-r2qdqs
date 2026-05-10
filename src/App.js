@@ -66,6 +66,10 @@ export default function RestaurantSwipeMVP() {
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
+
+ useEffect(() => {
+    if (openNow) setSelectedTimes([]);
+  }, [openNow]);
  
   useEffect(() => {
     async function loadVenues() {
@@ -350,7 +354,7 @@ loadAreas();
                 setExpandedRegions={setExpandedRegions}
               />
               <OpenNowToggle openNow={openNow} setOpenNow={setOpenNow} />
-            {availableTimes.length > 0 && (
+            {!openNow && availableTimes.length > 0 && (
                 <MultiSelectChips
                   label="Time of day"
                   options={availableTimes}
@@ -1246,8 +1250,8 @@ function VenueCard({ venue, onLike, onPass }) {
       <VenueHeroCarousel venue={venue} />
       <div className="mb-8 space-y-3">
         <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
-        <VenueVibes venue={venue} />
         <VenueRating venue={venue} />
+        <VenueVibes venue={venue} />
         <OpeningHours venue={venue} />
       </div>
       <OpenMapsButton url={getMapsUrl(venue)} />
