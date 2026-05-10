@@ -361,23 +361,25 @@ loadAreas();
   return (
     <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-neutral-500">Dinner picker</p>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Where should we go?
-            </h1>
+        {screen !== "map" && (
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-neutral-500">Dinner picker</p>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Where should we go?
+              </h1>
+            </div>
+            {screen !== "filters" && (
+              <button
+                onClick={resetSwipe}
+                className="rounded-full bg-white p-3 shadow-sm border border-neutral-100"
+                aria-label="Reset"
+              >
+                <RotateCcw size={18} />
+              </button>
+            )}
           </div>
-          {screen !== "filters" && (
-            <button
-              onClick={resetSwipe}
-              className="rounded-full bg-white p-3 shadow-sm border border-neutral-100"
-              aria-label="Reset"
-            >
-              <RotateCcw size={18} />
-            </button>
-          )}
-        </div>
+        )}
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="space-y-5">
@@ -463,7 +465,7 @@ loadAreas();
           </div>
         )}
         {screen === "map" && (
-          <MapScreen venues={filteredVenues} />
+          <MapScreen venues={filteredVenues} onBack={() => setScreen("filters")} />
         )}
         {screen === "matches" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
@@ -1363,7 +1365,7 @@ function MapVenueSheet({ venue, onClose }) {
   );
 }
 
-function MapScreen({ venues }) {
+function MapScreen({ venues, onBack }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const plottable = venues.filter(
     (v) =>
@@ -1371,21 +1373,37 @@ function MapScreen({ venues }) {
       Number.isFinite(Number(v.longitude))
   );
 
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
   return (
-    <div
-      className="relative rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden"
-      style={{ height: "75vh" }}
-    >
-      <div className="px-4 py-2 border-b border-neutral-100 text-sm text-neutral-600">
-        {plottable.length} places on the map
+    <div className="fixed inset-0 z-[1500] bg-white">
+      <div className="absolute top-0 left-0 right-0 z-[2000] flex items-center justify-between bg-white/95 backdrop-blur px-4 py-3 border-b border-neutral-100">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back to filters"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-neutral-700 shadow-sm border border-neutral-100"
+        >
+          <X size={18} />
+        </button>
+        <span className="text-sm font-medium text-neutral-700">
+          {plottable.length} places on the map
+        </span>
+        <div className="w-9" />
       </div>
-      <div style={{ height: "calc(100% - 36px)", width: "100%" }}>
+      <div className="absolute top-14 left-0 right-0 bottom-0">
         <MapContainer
           center={MELBOURNE_CENTER}
           zoom={MELBOURNE_ZOOM}
           style={{ height: "100%", width: "100%" }}
         >
-         <TileLayer
+          <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
