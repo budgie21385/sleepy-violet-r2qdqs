@@ -5,7 +5,7 @@ import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
  
@@ -431,14 +431,7 @@ loadAreas();
                 className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
               >
                 Start swiping
-              </button>
-              <button
-                onClick={() => setTab("map")}
-                disabled={!filteredVenues.length}
-                className="w-full rounded-2xl border border-[#455d3b] bg-white py-4 font-medium text-[#455d3b] disabled:border-neutral-300 disabled:text-neutral-300"
-              >
-                View on map
-              </button>
+              </button>              
             </div>
           </div>
         )}
@@ -1406,6 +1399,18 @@ function BottomTabBar({ tab, setTab }) {
   );
 }
 
+function MapResizer() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+      map.setView(MELBOURNE_CENTER, MELBOURNE_ZOOM);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
 function MapScreen({ venues }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const plottable = venues.filter(
@@ -1435,6 +1440,7 @@ function MapScreen({ venues }) {
           zoom={MELBOURNE_ZOOM}
           style={{ height: "100%", width: "100%" }}
         >
+          <MapResizer />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
