@@ -3,7 +3,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Check } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -83,9 +83,82 @@ function createEmojiIcon(emoji) {
   });
 }
  
+function SignInScreen() {
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function sendMagicLink(e) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSending(true);
+    setMessage("");
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    setSending(false);
+    if (error) {
+      setMessage("Couldn't send the link. " + error.message);
+    } else {
+      setMessage("Check your email for the sign-in link.");
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-5">
+          <p className="text-sm text-neutral-500">Dinner picker</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Welcome
+          </h1>
+        </div>
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+          <form onSubmit={sendMagicLink} className="space-y-4">
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-neutral-700">
+                Sign in with email
+              </span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                disabled={sending}
+                required
+                className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={sending || !email.trim()}
+              className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
+            >
+              {sending ? "Sending..." : "Send sign-in link"}
+            </button>
+            {message && (
+              <p className="text-sm text-neutral-700 text-center">{message}</p>
+            )}
+          </form>
+          <p className="mt-4 text-xs text-neutral-500 text-center">
+            We'll email you a link. Click it to sign in.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RestaurantSwipeMVP() {
   const [venues, setVenues] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [picked, setPicked] = useState(null);
   const [currentUser, setCurrentUser] = useState("mark");
   const [markLikes, setMarkLikes] = useState([]);
@@ -109,10 +182,49 @@ export default function RestaurantSwipeMVP() {
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
+  const [profile, setProfile] = useState(null);
 
  useEffect(() => {
     if (openNow) setSelectedTimes([]);
   }, [openNow]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setProfile(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("profiles")
+      .select("id, display_name, username, tier")
+      .eq("id", session.user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (!cancelled && !error) setProfile(data);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
  
   useEffect(() => {
     async function loadVenues() {
@@ -351,6 +463,18 @@ loadAreas();
     setPicked(randomMatch);
   }
  
+if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <SignInScreen />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
@@ -362,25 +486,27 @@ loadAreas();
   return (
     <div className="min-h-screen bg-[#fdf6f0] text-[#111111]">
       {tab === "matches" && (
-        <div className="flex items-start justify-center p-4 pb-24">
-          <div className="w-full max-w-sm">
-        <div className="mb-5 flex items-center justify-between">
-            <div>
-              <p className="text-sm text-neutral-500">Dinner picker</p>
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Where should we go?
-              </h1>
-            </div>
-            {screen !== "filters" && (
-              <button
-                onClick={resetSwipe}
-                className="rounded-full bg-white p-3 shadow-sm border border-neutral-100"
-                aria-label="Reset"
-              >
-                <RotateCcw size={18} />
-              </button>
-            )}
-          </div>
+          <div className="flex items-start justify-center p-4 pb-24">
+            <div className="w-full max-w-sm">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-neutral-500">Dinner picker</p>
+                  <h1 className="text-2xl font-semibold tracking-tight">
+                    Where should we go?
+                  </h1>
+                </div>
+                <div className="flex items-center gap-2">
+                  {screen !== "filters" && (
+                    <button
+                      onClick={resetSwipe}
+                      className="rounded-full bg-white p-3 shadow-sm border border-neutral-100"
+                      aria-label="Reset"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                  )}
+                </div>
+              </div>
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
             <div className="space-y-5">
@@ -522,6 +648,14 @@ loadAreas();
       )}
       {tab === "map" && (
         <MapScreen venues={filteredVenues} />
+      )}
+      {tab === "profile" && (
+        <ProfileTab
+          profile={profile}
+          setProfile={setProfile}
+          session={session}
+          signOut={signOut}
+        />
       )}
       <BottomTabBar tab={tab} setTab={setTab} />
     </div>
@@ -1394,9 +1528,239 @@ function BottomTabBar({ tab, setTab }) {
           />
           <span className="text-xs font-medium">Map</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("profile")}
+          className={`flex-1 flex flex-col items-center gap-1 py-3 transition ${
+            tab === "profile" ? "text-[#455d3b]" : "text-neutral-400"
+          }`}
+        >
+          <User size={20} />
+          <span className="text-xs font-medium">Profile</span>
+        </button>
       </div>
     </div>
   );
+}
+
+function ProfileTab({ profile, setProfile, session, signOut }) {
+  const [displayName, setDisplayName] = useState(profile?.display_name || "");
+  const [username, setUsername] = useState(profile?.username || "");
+  const [usernameStatus, setUsernameStatus] = useState({ state: "idle" });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  // Sync local form state when a different profile loads (e.g. after sign-in).
+  // Keyed on profile.id so unsaved edits aren't blown away by a re-fetch of
+  // the same profile.
+  useEffect(() => {
+    if (profile) {
+      setDisplayName(profile.display_name || "");
+      setUsername(profile.username || "");
+    }
+  }, [profile?.id]);
+
+  // Debounced username availability check.
+  useEffect(() => {
+    const trimmed = username.trim().toLowerCase();
+    if (!trimmed) {
+      setUsernameStatus({ state: "idle" });
+      return;
+    }
+    if (trimmed.length < 3) {
+      setUsernameStatus({ state: "tooShort" });
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(trimmed)) {
+      setUsernameStatus({ state: "invalid" });
+      return;
+    }
+    if (trimmed === (profile?.username || "").toLowerCase()) {
+      setUsernameStatus({ state: "current" });
+      return;
+    }
+    setUsernameStatus({ state: "checking" });
+    const handle = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", trimmed)
+        .neq("id", session.user.id)
+        .maybeSingle();
+      if (error) {
+        setUsernameStatus({ state: "error" });
+      } else if (data) {
+        setUsernameStatus({ state: "taken" });
+      } else {
+        setUsernameStatus({ state: "available" });
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [username, profile?.username, session?.user?.id]);
+
+  const trimmedDisplay = displayName.trim();
+  const trimmedUsername = username.trim().toLowerCase();
+  const hasChanges =
+    trimmedDisplay !== (profile?.display_name || "") ||
+    trimmedUsername !== (profile?.username || "").toLowerCase();
+  const usernameOk =
+    usernameStatus.state === "available" ||
+    usernameStatus.state === "current" ||
+    usernameStatus.state === "idle";
+  const canSave = hasChanges && usernameOk && !saving;
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError("");
+    setSaved(false);
+    const updates = {
+      display_name: trimmedDisplay || null,
+      username: trimmedUsername || null,
+    };
+    const { data, error } = await supabase
+      .from("profiles")
+      .update(updates)
+      .eq("id", session.user.id)
+      .select()
+      .single();
+    setSaving(false);
+    if (error) {
+      setSaveError(error.message || "Couldn't save. Try again.");
+    } else {
+      setProfile(data);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    }
+  }
+
+  const email = session?.user?.email || "";
+  const initial = (trimmedDisplay || email || "?").charAt(0).toUpperCase();
+  const tierLabel = {
+    active: "Member",
+    micro_influencer: "Micro Influencer",
+    influencer: "Influencer",
+  }[profile?.tier] || "Member";
+
+  return (
+    <div className="flex items-start justify-center p-4 pb-24">
+      <div className="w-full max-w-sm">
+        <div className="mb-5">
+          <p className="text-sm text-neutral-500">Account</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
+        </div>
+
+        <div className="text-center mb-5">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-[#455d3b] text-white text-3xl font-medium">
+            {initial}
+          </div>
+          {email && (
+            <p className="text-sm text-neutral-500 mt-2">{email}</p>
+          )}
+          <span className="inline-block mt-2 text-xs text-[#455d3b] bg-[#455d3b]/10 rounded-full px-3 py-1">
+            {tierLabel}
+          </span>
+        </div>
+
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 space-y-4">
+          <label className="block">
+            <span className="block text-xs font-medium text-neutral-700 mb-1.5">
+              Display name
+            </span>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              maxLength={60}
+              className="w-full rounded-2xl bg-neutral-50 px-4 py-3 text-base outline-none border border-neutral-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="block text-xs font-medium text-neutral-700 mb-1.5">
+              Username
+            </span>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 text-base">
+                @
+              </span>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                maxLength={20}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
+                className="w-full rounded-2xl bg-neutral-50 pl-8 pr-4 py-3 text-base outline-none border border-neutral-100"
+              />
+            </div>
+            <UsernameHint status={usernameStatus} />
+          </label>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={!canSave}
+          className="w-full rounded-2xl bg-[#455d3b] py-4 mt-4 font-medium text-white disabled:bg-neutral-300"
+        >
+          {saving ? "Saving..." : saved ? "Saved" : "Save"}
+        </button>
+        {saveError && (
+          <p className="text-sm text-red-600 mt-2 text-center">{saveError}</p>
+        )}
+
+        <div className="h-px bg-neutral-200 my-6" />
+
+        <button
+          onClick={signOut}
+          className="w-full rounded-2xl bg-white border border-neutral-200 py-4 font-medium text-red-700 flex items-center justify-center gap-2"
+        >
+          <LogOut size={18} />
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UsernameHint({ status }) {
+  if (status.state === "idle" || status.state === "current") return null;
+  if (status.state === "checking") {
+    return <p className="text-xs mt-1.5 text-neutral-400">Checking...</p>;
+  }
+  if (status.state === "tooShort") {
+    return <p className="text-xs mt-1.5 text-neutral-400">At least 3 characters</p>;
+  }
+  if (status.state === "invalid") {
+    return (
+      <p className="text-xs mt-1.5 text-red-600">
+        Letters, numbers, and underscores only
+      </p>
+    );
+  }
+  if (status.state === "available") {
+    return (
+      <p className="text-xs mt-1.5 text-green-700 flex items-center gap-1">
+        <Check size={14} /> Available
+      </p>
+    );
+  }
+  if (status.state === "taken") {
+    return (
+      <p className="text-xs mt-1.5 text-red-600 flex items-center gap-1">
+        <X size={14} /> Taken
+      </p>
+    );
+  }
+  if (status.state === "error") {
+    return (
+      <p className="text-xs mt-1.5 text-neutral-500">
+        Couldn't check availability
+      </p>
+    );
+  }
+  return null;
 }
 
 function MapResizer() {
@@ -1509,7 +1873,7 @@ function VenueCard({ venue, onLike, onPass }) {
     </div>
   );
 }
- 
+
 function VenueRating({ venue }) {
   if (!venue.rating && !venue.review_count) return null;
   return (
@@ -1523,7 +1887,7 @@ function VenueRating({ venue }) {
     </p>
   );
 }
- 
+
 function OpeningHours({ venue }) {
   const [isOpen, setIsOpen] = useState(false);
   const days = [
@@ -1562,7 +1926,7 @@ function OpeningHours({ venue }) {
     </div>
   );
 }
- 
+
 function OpenMapsButton({ url }) {
   return (
     <a
@@ -1575,7 +1939,7 @@ function OpenMapsButton({ url }) {
     </a>
   );
 }
- 
+
 function EmptyState({ title, text, action, actionText }) {
   return (
     <div className="rounded-3xl bg-white p-6 text-center shadow-sm border border-neutral-100">
