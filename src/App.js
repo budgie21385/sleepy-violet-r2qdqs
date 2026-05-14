@@ -3,7 +3,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Check } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Check, ArrowLeft, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -183,6 +183,8 @@ export default function RestaurantSwipeMVP() {
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
   const [profile, setProfile] = useState(null);
+  const [savedVenueIds, setSavedVenueIds] = useState(() => new Set());
+  const [hiddenVenueIds, setHiddenVenueIds] = useState(() => new Set());
 
  useEffect(() => {
     if (openNow) setSelectedTimes([]);
@@ -222,8 +224,103 @@ export default function RestaurantSwipeMVP() {
     };
   }, [session?.user?.id]);
 
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setSavedVenueIds(new Set());
+      setHiddenVenueIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      supabase
+        .from("saved_venues")
+        .select("venue_id")
+        .eq("user_id", session.user.id),
+      supabase
+        .from("hidden_venues")
+        .select("venue_id")
+        .eq("user_id", session.user.id),
+    ]).then(([savedRes, hiddenRes]) => {
+      if (cancelled) return;
+      if (!savedRes.error && savedRes.data) {
+        setSavedVenueIds(new Set(savedRes.data.map((r) => r.venue_id)));
+      }
+      if (!hiddenRes.error && hiddenRes.data) {
+        setHiddenVenueIds(new Set(hiddenRes.data.map((r) => r.venue_id)));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
   async function signOut() {
     await supabase.auth.signOut();
+  }
+  async function saveVenue(venueId) {
+    if (!session?.user?.id) return;
+    setSavedVenueIds((prev) => new Set([...prev, venueId]));
+    setHiddenVenueIds((prev) => {
+      const next = new Set(prev);
+      next.delete(venueId);
+      return next;
+    });
+    await supabase.from("saved_venues").upsert(
+      { user_id: session.user.id, venue_id: venueId },
+      { onConflict: "user_id,venue_id", ignoreDuplicates: true }
+    );
+    await supabase
+      .from("hidden_venues")
+      .delete()
+      .eq("user_id", session.user.id)
+      .eq("venue_id", venueId);
+  }
+
+  async function hideVenue(venueId) {
+    if (!session?.user?.id) return;
+    setHiddenVenueIds((prev) => new Set([...prev, venueId]));
+    setSavedVenueIds((prev) => {
+      const next = new Set(prev);
+      next.delete(venueId);
+      return next;
+    });
+    await supabase.from("hidden_venues").upsert(
+      { user_id: session.user.id, venue_id: venueId },
+      { onConflict: "user_id,venue_id", ignoreDuplicates: true }
+    );
+    await supabase
+      .from("saved_venues")
+      .delete()
+      .eq("user_id", session.user.id)
+      .eq("venue_id", venueId);
+  }
+
+  async function unsaveVenue(venueId) {
+    if (!session?.user?.id) return;
+    setSavedVenueIds((prev) => {
+      const next = new Set(prev);
+      next.delete(venueId);
+      return next;
+    });
+    await supabase
+      .from("saved_venues")
+      .delete()
+      .eq("user_id", session.user.id)
+      .eq("venue_id", venueId);
+  }
+
+  async function unhideVenue(venueId) {
+    if (!session?.user?.id) return;
+    setHiddenVenueIds((prev) => {
+      const next = new Set(prev);
+      next.delete(venueId);
+      return next;
+    });
+    await supabase
+      .from("hidden_venues")
+      .delete()
+      .eq("user_id", session.user.id)
+      .eq("venue_id", venueId);
   }
  
   useEffect(() => {
@@ -345,6 +442,7 @@ loadAreas();
   const filteredVenues = useMemo(() => {
     const todayKey = getTodayDayKey();
     return venues.filter((venue) => {
+      if (hiddenVenueIds.has(venue.id)) return false;
       const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
       if (!matchesArea) return false;
  
@@ -380,6 +478,7 @@ loadAreas();
     openNow,
     selectedTimes,
     selectedVibes,
+    hiddenVenueIds,
   ]);
  
   const currentUserSwipedIds =
@@ -647,7 +746,13 @@ if (authLoading) {
         </div>
       )}
       {tab === "map" && (
-        <MapScreen venues={filteredVenues} />
+        <MapScreen
+          venues={filteredVenues}
+          savedIds={savedVenueIds}
+          onSave={saveVenue}
+          onUnsave={unsaveVenue}
+          onHide={hideVenue}
+        />
       )}
       {tab === "profile" && (
         <ProfileTab
@@ -655,6 +760,13 @@ if (authLoading) {
           setProfile={setProfile}
           session={session}
           signOut={signOut}
+          venues={venues}
+          savedIds={savedVenueIds}
+          hiddenIds={hiddenVenueIds}
+          onSave={saveVenue}
+          onUnsave={unsaveVenue}
+          onHide={hideVenue}
+          onUnhide={unhideVenue}
         />
       )}
       <BottomTabBar tab={tab} setTab={setTab} />
@@ -1467,7 +1579,7 @@ function VenueVibes({ venue }) {
   );
 }
 
-function MapVenueSheet({ venue, onClose }) {
+function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
   return (
     <div
       className="absolute left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
@@ -1493,6 +1605,32 @@ function MapVenueSheet({ venue, onClose }) {
         <VenueVibes venue={venue} />
         <OpeningHours venue={venue} />
         <OpenMapsButton url={getMapsUrl(venue)} />
+        <div className="flex gap-2 mt-3">
+          {savedIds && savedIds.has(venue.id) ? (
+            <button
+              type="button"
+              onClick={() => onUnsave(venue.id)}
+              className="flex-1 rounded-2xl bg-[#edf2eb] py-3 font-medium text-[#455d3b] border border-[#c5d4c2]"
+            >
+              Remove from list
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onSave(venue.id)}
+              className="flex-1 rounded-2xl bg-[#455d3b] py-3 font-medium text-white"
+            >
+              Add to list
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onHide(venue.id)}
+            className="rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-sm text-neutral-600"
+          >
+            Hide
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1543,7 +1681,20 @@ function BottomTabBar({ tab, setTab }) {
   );
 }
 
-function ProfileTab({ profile, setProfile, session, signOut }) {
+function ProfileTab({
+  profile,
+  setProfile,
+  session,
+  signOut,
+  venues,
+  savedIds,
+  hiddenIds,
+  onSave,
+  onUnsave,
+  onHide,
+  onUnhide,
+}) {
+  const [showMyList, setShowMyList] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
   const [username, setUsername] = useState(profile?.username || "");
   const [usernameStatus, setUsernameStatus] = useState({ state: "idle" });
@@ -1644,6 +1795,18 @@ function ProfileTab({ profile, setProfile, session, signOut }) {
 
   return (
     <div className="flex items-start justify-center p-4 pb-24">
+      {showMyList && (
+        <MyListScreen
+          venues={venues}
+          savedIds={savedIds}
+          hiddenIds={hiddenIds}
+          onBack={() => setShowMyList(false)}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+          onUnhide={onUnhide}
+        />
+      )}
       <div className="w-full max-w-sm">
         <div className="mb-5">
           <p className="text-sm text-neutral-500">Account</p>
@@ -1661,6 +1824,23 @@ function ProfileTab({ profile, setProfile, session, signOut }) {
             {tierLabel}
           </span>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowMyList(true)}
+          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+            <Heart size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium">My List</p>
+            <p className="text-xs text-neutral-500">
+              {savedIds?.size || 0} saved · {hiddenIds?.size || 0} hidden
+            </p>
+          </div>
+          <span className="text-neutral-400 text-lg leading-none">›</span>
+        </button>
 
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 space-y-4">
           <label className="block">
@@ -1763,6 +1943,185 @@ function UsernameHint({ status }) {
   return null;
 }
 
+function MyListScreen({
+  venues,
+  savedIds,
+  hiddenIds,
+  onBack,
+  onSave,
+  onUnsave,
+  onHide,
+  onUnhide,
+}) {
+  const [view, setView] = useState("saved");
+  const [selectedVenue, setSelectedVenue] = useState(null);
+  const [typeFilter, setTypeFilter] = useState(null);
+
+  const sourceIds = view === "saved" ? savedIds : hiddenIds;
+
+  const listVenues = useMemo(() => {
+    const filtered = venues.filter((v) => sourceIds.has(v.id));
+    if (typeFilter) return filtered.filter((v) => v.type === typeFilter);
+    return filtered;
+  }, [venues, sourceIds, typeFilter]);
+
+  const availableTypes = useMemo(() => {
+    return Array.from(
+      new Set(venues.filter((v) => sourceIds.has(v.id)).map((v) => v.type))
+    )
+      .filter(Boolean)
+      .sort();
+  }, [venues, sourceIds]);
+
+  return (
+    <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col">
+      <div className="bg-white border-b border-neutral-100 px-4 py-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100"
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <h1 className="text-lg font-semibold flex-1">My List</h1>
+      </div>
+
+      <div className="bg-white border-b border-neutral-100 px-4 py-2 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setView("saved")}
+          className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
+            view === "saved"
+              ? "bg-[#455d3b] text-white"
+              : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+          }`}
+        >
+          Saved
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("hidden")}
+          className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
+            view === "hidden"
+              ? "bg-[#455d3b] text-white"
+              : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+          }`}
+        >
+          Hidden
+        </button>
+      </div>
+
+      {availableTypes.length > 0 && (
+        <div className="bg-white border-b border-neutral-100 px-4 py-2 overflow-x-auto">
+          <div className="flex gap-2 whitespace-nowrap">
+            <button
+              type="button"
+              onClick={() => setTypeFilter(null)}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                !typeFilter
+                  ? "bg-[#455d3b] text-white"
+                  : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+              }`}
+            >
+              All
+            </button>
+            {availableTypes.map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setTypeFilter(type)}
+                className={`rounded-full px-3 py-1 text-xs font-medium ${
+                  typeFilter === type
+                    ? "bg-[#455d3b] text-white"
+                    : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+                }`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto p-4 pb-24">
+        {listVenues.length === 0 ? (
+          <div className="text-center text-neutral-500 mt-12 text-sm">
+            {view === "saved"
+              ? "No saved venues yet. Add some from the map."
+              : "No hidden venues."}
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {listVenues.map((venue) => (
+              <li key={venue.id}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedVenue(venue)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedVenue(venue);
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 rounded-2xl bg-white border border-neutral-100 p-3 text-left cursor-pointer hover:bg-neutral-50 active:scale-[0.99] transition"
+                >
+                  {venue.primary_image ? (
+                    <img
+                      src={`/api/place-photo?url=${encodeURIComponent(venue.primary_image)}`}
+                      alt=""
+                      className="w-14 h-14 rounded-xl object-cover bg-neutral-100"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div className="w-14 h-14 rounded-xl bg-neutral-100" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{venue.name}</p>
+                    <p className="text-xs text-neutral-500 truncate">
+                      {venue.type}
+                      {venue.suburb ? ` · ${venue.suburb}` : ""}
+                      {venue.rating ? ` · ⭐ ${venue.rating}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (view === "saved") onUnsave(venue.id);
+                      else onUnhide(venue.id);
+                    }}
+                    aria-label={
+                      view === "saved" ? "Remove from list" : "Unhide"
+                    }
+                    className="text-neutral-400 hover:text-red-600 px-2 py-2"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {selectedVenue && (
+        <MapVenueSheet
+          venue={selectedVenue}
+          onClose={() => setSelectedVenue(null)}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+        />
+      )}
+    </div>
+  );
+}
+
 function MapResizer() {
   const map = useMap();
   useEffect(() => {
@@ -1775,7 +2134,7 @@ function MapResizer() {
   return null;
 }
 
-function MapScreen({ venues }) {
+function MapScreen({ venues, savedIds, onSave, onUnsave, onHide }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const plottable = venues.filter(
     (v) =>
@@ -1833,6 +2192,10 @@ function MapScreen({ venues }) {
         <MapVenueSheet
           venue={selectedVenue}
           onClose={() => setSelectedVenue(null)}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
         />
       )}
     </div>
