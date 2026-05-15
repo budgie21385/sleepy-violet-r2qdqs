@@ -1625,7 +1625,10 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
           )}
           <button
             type="button"
-            onClick={() => onHide(venue.id)}
+            onClick={() => {
+              onHide(venue.id);
+              onClose();
+            }}
             className="rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-sm text-neutral-600"
           >
             Hide
