@@ -3,7 +3,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Check, ArrowLeft, Trash2 } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -166,7 +166,9 @@ export default function RestaurantSwipeMVP() {
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
   const [tab, setTab] = useState("matches");
-  const [screen, setScreen] = useState("filters");
+  const [screen, setScreen] = useState("mode");
+  const [matchMode, setMatchMode] = useState("solo");
+  const [matchSource, setMatchSource] = useState("all");
   const [selectedCuisines, setSelectedCuisines] = useState([]);
   const [areas, setAreas] = useState([]);
   const [areasLoading, setAreasLoading] = useState(true);
@@ -321,6 +323,25 @@ export default function RestaurantSwipeMVP() {
       .delete()
       .eq("user_id", session.user.id)
       .eq("venue_id", venueId);
+  }
+
+  function soloSave() {
+    if (!currentVenue) return;
+    const venueId = currentVenue.id;
+    saveVenue(venueId);
+    setMarkPasses((prev) => [...prev, venueId]);
+  }
+
+  function soloSkip() {
+    if (!currentVenue) return;
+    setMarkPasses((prev) => [...prev, currentVenue.id]);
+  }
+
+  function soloHide() {
+    if (!currentVenue) return;
+    const venueId = currentVenue.id;
+    hideVenue(venueId);
+    setMarkPasses((prev) => [...prev, venueId]);
   }
  
   useEffect(() => {
@@ -486,7 +507,17 @@ loadAreas();
       ? [...markLikes, ...markPasses]
       : [...partnerLikes, ...partnerPasses];
  
-  const currentVenue = filteredVenues.find(
+  const swipeQueue = useMemo(() => {
+    if (matchSource === "my_list") {
+      return filteredVenues.filter((v) => savedVenueIds.has(v.id));
+    }
+    if (matchMode === "solo") {
+      return filteredVenues.filter((v) => !savedVenueIds.has(v.id));
+    }
+    return filteredVenues;
+  }, [filteredVenues, matchSource, matchMode, savedVenueIds]);
+
+  const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
   );
  
@@ -587,15 +618,26 @@ if (authLoading) {
       {tab === "matches" && (
           <div className="flex items-start justify-center p-4 pb-24">
             <div className="w-full max-w-sm">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-neutral-500">Dinner picker</p>
-                  <h1 className="text-2xl font-semibold tracking-tight">
-                    Where should we go?
-                  </h1>
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  {screen === "filters" && (
+                    <button
+                      type="button"
+                      onClick={() => setScreen("mode")}
+                      aria-label="Back to mode"
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm border border-neutral-100 text-neutral-600 shrink-0"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                  )}
+                  <div className="min-w-0">
+                    <h1 className="text-2xl font-semibold tracking-tight">
+                      Where should we go?
+                    </h1>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {screen !== "filters" && (
+                  {(screen === "swipe" || screen === "matches") && (
                     <button
                       onClick={resetSwipe}
                       className="rounded-full bg-white p-3 shadow-sm border border-neutral-100"
@@ -606,8 +648,42 @@ if (authLoading) {
                   )}
                 </div>
               </div>
+              {screen === "mode" && (
+          <ModeChooserScreen
+            onPickMode={(mode) => {
+              setMatchMode(mode);
+              setScreen("filters");
+            }}
+          />
+        )}
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+            <div className="flex justify-center mb-4 pb-4 border-b border-neutral-100">
+              <div className="flex bg-neutral-100 rounded-full p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setMatchSource("all")}
+                  className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
+                    matchSource === "all"
+                      ? "bg-white text-[#455d3b] shadow-sm"
+                      : "text-neutral-500"
+                  }`}
+                >
+                  All venues
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchSource("my_list")}
+                  className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
+                    matchSource === "my_list"
+                      ? "bg-white text-[#455d3b] shadow-sm"
+                      : "text-neutral-500"
+                  }`}
+                >
+                  My List
+                </button>
+              </div>
+            </div>
             <div className="space-y-5">
               <AreaFilter
                 areaSearch={areaSearch}
@@ -648,15 +724,15 @@ if (authLoading) {
               />
               <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
               <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600">
-                {filteredVenues.length} places available with these filters.
+                {swipeQueue.length} places available with these filters.
               </div>
               <button
                 onClick={startSwiping}
-                disabled={!filteredVenues.length}
+                disabled={!swipeQueue.length}
                 className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
               >
                 Start swiping
-              </button>              
+              </button>            
             </div>
           </div>
         )}
@@ -668,11 +744,19 @@ if (authLoading) {
                 Matches: {matches.length} / {matchLimit}
               </span>
               <span>
-                {currentUserSwipedCount + 1} of {filteredVenues.length}
+                {currentUserSwipedCount + 1} of {swipeQueue.length}
               </span>
             </div>
             {currentVenue ? (
-              <VenueCard venue={currentVenue} onLike={likeVenue} onPass={passVenue} />
+              <VenueCard
+                venue={currentVenue}
+                mode={matchMode}
+                onLike={likeVenue}
+                onPass={passVenue}
+                onSoloSave={soloSave}
+                onSoloSkip={soloSkip}
+                onSoloHide={soloHide}
+              />
             ) : (
               <EmptyState
                 title="No more places"
@@ -1580,6 +1664,7 @@ function VenueVibes({ venue }) {
 }
 
 function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
+  const [mapMenuOpen, setMapMenuOpen] = useState(false);
   return (
     <div
       className="absolute left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
@@ -1605,7 +1690,15 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
         <VenueVibes venue={venue} />
         <OpeningHours venue={venue} />
         <OpenMapsButton url={getMapsUrl(venue)} />
-        <div className="flex gap-2 mt-3">
+        <div className="flex gap-2 mt-3 relative">
+          <button
+            type="button"
+            onClick={() => setMapMenuOpen(true)}
+            aria-label="More options"
+            className="rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-neutral-500 active:scale-[0.98] transition flex items-center justify-center"
+          >
+            <MoreVertical size={18} />
+          </button>
           {savedIds && savedIds.has(venue.id) ? (
             <button
               type="button"
@@ -1623,16 +1716,27 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
               Add to list
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              onHide(venue.id);
-              onClose();
-            }}
-            className="rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-sm text-neutral-600"
-          >
-            Hide
-          </button>
+          {mapMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-[3400]"
+                onClick={() => setMapMenuOpen(false)}
+              />
+              <div className="absolute bottom-full left-0 mb-2 bg-white border border-neutral-200 rounded-xl shadow-lg z-[3500] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onHide(venue.id);
+                    setMapMenuOpen(false);
+                    onClose();
+                  }}
+                  className="block px-5 py-3 text-red-700 font-medium hover:bg-neutral-50 whitespace-nowrap text-left"
+                >
+                  Don't show this again
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -2125,6 +2229,48 @@ function MyListScreen({
   );
 }
 
+function ModeChooserScreen({ onPickMode }) {
+  return (
+    <div className="flex items-start justify-center p-4 pb-24">
+      <div className="w-full max-w-sm">
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Who's playing?
+          </h1>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onPickMode("solo")}
+          className="w-full text-left bg-white rounded-3xl border border-neutral-100 shadow-sm p-5 mb-3 active:scale-[0.99] transition hover:bg-neutral-50"
+        >
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#455d3b]/10 text-[#455d3b] mb-3">
+            <User size={22} />
+          </div>
+          <p className="text-lg font-medium">Just me</p>
+          <p className="text-sm text-neutral-500 mt-1">
+            Discover new places. Build your favourites list, or head somewhere nearby right now.
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onPickMode("multi")}
+          className="w-full text-left bg-white rounded-3xl border border-neutral-100 shadow-sm p-5 active:scale-[0.99] transition hover:bg-neutral-50"
+        >
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#455d3b]/10 text-[#455d3b] mb-3">
+            <Users size={22} />
+          </div>
+          <p className="text-lg font-medium">With others</p>
+          <p className="text-sm text-neutral-500 mt-1">
+            Match with friends. Share a link, swipe together, pick a place to go.
+          </p>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function MapResizer() {
   const map = useMap();
   useEffect(() => {
@@ -2139,11 +2285,16 @@ function MapResizer() {
 
 function MapScreen({ venues, savedIds, onSave, onUnsave, onHide }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
+  const [mapFilter, setMapFilter] = useState("all");
   const plottable = venues.filter(
     (v) =>
       Number.isFinite(Number(v.latitude)) &&
       Number.isFinite(Number(v.longitude))
   );
+  const displayedPlottable =
+      mapFilter === "my_list" && savedIds
+        ? plottable.filter((v) => savedIds.has(v.id))
+        : plottable;
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -2155,9 +2306,34 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide }) {
 
   return (
     <div className="fixed inset-0 z-[1500] bg-white">
-      <div className="absolute top-0 left-0 right-0 z-[2000] flex items-center justify-center bg-white/95 backdrop-blur px-4 py-3 border-b border-neutral-100">
+      <div className="absolute top-0 left-0 right-0 z-[2000] flex items-center justify-between gap-3 bg-white/95 backdrop-blur px-4 py-3 border-b border-neutral-100">
+        <div className="flex gap-0.5 bg-neutral-100 rounded-full p-0.5">
+          <button
+            type="button"
+            onClick={() => setMapFilter("all")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              mapFilter === "all"
+                ? "bg-white text-[#455d3b] shadow-sm"
+                : "text-neutral-500"
+            }`}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => setMapFilter("my_list")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              mapFilter === "my_list"
+                ? "bg-white text-[#455d3b] shadow-sm"
+                : "text-neutral-500"
+            }`}
+          >
+            My List
+          </button>
+        </div>
         <span className="text-sm font-medium text-neutral-700">
-          {plottable.length} places on the map
+          {displayedPlottable.length}{" "}
+          {displayedPlottable.length === 1 ? "place" : "places"}
         </span>
       </div>
       <div className="absolute top-14 left-0 right-0 bottom-0">
@@ -2178,7 +2354,7 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide }) {
             showCoverageOnHover={false}
             maxClusterRadius={60}
           >
-            {plottable.map((venue) => (
+            {displayedPlottable.map((venue) => (
               <Marker
                 key={venue.id}
                 position={[Number(venue.latitude), Number(venue.longitude)]}
@@ -2205,7 +2381,16 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide }) {
   );
 }
 
-function VenueCard({ venue, onLike, onPass }) {
+function VenueCard({
+  venue,
+  mode,
+  onLike,
+  onPass,
+  onSoloSave,
+  onSoloSkip,
+  onSoloHide,
+}) {
+  const [soloMenuOpen, setSoloMenuOpen] = useState(false);
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
@@ -2216,26 +2401,73 @@ function VenueCard({ venue, onLike, onPass }) {
         <OpeningHours venue={venue} />
       </div>
       <OpenMapsButton url={getMapsUrl(venue)} />
-      <div className="mt-5 grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={onPass}
-          className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
-        >
-          <span className="inline-flex items-center justify-center gap-2">
-            <X size={18} /> Pass
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={onLike}
-          className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition"
-        >
-          <span className="inline-flex items-center justify-center gap-2">
-            <Heart size={18} /> Like
-          </span>
-        </button>
-      </div>
+      {mode === "solo" ? (
+        <div className="mt-5 flex gap-2 relative">
+          <button
+            type="button"
+            onClick={() => setSoloMenuOpen(true)}
+            aria-label="More options"
+            className="rounded-2xl bg-white border border-neutral-200 px-4 py-4 text-neutral-500 active:scale-[0.98] transition flex items-center justify-center"
+          >
+            <MoreVertical size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={onSoloSkip}
+            className="flex-1 rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
+          >
+            Next
+          </button>
+          <button
+            type="button"
+            onClick={onSoloSave}
+            className="flex-1 rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
+          >
+            Add to list
+          </button>
+          {soloMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-[3400]"
+                onClick={() => setSoloMenuOpen(false)}
+              />
+              <div className="absolute bottom-full left-0 mb-2 bg-white border border-neutral-200 rounded-xl shadow-lg z-[3500] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSoloHide();
+                    setSoloMenuOpen(false);
+                  }}
+                  className="block px-5 py-3 text-red-700 font-medium hover:bg-neutral-50 whitespace-nowrap text-left"
+                >
+                  Don't show this again
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={onPass}
+            className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <X size={18} /> Pass
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={onLike}
+            className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition"
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <Heart size={18} /> Like
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
