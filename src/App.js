@@ -3,7 +3,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -169,6 +169,8 @@ export default function RestaurantSwipeMVP() {
   const [screen, setScreen] = useState("mode");
   const [matchMode, setMatchMode] = useState("solo");
   const [matchSource, setMatchSource] = useState("all");
+  const [eventDate, setEventDate] = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const [selectedCuisines, setSelectedCuisines] = useState([]);
   const [areas, setAreas] = useState([]);
   const [areasLoading, setAreasLoading] = useState(true);
@@ -309,6 +311,50 @@ export default function RestaurantSwipeMVP() {
       .delete()
       .eq("user_id", session.user.id)
       .eq("venue_id", venueId);
+  }
+
+  async function handleDoneAndSend() {
+    if (!currentSessionId || !session?.user?.id) return;
+
+    const swipeRows = [
+      ...markLikes.map((venueId) => ({
+        session_id: currentSessionId,
+        user_id: session.user.id,
+        venue_id: venueId,
+        action: "like",
+      })),
+      ...markPasses.map((venueId) => ({
+        session_id: currentSessionId,
+        user_id: session.user.id,
+        venue_id: venueId,
+        action: "pass",
+      })),
+    ];
+
+    if (swipeRows.length > 0) {
+      const { error: swipeError } = await supabase
+        .from("session_swipes")
+        .insert(swipeRows);
+      if (swipeError) {
+        console.error("Failed to write session swipes:", swipeError);
+        return;
+      }
+    }
+
+    const { error: updateError } = await supabase
+      .from("match_sessions")
+      .update({
+        status: "open",
+        host_curating_complete_at: new Date().toISOString(),
+      })
+      .eq("id", currentSessionId);
+
+    if (updateError) {
+      console.error("Failed to update session status:", updateError);
+      return;
+    }
+
+    setScreen("invite_share");
   }
 
   async function unhideVenue(venueId) {
@@ -536,7 +582,7 @@ loadAreas();
     setPartnerPasses([]);
   }
  
-  function startSwiping() {
+  async function startSwiping() {
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
@@ -546,7 +592,72 @@ loadAreas();
     setMarkPasses([]);
     setPartnerPasses([]);
     setCurrentUser("mark");
-    setScreen("swipe");
+    setCurrentSessionId(null);
+
+    let newSessionId = null;
+    if (
+      (matchMode === "concurrent" || matchMode === "curated") &&
+      session?.user?.id
+    ) {
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24);
+
+      const sessionFilters = {
+        selectedAreaIds: selectedAreas.map((a) => a.id),
+        radiusKm,
+        openNow,
+        selectedTimes,
+        selectedVibes,
+        selectedCuisines,
+      };
+
+      const sessionName = eventDate
+        ? eventDate.toLocaleDateString("en-AU", {
+            weekday: "long",
+            day: "numeric",
+            month: "short",
+          })
+        : "Right now";
+
+      const { data, error } = await supabase
+        .from("match_sessions")
+        .insert({
+          host_user_id: session.user.id,
+          mode: matchMode,
+          source_type: matchSource === "my_list" ? "list" : "filters",
+          filters: sessionFilters,
+          list_id: null,
+          target_matches: null,
+          event_at: eventDate ? eventDate.toISOString() : null,
+          expires_at: expiresAt.toISOString(),
+          status: matchMode === "curated" ? "host_curating" : "open",
+          name: sessionName,
+        })
+        .select()
+        .single();
+
+      if (error || !data) {
+        console.error("Failed to create session:", error);
+        return;
+      }
+
+      newSessionId = data.id;
+      setCurrentSessionId(data.id);
+
+      await supabase.from("session_participants").insert({
+        session_id: data.id,
+        user_id: session.user.id,
+      });
+
+      console.log("Session created:", data.id);
+    }
+
+    if (matchMode === "concurrent" && newSessionId) {
+      setScreen("invite_share");
+    } else {
+      setScreen("swipe");
+    }
+   
   }
  
   function nextCard() {
@@ -623,7 +734,9 @@ if (authLoading) {
                   {screen === "filters" && (
                     <button
                       type="button"
-                      onClick={() => setScreen("mode")}
+                      onClick={() =>
+                        setScreen(matchMode === "solo" ? "mode" : "session_setup")
+                      }
                       aria-label="Back to mode"
                       className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm border border-neutral-100 text-neutral-600 shrink-0"
                     >
@@ -651,7 +764,26 @@ if (authLoading) {
               {screen === "mode" && (
           <ModeChooserScreen
             onPickMode={(mode) => {
-              setMatchMode(mode);
+              if (mode === "solo") {
+                setMatchMode("solo");
+                setScreen("filters");
+              } else {
+                setScreen("session_setup");
+              }
+            }}
+          />
+        )}
+        {screen === "session_setup" && (
+          <SessionSetupScreen
+            onBack={() => setScreen("mode")}
+            onPickRightNow={() => {
+              setMatchMode("concurrent");
+              setEventDate(null);
+              setScreen("filters");
+            }}
+            onPickLater={(date) => {
+              setMatchMode("curated");
+              setEventDate(date);
               setScreen("filters");
             }}
           />
@@ -736,9 +868,15 @@ if (authLoading) {
             </div>
           </div>
         )}
+        {screen === "invite_share" && (
+          <InviteShareScreen
+            sessionId={currentSessionId}
+            onBack={() => setScreen("filters")}
+            onContinue={() => setScreen("swipe")}
+          />
+        )}        
         {screen === "swipe" && (
           <div>
-            <UserToggle currentUser={currentUser} setCurrentUser={setCurrentUser} />
             <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
               <span>
                 Matches: {matches.length} / {matchLimit}
@@ -748,19 +886,23 @@ if (authLoading) {
               </span>
             </div>
             {currentVenue ? (
-              <VenueCard
-                venue={currentVenue}
-                mode={matchMode}
-                onLike={likeVenue}
-                onPass={passVenue}
-                onSoloSave={soloSave}
-                onSoloSkip={soloSkip}
-                onSoloHide={soloHide}
-              />
+              <>
+                <VenueCard venue={currentVenue} />
+                <SwipeActions
+                  mode={matchMode}
+                  likeCount={markLikes.length}
+                  onLike={likeVenue}
+                  onPass={passVenue}
+                  onSoloSave={soloSave}
+                  onSoloSkip={soloSkip}
+                  onSoloHide={soloHide}
+                  onDoneAndSend={handleDoneAndSend}
+                />
+              </>
             ) : (
               <EmptyState
                 title="No more places"
-                text="You’ve reached the end of this list."
+                text="You've reached the end of this list."
                 action={() => setScreen("matches")}
                 actionText="View matches"
               />
@@ -1667,10 +1809,15 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   return (
     <div
-      className="absolute left-3 right-3 bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-y-auto"
-      style={{ bottom: 80, maxHeight: "calc(100% - 100px)", zIndex: 2500 }}
+      className="absolute left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col"
+      style={{
+        bottom: 80,
+        width: "calc(100% - 1.5rem)",
+        maxHeight: "calc(100% - 100px)",
+        zIndex: 2500,
+      }}
     >
-      <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100">
+      <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100 rounded-t-3xl">
         <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
           {venue.name}
         </span>
@@ -1683,14 +1830,18 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
           <X size={16} />
         </button>
       </div>
-      <div className="p-4 space-y-3">
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         <VenueHeroCarousel venue={venue} />
         <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
         <VenueRating venue={venue} />
         <VenueVibes venue={venue} />
         <OpeningHours venue={venue} />
         <OpenMapsButton url={getMapsUrl(venue)} />
-        <div className="flex gap-2 mt-3 relative">
+      </div>
+
+      <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
+        <div className="flex gap-2 relative">
           <button
             type="button"
             onClick={() => setMapMenuOpen(true)}
@@ -1901,7 +2052,7 @@ function ProfileTab({
   }[profile?.tier] || "Member";
 
   return (
-    <div className="flex items-start justify-center p-4 pb-24">
+    <div className="flex items-start justify-center p-4 pb-52">
       {showMyList && (
         <MyListScreen
           venues={venues}
@@ -2271,6 +2422,365 @@ function ModeChooserScreen({ onPickMode }) {
   );
 }
 
+function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
+  const [expanded, setExpanded] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState("");
+  const todayIso = new Date().toISOString().split("T")[0];
+
+  return (
+    <div className="flex items-start justify-center p-4 pb-24">
+      <div className="w-full max-w-sm">
+        <div className="mb-5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm border border-neutral-100 text-neutral-600 shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            When are you going?
+          </h1>
+        </div>
+
+        <SessionSetupCard
+          icon={<Zap size={18} />}
+          title="Right now"
+          subtitle="Swipe together, decide fast"
+          expanded={expanded === "right_now"}
+          onToggle={() =>
+            setExpanded(expanded === "right_now" ? null : "right_now")
+          }
+          steps={[
+            "Pick your filters",
+            "Invite your friends",
+            "Swipe together",
+            "See your matches",
+          ]}
+          ctaLabel="Continue"
+          onCta={onPickRightNow}
+        />
+
+        <div className="h-2" />
+
+        <SessionSetupCard
+          icon={<Calendar size={18} />}
+          title="Later"
+          subtitle="Curate options, friends choose"
+          expanded={expanded === "later"}
+          onToggle={() =>
+            setExpanded(expanded === "later" ? null : "later")
+          }
+          steps={[
+            "Pick your filters",
+            "Build your shortlist",
+            "Send to friends",
+            "See your matches",
+          ]}
+          ctaLabel="Pick your date"
+          onCta={() => setPickerOpen(true)}
+        />
+      </div>
+
+      {pickerOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/30 z-[3400]"
+            onClick={() => setPickerOpen(false)}
+          />
+          <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl p-5 z-[3500] max-w-md mx-auto shadow-2xl">
+            <div className="w-10 h-1 bg-neutral-200 rounded-full mx-auto mb-4" />
+            <h2 className="text-lg font-semibold mb-1">Pick your date</h2>
+            <p className="text-sm text-neutral-500 mb-4">When are you all going?</p>
+            <input
+              type="date"
+              value={selectedDate}
+              min={todayIso}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-full rounded-2xl bg-neutral-50 px-4 py-3 text-base outline-none border border-neutral-100 mb-4"
+            />
+            <button
+              type="button"
+              disabled={!selectedDate}
+              onClick={() => {
+                onPickLater(new Date(selectedDate));
+                setPickerOpen(false);
+              }}
+              className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
+            >
+              Continue
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SessionSetupCard({
+  icon,
+  title,
+  subtitle,
+  expanded,
+  onToggle,
+  steps,
+  ctaLabel,
+  onCta,
+}) {
+  return (
+    <div
+      className={`bg-white rounded-2xl shadow-sm transition border ${
+        expanded ? "border-[#455d3b] border-2" : "border-neutral-100"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full p-4 flex items-center gap-3 text-left"
+      >
+        <div
+          className={`inline-flex items-center justify-center w-10 h-10 rounded-full transition ${
+            expanded
+              ? "bg-[#455d3b] text-white"
+              : "bg-[#455d3b]/10 text-[#455d3b]"
+          }`}
+        >
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-medium text-neutral-900">{title}</p>
+          <p className="text-xs text-neutral-500">{subtitle}</p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none">
+          {expanded ? "" : "›"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4">
+          <ul className="mb-3 space-y-1.5">
+            {steps.map((step, i) => (
+              <li key={i} className="flex gap-3 text-sm text-neutral-700">
+                <span className="text-[#455d3b] font-medium w-4">{i + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={onCta}
+            className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.99] transition"
+          >
+            {ctaLabel}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InviteShareScreen({ sessionId, onBack, onContinue }) {
+  const [copied, setCopied] = useState(false);
+  const shareUrl = sessionId
+    ? `${window.location.origin}/s/${sessionId}`
+    : "";
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Copy failed:", err);
+    }
+  }
+
+  async function shareLink() {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Join my session",
+          text: "Help me pick a place to eat",
+          url: shareUrl,
+        });
+      } catch (err) {
+        // user cancelled or share failed; no-op
+      }
+    } else {
+      copyLink();
+    }
+  }
+
+  return (
+    <div className="flex items-start justify-center p-4 pb-24">
+      <div className="w-full max-w-sm">
+        <div className="mb-5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm border border-neutral-100 text-neutral-600 shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Invite your friends
+          </h1>
+        </div>
+
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-4">
+          <p className="text-sm text-neutral-500 mb-2">Share this link</p>
+          <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-700 mb-3 break-all border border-neutral-100">
+            {shareUrl}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={copyLink}
+              className="rounded-2xl bg-white border border-neutral-200 py-3 font-medium text-neutral-700 active:scale-[0.98] transition"
+            >
+              {copied ? "Copied!" : "Copy link"}
+            </button>
+            <button
+              type="button"
+              onClick={shareLink}
+              className="rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition"
+            >
+              Share
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600 mb-4">
+          Your friends will swipe the same places as you. The session ends when everyone submits or time runs out.
+        </div>
+
+        <button
+          type="button"
+          onClick={onContinue}
+          className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
+        >
+          Start swiping
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SwipeActions({
+  mode,
+  likeCount,
+  onLike,
+  onPass,
+  onSoloSave,
+  onSoloSkip,
+  onSoloHide,
+  onDoneAndSend,
+}) {
+  const [soloMenuOpen, setSoloMenuOpen] = useState(false);
+
+  return (
+    <div className="fixed bottom-20 left-0 right-0 z-30 px-4">
+      <div className="w-full max-w-sm mx-auto">
+        {mode === "solo" ? (
+          <div className="flex gap-2 relative">
+            <button
+              type="button"
+              onClick={() => setSoloMenuOpen(true)}
+              aria-label="More options"
+              className="rounded-2xl bg-white border border-neutral-200 px-4 py-4 text-neutral-500 active:scale-[0.98] transition flex items-center justify-center shadow-md"
+            >
+              <MoreVertical size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={onSoloSkip}
+              className="flex-1 rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition shadow-md"
+            >
+              Next
+            </button>
+            <button
+              type="button"
+              onClick={onSoloSave}
+              className="flex-1 rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition shadow-md"
+            >
+              Add to list
+            </button>
+            {soloMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-[3400]"
+                  onClick={() => setSoloMenuOpen(false)}
+                />
+                <div className="absolute bottom-full left-0 mb-2 bg-white border border-neutral-200 rounded-xl shadow-lg z-[3500] overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSoloHide();
+                      setSoloMenuOpen(false);
+                    }}
+                    className="block px-5 py-3 text-red-700 font-medium hover:bg-neutral-50 whitespace-nowrap text-left"
+                  >
+                    Don't show this again
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={onPass}
+              className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition shadow-md"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <X size={18} /> Pass
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={onLike}
+              className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition shadow-md"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Heart size={18} /> Like
+              </span>
+            </button>
+          </div>
+        )}
+
+        {mode === "curated" && (
+          <div className="mt-2">
+            {likeCount < 15 ? (
+              <button
+                type="button"
+                onClick={onDoneAndSend}
+                disabled={likeCount === 0}
+                className="block w-full text-center text-sm py-2 px-4 rounded-full bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:text-neutral-300 disabled:border-neutral-200 disabled:cursor-not-allowed"
+              >
+                Done &amp; send ({likeCount})
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onDoneAndSend}
+                className={`w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-md ${
+                  likeCount >= 20 ? "animate-pulse" : ""
+                }`}
+              >
+                {likeCount < 20 && <span>✨</span>}
+                <span>Done &amp; send ({likeCount})</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MapResizer() {
   const map = useMap();
   useEffect(() => {
@@ -2381,16 +2891,7 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide }) {
   );
 }
 
-function VenueCard({
-  venue,
-  mode,
-  onLike,
-  onPass,
-  onSoloSave,
-  onSoloSkip,
-  onSoloHide,
-}) {
-  const [soloMenuOpen, setSoloMenuOpen] = useState(false);
+function VenueCard({ venue }) {
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
@@ -2401,73 +2902,6 @@ function VenueCard({
         <OpeningHours venue={venue} />
       </div>
       <OpenMapsButton url={getMapsUrl(venue)} />
-      {mode === "solo" ? (
-        <div className="mt-5 flex gap-2 relative">
-          <button
-            type="button"
-            onClick={() => setSoloMenuOpen(true)}
-            aria-label="More options"
-            className="rounded-2xl bg-white border border-neutral-200 px-4 py-4 text-neutral-500 active:scale-[0.98] transition flex items-center justify-center"
-          >
-            <MoreVertical size={18} />
-          </button>
-          <button
-            type="button"
-            onClick={onSoloSkip}
-            className="flex-1 rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
-          >
-            Next
-          </button>
-          <button
-            type="button"
-            onClick={onSoloSave}
-            className="flex-1 rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
-          >
-            Add to list
-          </button>
-          {soloMenuOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-[3400]"
-                onClick={() => setSoloMenuOpen(false)}
-              />
-              <div className="absolute bottom-full left-0 mb-2 bg-white border border-neutral-200 rounded-xl shadow-lg z-[3500] overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSoloHide();
-                    setSoloMenuOpen(false);
-                  }}
-                  className="block px-5 py-3 text-red-700 font-medium hover:bg-neutral-50 whitespace-nowrap text-left"
-                >
-                  Don't show this again
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={onPass}
-            className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition"
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              <X size={18} /> Pass
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={onLike}
-            className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition"
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              <Heart size={18} /> Like
-            </span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }
