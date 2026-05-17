@@ -113,7 +113,6 @@ function SignInScreen() {
     <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="mb-5">
-          <p className="text-sm text-neutral-500">Dinner picker</p>
           <h1 className="text-2xl font-semibold tracking-tight">
             Welcome
           </h1>
@@ -195,6 +194,8 @@ export default function RestaurantSwipeMVP() {
   const [guestLoading, setGuestLoading] = useState(true);
   const [guestHostProfile, setGuestHostProfile] = useState(null);
   const [joining, setJoining] = useState(false);
+  const [guestName, setGuestName] = useState("");
+  const [guestStage, setGuestStage] = useState("splash");
 
 useEffect(() => {
     // Parse window.location.pathname for /s/<uuid> — guest invite landing.
@@ -234,23 +235,27 @@ useEffect(() => {
   }, []);
 
   useEffect(() => {
-    if (!guestSessionData?.host_user_id) {
+    if (!guestSessionId || !guestSessionData?.host_user_id) {
       setGuestHostProfile(null);
       return;
     }
     let cancelled = false;
     supabase
-      .from("profiles")
-      .select("id, display_name, username")
-      .eq("id", guestSessionData.host_user_id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled) setGuestHostProfile(data || null);
+      .rpc("get_session_host_profile", { p_session_id: guestSessionId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch host profile:", error);
+          setGuestHostProfile(null);
+          return;
+        }
+        // RPC returns a table → array. Take the first row.
+        setGuestHostProfile(Array.isArray(data) ? data[0] || null : data || null);
       });
     return () => {
       cancelled = true;
     };
-  }, [guestSessionData?.host_user_id]);
+  }, [guestSessionId, guestSessionData?.host_user_id]);
 
  useEffect(() => {
     if (openNow) setSelectedTimes([]);
@@ -321,13 +326,58 @@ useEffect(() => {
   }, [session?.user?.id]);
 
   async function handleJoinSession() {
-    // B.4.3/B.4.4 will wire this up — anonymous auth + insert into
-    // session_participants + route to the guest swipe queue. For now,
-    // just flag that we got here so we can verify the button works.
+    const name = guestName.trim();
+    if (!name) return;
+    if (!guestSessionId) return;
+
     setJoining(true);
-    console.log("Join clicked for session:", guestSessionId);
-    // Stub: revert state after a beat so the button doesn't appear stuck.
-    setTimeout(() => setJoining(false), 800);
+
+    try {
+      // If we're not signed in (typical guest case), sign in anonymously.
+      // Returning users / the host visiting their own link skip this branch.
+      let userId = session?.user?.id;
+      if (!userId) {
+        const { data: anonData, error: anonError } =
+          await supabase.auth.signInAnonymously();
+        if (anonError) {
+          console.error("Anonymous sign-in failed:", anonError);
+          setJoining(false);
+          return;
+        }
+        userId = anonData?.user?.id;
+        if (!userId) {
+          console.error("Anonymous sign-in returned no user");
+          setJoining(false);
+          return;
+        }
+      }
+
+      // Insert participant row. ignoreDuplicates handles the case where
+      // the user has already joined this session (e.g. host opening their
+      // own link, or a guest refreshing the page).
+      const { error: joinError } = await supabase
+        .from("session_participants")
+        .upsert(
+          {
+            session_id: guestSessionId,
+            user_id: userId,
+            display_name: name,
+          },
+          { onConflict: "session_id,user_id", ignoreDuplicates: true }
+        );
+
+      if (joinError) {
+        console.error("Failed to join session:", joinError);
+        setJoining(false);
+        return;
+      }
+
+      setGuestStage("joined");
+    } catch (err) {
+      console.error("Join error:", err);
+    } finally {
+      setJoining(false);
+    }
   }
 
   function handleNotForMe() {
@@ -796,7 +846,6 @@ if (authLoading || guestLoading) {
       return (
         <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
           <div className="w-full max-w-sm text-center">
-            <p className="text-sm text-neutral-500">Dinner picker</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">
               Link's expired
             </h1>
@@ -840,12 +889,28 @@ if (authLoading || guestLoading) {
     const isClosed = guestSessionData.status === "closed";
     const isHostCurating = guestSessionData.status === "host_curating";
     const isOpen = guestSessionData.status === "open";
+    // Post-join stub — B.4.4 replaces this with the guest swipe queue.
+    if (guestStage === "joined") {
+      return (
+        <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm text-center">
+            <p className="text-sm text-neutral-500">You're in</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+              Welcome, {guestName.trim() || "friend"}
+            </h1>
+            <p className="mt-3 text-sm text-neutral-600">
+              The swipe queue lands in B.4.4. For now you can confirm your
+              row in Supabase Table Editor → session_participants.
+            </p>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
         <div className="w-full max-w-sm">
           <div className="text-center">
-            <p className="text-sm text-neutral-500">Dinner picker</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">
               {hostName} wants to pick dinner with you
             </h1>
@@ -890,14 +955,27 @@ if (authLoading || guestLoading) {
           </div>
 
           {isOpen && (
-            <button
-              type="button"
-              onClick={handleJoinSession}
-              disabled={joining}
-              className="mt-5 w-full rounded-full bg-[#111111] px-5 py-3 text-sm font-medium text-white disabled:opacity-60"
-            >
-              {joining ? "Joining..." : "Join"}
-            </button>
+            <>
+              <label className="mt-5 block text-xs font-medium uppercase tracking-wide text-neutral-500">
+                What should we call you?
+              </label>
+              <input
+                type="text"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="Your name"
+                maxLength={40}
+                className="mt-2 w-full rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-sm focus:border-neutral-400 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleJoinSession}
+                disabled={joining || !guestName.trim()}
+                className="mt-3 w-full rounded-full bg-[#111111] px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
+              >
+                {joining ? "Joining..." : "Join"}
+              </button>
+            </>
           )}
           {isHostCurating && (
             <button
