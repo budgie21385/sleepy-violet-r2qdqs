@@ -196,6 +196,10 @@ export default function RestaurantSwipeMVP() {
   const [joining, setJoining] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [guestStage, setGuestStage] = useState("splash");
+  const [guestShortlistIds, setGuestShortlistIds] = useState([]);
+  const [guestLikes, setGuestLikes] = useState([]);
+  const [guestPasses, setGuestPasses] = useState([]);
+  const [guestCardIndex, setGuestCardIndex] = useState(0);
 
 useEffect(() => {
     // Parse window.location.pathname for /s/<uuid> — guest invite landing.
@@ -256,6 +260,39 @@ useEffect(() => {
       cancelled = true;
     };
   }, [guestSessionId, guestSessionData?.host_user_id]);
+
+  useEffect(() => {
+    if (!isGuest || !guestSessionId) {
+      setGuestShortlistIds([]);
+      return;
+    }
+    if (guestSessionData?.mode !== "curated") {
+      // Concurrent sessions don't have a shortlist — guests swipe the
+      // session's captured filter set instead.
+      setGuestShortlistIds([]);
+      return;
+    }
+    if (guestSessionData?.status !== "open") {
+      // RPC returns nothing until host hits "Done & send".
+      setGuestShortlistIds([]);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .rpc("get_session_shortlist", { p_session_id: guestSessionId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch shortlist:", error);
+          setGuestShortlistIds([]);
+          return;
+        }
+        setGuestShortlistIds((data || []).map((r) => r.venue_id));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, guestSessionId, guestSessionData?.mode, guestSessionData?.status]);
 
  useEffect(() => {
     if (openNow) setSelectedTimes([]);
@@ -384,6 +421,30 @@ useEffect(() => {
     // Send them to the root — they can sign in and start their own session
     // if they want, or just close the tab.
     window.location.assign("/");
+  }
+
+  function handleGuestLike() {
+    const v = guestQueue[guestCardIndex];
+    if (!v) return;
+    setGuestLikes((prev) => [...prev, v.id]);
+    setGuestCardIndex((i) => i + 1);
+  }
+
+  function handleGuestPass() {
+    const v = guestQueue[guestCardIndex];
+    if (!v) return;
+    setGuestPasses((prev) => [...prev, v.id]);
+    setGuestCardIndex((i) => i + 1);
+  }
+
+  function handleGuestSubmit() {
+    // B.4.4d wires this up — for now just log + flip stage so we can
+    // verify the flow visually.
+    console.log("Submit clicked:", {
+      likes: guestLikes,
+      passes: guestPasses,
+    });
+    setGuestStage("submitted");
   }
 
   async function signOut() {
@@ -691,6 +752,53 @@ loadAreas();
     return filteredVenues;
   }, [filteredVenues, matchSource, matchMode, savedVenueIds]);
 
+  const guestQueue = useMemo(() => {
+    if (!isGuest || !guestSessionData) return [];
+    if (!venues.length) return [];
+
+    // Curated: intersect with host's shortlist.
+    if (guestSessionData.mode === "curated") {
+      if (!guestShortlistIds.length) return [];
+      const shortlistSet = new Set(guestShortlistIds);
+      return venues.filter((v) => shortlistSet.has(v.id));
+    }
+
+    // Concurrent: apply the host's captured filter set.
+    const filters = guestSessionData.filters || {};
+    const todayKey = getTodayDayKey();
+    const sessionAreas = filters.selectedAreaIds && areas.length
+      ? areas.filter((a) => filters.selectedAreaIds.includes(a.id))
+      : [];
+    const sessionRadius = typeof filters.radiusKm === "number" ? filters.radiusKm : 5;
+
+    return venues.filter((venue) => {
+      if (!venueMatchesAreas(venue, sessionAreas, sessionRadius)) return false;
+
+      if (filters.selectedCuisines && filters.selectedCuisines.length > 0) {
+        if (!filters.selectedCuisines.includes(venue.cuisine)) return false;
+      }
+
+      if (filters.openNow && !isVenueOpenNow(venue)) return false;
+
+      if (filters.selectedTimes && filters.selectedTimes.length > 0) {
+        const anyBand = filters.selectedTimes.some((label) => {
+          const band = TIME_BANDS.find((b) => b.key === label);
+          return band && venueOpenInBand(venue, todayKey, band);
+        });
+        if (!anyBand) return false;
+      }
+
+      if (filters.selectedVibes && filters.selectedVibes.length > 0) {
+        const anyVibe = filters.selectedVibes.some((vibe) =>
+          venueMatchesVibe(venue, vibe, todayKey)
+        );
+        if (!anyVibe) return false;
+      }
+
+      return true;
+    });
+  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds]);
+
   const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
   );
@@ -755,7 +863,7 @@ loadAreas();
           source_type: matchSource === "my_list" ? "list" : "filters",
           filters: sessionFilters,
           list_id: null,
-          target_matches: null,
+          target_matches: matchLimit || null,
           event_at: eventDate ? eventDate.toISOString() : null,
           expires_at: expiresAt.toISOString(),
           status: matchMode === "curated" ? "host_curating" : "open",
@@ -891,16 +999,128 @@ if (authLoading || guestLoading) {
     const isOpen = guestSessionData.status === "open";
     // Post-join stub — B.4.4 replaces this with the guest swipe queue.
     if (guestStage === "joined") {
+      const guestCurrentVenue = guestQueue[guestCardIndex];
+      const guestAtEnd = guestCardIndex >= guestQueue.length;
+      const guestSwipedCount = guestLikes.length + guestPasses.length;
+      const queueEmpty = guestQueue.length === 0;
+      const target = guestSessionData.target_matches || 0;
+      const isCurated = guestSessionData.mode === "curated";
+      // Curated: every guest-like IS a match (shortlist = host's likes).
+      // Concurrent: "match" requires mutual likes, only known at
+      // reconciliation (B.5). So the target trigger only applies to
+      // curated — concurrent guests just keep swiping until they hit
+      // Submit themselves or reach end of queue.
+      const hitTarget = isCurated && target > 0 && guestLikes.length >= target;
+      const showAllDone = guestAtEnd || hitTarget || queueEmpty;
+
+      return (
+        <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-start justify-center p-4 pb-40">
+          <div className="w-full max-w-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-neutral-500 truncate">
+                  {guestSessionData.name || "Session"}
+                </p>
+                <h1 className="text-lg font-semibold tracking-tight truncate">
+                  Welcome, {guestName.trim() || "friend"}
+                </h1>
+              </div>
+              {!queueEmpty && !showAllDone && (
+                <div className="text-xs text-neutral-500 shrink-0">
+                  {isCurated
+                    ? `${guestLikes.length}${target > 0 ? ` / ${target}` : ""} matched`
+                    : `${guestLikes.length} like${guestLikes.length === 1 ? "" : "s"}`}
+                </div>
+              )}
+            </div>
+
+            {queueEmpty ? (
+              <div className="rounded-2xl bg-white shadow-sm border border-neutral-100 p-6 text-center">
+                <h2 className="text-lg font-semibold tracking-tight">Nothing to swipe</h2>
+                <p className="mt-2 text-sm text-neutral-600">
+                  {hostName} didn't include any places. You can still submit empty.
+                </p>
+              </div>
+            ) : showAllDone ? (
+              <div className="rounded-2xl bg-white shadow-sm border border-neutral-100 p-6 text-center">
+                <h2 className="text-lg font-semibold tracking-tight">All done!</h2>
+                <p className="mt-2 text-sm text-neutral-600">
+                  {hitTarget && !guestAtEnd
+                    ? `You've matched ${guestLikes.length}. Submit now or keep swiping if you want more options.`
+                    : isCurated
+                    ? "Submit your picks and we'll show you what you matched on."
+                    : `Submit your picks — we'll show you what you and ${hostName} both liked.`}
+                </p>
+                <p className="mt-3 text-xs text-neutral-500">
+                  {guestLikes.length} like{guestLikes.length === 1 ? "" : "s"}, {guestPasses.length} pass{guestPasses.length === 1 ? "" : "es"}
+                </p>
+              </div>
+            ) : guestCurrentVenue ? (
+              <VenueCard venue={guestCurrentVenue} />
+            ) : null}
+          </div>
+
+          {/* Sticky action bar at bottom */}
+          <div className="fixed bottom-0 left-0 right-0 z-30 px-4 pb-6 pt-4 bg-gradient-to-t from-[#fdf6f0] via-[#fdf6f0] to-transparent">
+            <div className="w-full max-w-sm mx-auto">
+              {!showAllDone && guestCurrentVenue && (
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={handleGuestPass}
+                    className="rounded-2xl bg-neutral-100 py-4 font-medium text-neutral-700 active:scale-[0.98] transition shadow-md"
+                  >
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <X size={18} /> Pass
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGuestLike}
+                    className="rounded-2xl bg-[#edf2eb] py-4 font-medium text-[#455d3b] active:scale-[0.98] transition shadow-md"
+                  >
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Heart size={18} /> Like
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {!showAllDone && guestSwipedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleGuestSubmit}
+                  className="mt-2 block w-full text-center text-sm py-2 px-4 rounded-full bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50"
+                >
+                  Submit picks ({guestLikes.length})
+                </button>
+              )}
+
+              {showAllDone && (
+                <button
+                  type="button"
+                  onClick={handleGuestSubmit}
+                  className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                >
+                  Submit my picks
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (guestStage === "submitted") {
       return (
         <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
           <div className="w-full max-w-sm text-center">
-            <p className="text-sm text-neutral-500">You're in</p>
+            <p className="text-sm text-neutral-500">Submitted (B.4.4c stub)</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-              Welcome, {guestName.trim() || "friend"}
+              Thanks, {guestName.trim() || "friend"}
             </h1>
             <p className="mt-3 text-sm text-neutral-600">
-              The swipe queue lands in B.4.4. For now you can confirm your
-              row in Supabase Table Editor → session_participants.
+              You liked {guestLikes.length} place{guestLikes.length === 1 ? "" : "s"}. B.4.4d will actually persist this and show results.
             </p>
           </div>
         </div>
