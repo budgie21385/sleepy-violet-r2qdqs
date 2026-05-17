@@ -189,6 +189,68 @@ export default function RestaurantSwipeMVP() {
   const [profile, setProfile] = useState(null);
   const [savedVenueIds, setSavedVenueIds] = useState(() => new Set());
   const [hiddenVenueIds, setHiddenVenueIds] = useState(() => new Set());
+  const [isGuest, setIsGuest] = useState(false);
+  const [guestSessionId, setGuestSessionId] = useState(null);
+  const [guestSessionData, setGuestSessionData] = useState(null);
+  const [guestLoading, setGuestLoading] = useState(true);
+  const [guestHostProfile, setGuestHostProfile] = useState(null);
+  const [joining, setJoining] = useState(false);
+
+useEffect(() => {
+    // Parse window.location.pathname for /s/<uuid> — guest invite landing.
+    // UUID v4 pattern. If no match, this is a normal app load.
+    const path = window.location.pathname;
+    const match = path.match(
+      /^\/s\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+    );
+
+    if (!match) {
+      setGuestLoading(false);
+      return;
+    }
+
+    const sessionId = match[1];
+    setIsGuest(true);
+    setGuestSessionId(sessionId);
+
+    let cancelled = false;
+    supabase
+      .from("match_sessions")
+      .select("id, host_user_id, mode, source_type, filters, target_matches, event_at, expires_at, status, name, created_at")
+      .eq("id", sessionId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch guest session:", error);
+        }
+        setGuestSessionData(data || null);
+        setGuestLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!guestSessionData?.host_user_id) {
+      setGuestHostProfile(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("profiles")
+      .select("id, display_name, username")
+      .eq("id", guestSessionData.host_user_id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setGuestHostProfile(data || null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [guestSessionData?.host_user_id]);
 
  useEffect(() => {
     if (openNow) setSelectedTimes([]);
@@ -257,6 +319,22 @@ export default function RestaurantSwipeMVP() {
       cancelled = true;
     };
   }, [session?.user?.id]);
+
+  async function handleJoinSession() {
+    // B.4.3/B.4.4 will wire this up — anonymous auth + insert into
+    // session_participants + route to the guest swipe queue. For now,
+    // just flag that we got here so we can verify the button works.
+    setJoining(true);
+    console.log("Join clicked for session:", guestSessionId);
+    // Stub: revert state after a beat so the button doesn't appear stuck.
+    setTimeout(() => setJoining(false), 800);
+  }
+
+  function handleNotForMe() {
+    // Send them to the root — they can sign in and start their own session
+    // if they want, or just close the tab.
+    window.location.assign("/");
+  }
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -704,10 +782,141 @@ loadAreas();
     setPicked(randomMatch);
   }
  
-if (authLoading) {
+if (authLoading || guestLoading) {
     return (
       <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
         Loading...
+      </div>
+    );
+  }
+
+  if (isGuest) {
+    // Session not found at all — bad/expired link.
+    if (!guestSessionData) {
+      return (
+        <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm text-center">
+            <p className="text-sm text-neutral-500">Dinner picker</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+              Link's expired
+            </h1>
+            <p className="mt-3 text-sm text-neutral-600">
+              This session link doesn't exist anymore — it may have ended or been deleted.
+            </p>
+            <button
+              type="button"
+              onClick={handleNotForMe}
+              className="mt-6 inline-flex items-center justify-center rounded-full bg-[#111111] px-5 py-2.5 text-sm font-medium text-white"
+            >
+              Start your own
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Format the host's display name.
+    const hostName =
+      guestHostProfile?.display_name ||
+      (guestHostProfile?.username ? `@${guestHostProfile.username}` : "Someone");
+
+    // Format the event timing.
+    let whenLabel = "Right now";
+    if (guestSessionData.mode === "curated" && guestSessionData.event_at) {
+      try {
+        const eventDate = new Date(guestSessionData.event_at);
+        whenLabel = new Intl.DateTimeFormat(undefined, {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        }).format(eventDate);
+      } catch {
+        whenLabel = "Later";
+      }
+    } else if (guestSessionData.mode === "curated") {
+      whenLabel = "Later";
+    }
+
+    const isClosed = guestSessionData.status === "closed";
+    const isHostCurating = guestSessionData.status === "host_curating";
+    const isOpen = guestSessionData.status === "open";
+
+    return (
+      <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="text-center">
+            <p className="text-sm text-neutral-500">Dinner picker</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+              {hostName} wants to pick dinner with you
+            </h1>
+          </div>
+
+          <div className="mt-6 rounded-2xl bg-white shadow-sm border border-neutral-100 p-5">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-neutral-500">
+              {guestSessionData.mode === "concurrent" ? (
+                <>
+                  <Zap size={14} />
+                  Right now
+                </>
+              ) : (
+                <>
+                  <Calendar size={14} />
+                  Later
+                </>
+              )}
+            </div>
+            <div className="mt-2 text-lg font-medium">
+              {guestSessionData.name || whenLabel}
+            </div>
+            {guestSessionData.name && whenLabel !== guestSessionData.name && (
+              <div className="text-sm text-neutral-500 mt-0.5">{whenLabel}</div>
+            )}
+
+            {isOpen && (
+              <p className="mt-4 text-sm text-neutral-600">
+                You'll swipe through some spots and we'll surface what you both like.
+              </p>
+            )}
+            {isHostCurating && (
+              <p className="mt-4 text-sm text-neutral-600">
+                {hostName} is still picking the shortlist. Check back in a few minutes.
+              </p>
+            )}
+            {isClosed && (
+              <p className="mt-4 text-sm text-neutral-600">
+                This session has ended.
+              </p>
+            )}
+          </div>
+
+          {isOpen && (
+            <button
+              type="button"
+              onClick={handleJoinSession}
+              disabled={joining}
+              className="mt-5 w-full rounded-full bg-[#111111] px-5 py-3 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {joining ? "Joining..." : "Join"}
+            </button>
+          )}
+          {isHostCurating && (
+            <button
+              type="button"
+              disabled
+              className="mt-5 w-full rounded-full bg-neutral-200 px-5 py-3 text-sm font-medium text-neutral-500"
+            >
+              Waiting for {hostName}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleNotForMe}
+            className="mt-3 w-full text-center text-sm text-neutral-500 underline underline-offset-2"
+          >
+            This isn't for me
+          </button>
+        </div>
       </div>
     );
   }
