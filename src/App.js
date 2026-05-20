@@ -8,10 +8,41 @@ import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
+import { QRCodeSVG } from "qrcode.react";
+import { Turnstile } from "@marsidev/react-turnstile";
+
+// Cloudflare Turnstile site key (public — safe to commit). Bot/captcha
+// gate on the three Supabase Auth entry points: host magic-link signin,
+// anonymous guest signin, and the anon→email upgrade. The matching
+// secret key is held in Supabase Auth → Captcha Protection. If captcha
+// is disabled server-side the token is simply ignored, so this widget
+// is safe to render before the Supabase side is enabled.
+const TURNSTILE_SITE_KEY = "0x4AAAAAADTF1P7KXWBPldrU";
  
 const ALL = "All";
 const MATCH_OPTIONS = [1, 2, 3, 4];
 const RADIUS_OPTIONS = [1, 3, 5, 10];
+
+// 2-4 because 1 is solo (no session needed) and >4 stops being playful.
+// If you change this, update the schema CHECK / validation too.
+const PARTICIPANT_OPTIONS = [2, 3, 4];
+
+// Time-limit options per mode, in minutes. Used to compute the session's
+// expires_at when it's created. "Right now" is short by design — get to a
+// decision in the next 10 min or two. "Later" is generous — host curates,
+// guests can swipe at their own pace over hours or days.
+const TIME_LIMIT_OPTIONS_CONCURRENT = [
+  { label: "10 min", minutes: 10 },
+  { label: "30 min", minutes: 30 },
+  { label: "1 hour", minutes: 60 },
+  { label: "2 hours", minutes: 120 },
+];
+const TIME_LIMIT_OPTIONS_CURATED = [
+  { label: "6 hours", minutes: 60 * 6 },
+  { label: "24 hours", minutes: 60 * 24 },
+  { label: "3 days", minutes: 60 * 24 * 3 },
+  { label: "7 days", minutes: 60 * 24 * 7 },
+];
  
 const DAY_KEYS = [
   "sunday",
@@ -84,13 +115,19 @@ function createEmojiIcon(emoji) {
 }
  
 function SignInScreen() {
+  // "landing" = brand + tagline + Get started CTA
+  // "email"   = magic-link email form
+  const [view, setView] = useState("landing");
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState("");
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const turnstileRef = useRef(null);
 
   async function sendMagicLink(e) {
     e.preventDefault();
     if (!email.trim()) return;
+    if (!captchaToken) return;
     setSending(true);
     setMessage("");
 
@@ -98,9 +135,13 @@ function SignInScreen() {
       email: email.trim(),
       options: {
         emailRedirectTo: window.location.origin,
+        captchaToken,
       },
     });
 
+    // Turnstile tokens are single-use; reset for any retry.
+    turnstileRef.current?.reset();
+    setCaptchaToken(null);
     setSending(false);
     if (error) {
       setMessage("Couldn't send the link. " + error.message);
@@ -109,33 +150,76 @@ function SignInScreen() {
     }
   }
 
+  if (view === "landing") {
+    return (
+      <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-6">
+        <div className="w-full max-w-sm text-center flex flex-col items-center">
+          {/* Logo lives at public/flanit-logo.svg and is served as a
+              static asset by the React app. */}
+          <img
+            src="/flanit-logo.svg"
+            alt="Flanit"
+            className="w-56 h-auto mb-10"
+          />
+          <h1 className="text-3xl font-semibold tracking-tight leading-tight max-w-[18rem]">
+            A place to experience your city with friends.
+          </h1>
+          <button
+            type="button"
+            onClick={() => setView("email")}
+            className="mt-10 inline-flex items-center justify-center gap-2 rounded-full bg-[#455d3b] px-7 py-3.5 text-base font-medium text-white active:scale-[0.98] transition shadow-sm"
+          >
+            Get started →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // view === "email"
   return (
     <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="mb-5">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome
-          </h1>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setView("landing");
+            setMessage("");
+          }}
+          className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600 hover:text-neutral-900"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
-          <form onSubmit={sendMagicLink} className="space-y-4">
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-neutral-700">
-                Sign in with email
-              </span>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                disabled={sending}
-                required
-                className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
+          <h2 className="text-xl font-semibold tracking-tight mb-2">
+            Sign in
+          </h2>
+          <p className="text-sm text-neutral-600 mb-4">
+            Pop in your email and we'll send you a sign-in link.
+          </p>
+          <form onSubmit={sendMagicLink} className="space-y-3">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              disabled={sending}
+              required
+              className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
+            />
+            <div className="flex justify-center">
+              <Turnstile
+                ref={turnstileRef}
+                siteKey={TURNSTILE_SITE_KEY}
+                onSuccess={setCaptchaToken}
+                onExpire={() => setCaptchaToken(null)}
+                onError={() => setCaptchaToken(null)}
+                options={{ theme: "light" }}
               />
-            </label>
+            </div>
             <button
               type="submit"
-              disabled={sending || !email.trim()}
+              disabled={sending || !email.trim() || !captchaToken}
               className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
             >
               {sending ? "Sending..." : "Send sign-in link"}
@@ -144,9 +228,6 @@ function SignInScreen() {
               <p className="text-sm text-neutral-700 text-center">{message}</p>
             )}
           </form>
-          <p className="mt-4 text-xs text-neutral-500 text-center">
-            We'll email you a link. Click it to sign in.
-          </p>
         </div>
       </div>
     </div>
@@ -182,6 +263,10 @@ export default function RestaurantSwipeMVP() {
   const [selectedTimes, setSelectedTimes] = useState([]);
   const [selectedVibes, setSelectedVibes] = useState([]);
   const [matchLimit, setMatchLimit] = useState(3);
+  // Multi-mode session config. Defaults: 2 participants; 10 min for
+  // concurrent ("Right now"), 24h for curated ("Later").
+  const [participants, setParticipants] = useState(2);
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState(10);
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
@@ -200,6 +285,30 @@ export default function RestaurantSwipeMVP() {
   const [guestLikes, setGuestLikes] = useState([]);
   const [guestPasses, setGuestPasses] = useState([]);
   const [guestCardIndex, setGuestCardIndex] = useState(0);
+  // Concurrent-mode reconciliation. sessionMatches is the raw RPC payload
+  // (one row per venue with like_count + liker_user_ids); sessionParticipants
+  // gives us a uid -> display_name map for labelling matches "You + Sarah".
+  const [sessionMatches, setSessionMatches] = useState([]);
+  const [sessionParticipants, setSessionParticipants] = useState([]);
+  // Guest sign-up flow (anon -> email). guestSignupEmail is the field value,
+  // guestSignupSent flips to true after updateUser succeeds, guestSignupError
+  // surfaces any updateUser error inline.
+  const [guestSignupEmail, setGuestSignupEmail] = useState("");
+  const [guestSignupSent, setGuestSignupSent] = useState(false);
+  const [guestSignupError, setGuestSignupError] = useState("");
+  const [guestSigningUp, setGuestSigningUp] = useState(false);
+  // Dev-only override so we can visually verify the matches-reveal UI on
+  // localhost without going through the real magic-link confirmation flow
+  // (Resend's dev sender can only deliver to verified addresses).
+  const [devRevealOverride, setDevRevealOverride] = useState(false);
+  // Cloudflare Turnstile tokens for the two anon-side Supabase Auth calls:
+  // guestCaptchaToken gates signInAnonymously on the splash; guestSignupCaptchaToken
+  // gates the updateUser email-upgrade on the end-of-game signup form.
+  // Tokens are single-use — reset the widget after each submission.
+  const [guestCaptchaToken, setGuestCaptchaToken] = useState(null);
+  const [guestSignupCaptchaToken, setGuestSignupCaptchaToken] = useState(null);
+  const guestCaptchaRef = useRef(null);
+  const guestSignupCaptchaRef = useRef(null);
 
 useEffect(() => {
     // Parse window.location.pathname for /s/<uuid> — guest invite landing.
@@ -294,9 +403,236 @@ useEffect(() => {
     };
   }, [isGuest, guestSessionId, guestSessionData?.mode, guestSessionData?.status]);
 
+  // Fetch session_participants once per concurrent session so the matches
+  // screen can label each match with display_names. Re-fetches when a new
+  // participant joins (handled by interval polling below).
+  useEffect(() => {
+    const sessionId = isGuest ? guestSessionId : currentSessionId;
+    const mode = isGuest ? guestSessionData?.mode : matchMode;
+    if (!sessionId || mode !== "concurrent") {
+      setSessionParticipants([]);
+      return;
+    }
+    let cancelled = false;
+    async function fetchParticipants() {
+      const { data, error } = await supabase
+        .from("session_participants")
+        .select("user_id, display_name")
+        .eq("session_id", sessionId);
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch participants:", error);
+        return;
+      }
+      setSessionParticipants(data || []);
+    }
+    fetchParticipants();
+    // Refresh every 10s so newly-joined participants get labels.
+    const interval = setInterval(fetchParticipants, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isGuest, guestSessionId, currentSessionId, guestSessionData?.mode, matchMode]);
+
+  // Poll get_session_matches every 3s so both host and guest see the match
+  // count climb live. Stays active on the end-of-game screens too so late
+  // matches from a still-swiping party surface for the party that already
+  // finished. Stops when the user navigates away (Done, tab change, etc.).
+  //
+  // Modes:
+  // - Concurrent: host polls on swipe + matches; guest polls on joined +
+  //   submitted (both parties are writing per-swipe).
+  // - Curated: host polls on invite_share + matches (host's likes were
+  //   batched at Done & Send, guest writes per-swipe); guest does NOT poll
+  //   during swipe (every guest-like is a match by construction so the
+  //   counter uses guestLikes.length directly). Guest still gets a one-shot
+  //   refetch on submitted entry.
+  useEffect(() => {
+    const sessionId = isGuest ? guestSessionId : currentSessionId;
+    const mode = isGuest ? guestSessionData?.mode : matchMode;
+    let isOnLiveScreen = false;
+    if (isGuest) {
+      // Guest polls only in concurrent (curated has no need mid-flow).
+      isOnLiveScreen =
+        mode === "concurrent" &&
+        (guestStage === "joined" || guestStage === "submitted");
+    } else if (mode === "concurrent") {
+      isOnLiveScreen = screen === "swipe" || screen === "matches";
+    } else if (mode === "curated") {
+      isOnLiveScreen = screen === "invite_share" || screen === "matches";
+    }
+    if (!sessionId || !isOnLiveScreen) {
+      return;
+    }
+    let cancelled = false;
+    async function fetchMatches() {
+      const { data, error } = await supabase.rpc("get_session_matches", {
+        p_session_id: sessionId,
+      });
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch session matches:", error);
+        return;
+      }
+      setSessionMatches(data || []);
+    }
+    fetchMatches();
+    const interval = setInterval(fetchMatches, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    isGuest,
+    guestSessionId,
+    currentSessionId,
+    guestSessionData?.mode,
+    matchMode,
+    guestStage,
+    screen,
+  ]);
+
+  // Game-end trigger for the host. Concurrent: flip from swipe → matches
+  // when target hit. Curated: flip from invite_share → matches when target
+  // hit (guests writing per-swipe land matches on the host's invite_share
+  // screen, and once reconciliation crosses target_matches we navigate the
+  // host to the unified matches view).
+  useEffect(() => {
+    const target = matchLimit || 0;
+    if (!target || sessionMatches.length < target) return;
+    if (matchMode === "concurrent" && screen === "swipe") {
+      setScreen("matches");
+    } else if (matchMode === "curated" && screen === "invite_share") {
+      setScreen("matches");
+    }
+  }, [matchMode, screen, matchLimit, sessionMatches.length]);
+
+  // Refetch reconciliation when the guest hits the submitted screen. Two
+  // reasons: (1) curated guests don't get live polling so this is their
+  // only fetch; (2) concurrent guests had polling but their last polled
+  // snapshot could be stale relative to the host's by up to ~3 seconds
+  // (their poll fired before the host's most-recent likes were committed).
+  // Without this refetch the host and guest can disagree on the final
+  // match list.
+  useEffect(() => {
+    if (!isGuest) return;
+    if (guestStage !== "submitted") return;
+    if (!guestSessionId) return;
+    let cancelled = false;
+    supabase
+      .rpc("get_session_matches", { p_session_id: guestSessionId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to refetch guest matches:", error);
+          return;
+        }
+        setSessionMatches(data || []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, guestStage, guestSessionId]);
+
+  // Same refetch on the host side when they transition to the matches
+  // screen — applies to both concurrent (last polled snapshot could be a
+  // few seconds stale) and curated (host wasn't polling continuously, so
+  // a fresh read on entry catches any guest swipes that landed between
+  // the last poll and the game-end flip).
+  useEffect(() => {
+    if (matchMode !== "concurrent" && matchMode !== "curated") return;
+    if (screen !== "matches") return;
+    if (!currentSessionId) return;
+    let cancelled = false;
+    supabase
+      .rpc("get_session_matches", { p_session_id: currentSessionId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to refetch host matches:", error);
+          return;
+        }
+        setSessionMatches(data || []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [matchMode, screen, currentSessionId]);
+
+  useEffect(() => {
+    if (!isGuest || guestStage !== "joined") return;
+    const target = guestSessionData?.target_matches || 0;
+    const mode = guestSessionData?.mode;
+    let shouldFlip = false;
+
+    if (mode === "concurrent") {
+      // Concurrent: reconciliation polling tells us when target is reached.
+      shouldFlip = target > 0 && sessionMatches.length >= target;
+    } else if (mode === "curated") {
+      // Curated: every guest-like is a mutual match by construction (the
+      // shortlist IS the host's likes). target hit, or end of shortlist.
+      const queueEmpty = guestQueue.length === 0 && guestCardIndex === 0;
+      const reachedEnd = guestQueue.length > 0 && guestCardIndex >= guestQueue.length;
+      shouldFlip =
+        (target > 0 && guestLikes.length >= target) ||
+        reachedEnd ||
+        queueEmpty;
+    }
+
+    if (shouldFlip) {
+      setGuestStage("submitted");
+      // Fire-and-forget — failure here doesn't block the end screen.
+      if (session?.user?.id && guestSessionId) {
+        supabase
+          .from("session_participants")
+          .update({ submitted_at: new Date().toISOString() })
+          .eq("session_id", guestSessionId)
+          .eq("user_id", session.user.id)
+          .then(({ error }) => {
+            if (error) console.error("Failed to set submitted_at:", error);
+          });
+      }
+    }
+    // NB: don't add `guestQueue.length` to deps — it's a useMemo declared
+    // later in the component (TDZ would throw on evaluation here). The
+    // body still reads guestQueue.length safely because the effect runs
+    // post-render, by which point guestQueue is initialized. guestLikes
+    // and sessionMatches changes drive re-runs frequently enough to catch
+    // the right transitions.
+  }, [
+    isGuest,
+    guestSessionData?.mode,
+    guestSessionData?.target_matches,
+    guestStage,
+    sessionMatches.length,
+    guestLikes.length,
+    guestCardIndex,
+    session?.user?.id,
+    guestSessionId,
+  ]);
+
  useEffect(() => {
     if (openNow) setSelectedTimes([]);
   }, [openNow]);
+
+  // When match mode changes:
+  //  - Snap timeLimitMinutes to a sensible default for the new mode
+  //    ("Right now" is short, "Later" is generous; user can override).
+  //  - Reset openNow to false. The When? toggle is hidden in multi modes
+  //    (Right Now = going now so "open now" is implicit; Later = going at
+  //    a future time so "open now" is irrelevant). Hidden state could
+  //    still leak through if it was true from a prior solo session, so
+  //    force-reset on mode change.
+  useEffect(() => {
+    if (matchMode === "concurrent") {
+      setTimeLimitMinutes(10);
+      setOpenNow(false);
+    } else if (matchMode === "curated") {
+      setTimeLimitMinutes(60 * 24);
+      setOpenNow(false);
+    }
+  }, [matchMode]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -373,9 +709,22 @@ useEffect(() => {
       // If we're not signed in (typical guest case), sign in anonymously.
       // Returning users / the host visiting their own link skip this branch.
       let userId = session?.user?.id;
+      let justSignedInAnon = false;
       if (!userId) {
+        // Guard: captcha is required for first-time anon signins. The button
+        // should already be disabled until the widget produces a token, but
+        // guard defensively in case state lags behind the click.
+        if (!guestCaptchaToken) {
+          setJoining(false);
+          return;
+        }
         const { data: anonData, error: anonError } =
-          await supabase.auth.signInAnonymously();
+          await supabase.auth.signInAnonymously({
+            options: { captchaToken: guestCaptchaToken },
+          });
+        // Tokens are single-use; reset for any retry path below.
+        guestCaptchaRef.current?.reset();
+        setGuestCaptchaToken(null);
         if (anonError) {
           console.error("Anonymous sign-in failed:", anonError);
           setJoining(false);
@@ -387,6 +736,7 @@ useEffect(() => {
           setJoining(false);
           return;
         }
+        justSignedInAnon = true;
       }
 
       // Insert participant row. ignoreDuplicates handles the case where
@@ -409,6 +759,23 @@ useEffect(() => {
         return;
       }
 
+      // Sync the typed name to profile.display_name for anonymous users so
+      // their Profile tab shows the real name instead of the "New user"
+      // default created by the handle_new_user trigger. Skipped for
+      // returning signed-in users (we don't want to clobber their existing
+      // display name).
+      const isAnon =
+        justSignedInAnon || session?.user?.is_anonymous === true;
+      if (isAnon) {
+        supabase
+          .from("profiles")
+          .update({ display_name: name })
+          .eq("id", userId)
+          .then(({ error }) => {
+            if (error) console.error("Failed to sync display_name:", error);
+          });
+      }
+
       setGuestStage("joined");
     } catch (err) {
       console.error("Join error:", err);
@@ -423,9 +790,36 @@ useEffect(() => {
     window.location.assign("/");
   }
 
+  // Fire-and-forget DB write for concurrent guest swipes. Mirrors the host's
+  // recordHostSwipe so reconciliation can see both sides immediately.
+  // Curated keeps batching at submit time (see handleGuestSubmit).
+  // The guest's anonymous-auth session populates `session` via
+  // onAuthStateChange after Join, so session.user.id is the guest's uid here.
+  function recordGuestSwipe(venueId, action) {
+    // Per-swipe persistence for both modes:
+    // - Concurrent: matches accumulate live as both sides swipe in parallel.
+    // - Curated: host's likes are already in session_swipes from Done & Send,
+    //   so every guest like is a mutual match. Per-swipe writes mean matches
+    //   surface live on the host's invite_share screen.
+    if (!guestSessionId || !session?.user?.id) return;
+    if (!guestSessionData?.mode) return;
+    supabase
+      .from("session_swipes")
+      .insert({
+        session_id: guestSessionId,
+        user_id: session.user.id,
+        venue_id: venueId,
+        action,
+      })
+      .then(({ error }) => {
+        if (error) console.error("Failed to record guest swipe:", error);
+      });
+  }
+
   function handleGuestLike() {
     const v = guestQueue[guestCardIndex];
     if (!v) return;
+    recordGuestSwipe(v.id, "like");
     setGuestLikes((prev) => [...prev, v.id]);
     setGuestCardIndex((i) => i + 1);
   }
@@ -433,18 +827,62 @@ useEffect(() => {
   function handleGuestPass() {
     const v = guestQueue[guestCardIndex];
     if (!v) return;
+    recordGuestSwipe(v.id, "pass");
     setGuestPasses((prev) => [...prev, v.id]);
     setGuestCardIndex((i) => i + 1);
   }
 
   function handleGuestSubmit() {
-    // B.4.4d wires this up — for now just log + flip stage so we can
-    // verify the flow visually.
-    console.log("Submit clicked:", {
-      likes: guestLikes,
-      passes: guestPasses,
-    });
+    // Curated guests use this to submit their picks. Concurrent doesn't —
+    // those flip to 'submitted' automatically via the game-end useEffect.
     setGuestStage("submitted");
+  }
+
+  // Drop a (now-authed) guest into the main app shell on the given tab.
+  // Cleans the /s/<session_id> URL so subsequent reloads don't re-route
+  // them back into the guest flow.
+  function goToMainApp(targetTab) {
+    setIsGuest(false);
+    setTab(targetTab);
+    if (typeof window !== "undefined" && window.history?.replaceState) {
+      window.history.replaceState(null, "", "/");
+    }
+  }
+
+  // Anon-to-email upgrade. Attaches an email to the anonymous user so they
+  // keep the same auth.uid (and stay linked to their session_swipes /
+  // participant row) after confirming via magic link. On confirmation the
+  // same-tab onAuthStateChange listener fires, session.user.is_anonymous
+  // flips to false, and the submitted-stage UI swaps to the reveal view.
+  async function handleGuestSignup(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const email = guestSignupEmail.trim();
+    if (!email) return;
+    if (!guestSignupCaptchaToken) return;
+    setGuestSigningUp(true);
+    setGuestSignupError("");
+    try {
+      const { error } = await supabase.auth.updateUser(
+        { email },
+        {
+          emailRedirectTo: window.location.href,
+          captchaToken: guestSignupCaptchaToken,
+        }
+      );
+      // Reset the widget regardless of outcome — tokens are single-use.
+      guestSignupCaptchaRef.current?.reset();
+      setGuestSignupCaptchaToken(null);
+      if (error) {
+        setGuestSignupError(error.message || "Couldn't send the link. Try again.");
+        return;
+      }
+      setGuestSignupSent(true);
+    } catch (err) {
+      console.error("Guest signup error:", err);
+      setGuestSignupError("Couldn't send the link. Try again.");
+    } finally {
+      setGuestSigningUp(false);
+    }
   }
 
   async function signOut() {
@@ -835,8 +1273,12 @@ loadAreas();
       (matchMode === "concurrent" || matchMode === "curated") &&
       session?.user?.id
     ) {
+      // expires_at is computed from the time-limit selector (mode default
+      // applied on mode-change useEffect; user can override on Filters).
       const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + 24);
+      expiresAt.setMinutes(
+        expiresAt.getMinutes() + (timeLimitMinutes || 60 * 24)
+      );
 
       const sessionFilters = {
         selectedAreaIds: selectedAreas.map((a) => a.id),
@@ -883,6 +1325,11 @@ loadAreas();
       await supabase.from("session_participants").insert({
         session_id: data.id,
         user_id: session.user.id,
+        // Write the host's display_name from their profile so the
+        // participants strip later shows "Mark" instead of falling back to
+        // "Guest". Old sessions where this is NULL are hydrated lazily in
+        // SessionsScreen via a profiles fallback fetch.
+        display_name: profile?.display_name || null,
       });
 
       console.log("Session created:", data.id);
@@ -905,9 +1352,30 @@ loadAreas();
     setCardIndex(nextIndex);
   }
  
+  // Fire-and-forget DB write for concurrent host swipes. Local state updates
+  // immediately so the UI doesn't wait on the network. Reconciliation + live
+  // match detection (replacing the legacy partnerLikes path below) lands in
+  // the get_session_matches polling step.
+  function recordHostSwipe(venueId, action) {
+    if (matchMode !== "concurrent") return;
+    if (!currentSessionId || !session?.user?.id) return;
+    supabase
+      .from("session_swipes")
+      .insert({
+        session_id: currentSessionId,
+        user_id: session.user.id,
+        venue_id: venueId,
+        action,
+      })
+      .then(({ error }) => {
+        if (error) console.error("Failed to record host swipe:", error);
+      });
+  }
+
   function likeVenue() {
     if (!currentVenue) return;
     const venueId = currentVenue.id;
+    recordHostSwipe(venueId, "like");
     const otherUserLikes = currentUser === "mark" ? partnerLikes : markLikes;
     const isMatch = otherUserLikes.includes(venueId);
     if (currentUser === "mark") {
@@ -923,10 +1391,11 @@ loadAreas();
       }
     }
   }
- 
+
   function passVenue() {
     if (!currentVenue) return;
     const venueId = currentVenue.id;
+    recordHostSwipe(venueId, "pass");
     if (currentUser === "mark") {
       setMarkPasses((prev) => [...prev, venueId]);
     } else {
@@ -935,6 +1404,20 @@ loadAreas();
   }
  
   function pickForUs() {
+    // Both concurrent and curated read from sessionMatches (the
+    // reconciliation RPC populates it for both modes). Solo would fall
+    // through to the legacy matches array, but solo doesn't hit the
+    // matches screen in practice.
+    if (matchMode === "concurrent" || matchMode === "curated") {
+      if (!sessionMatches.length) return;
+      const venueById = new Map(venues.map((v) => [v.id, v]));
+      const pool = sessionMatches
+        .map((m) => venueById.get(m.venue_id))
+        .filter(Boolean);
+      if (!pool.length) return;
+      setPicked(pool[Math.floor(Math.random() * pool.length)]);
+      return;
+    }
     if (!matches.length) return;
     const randomMatch = matches[Math.floor(Math.random() * matches.length)];
     setPicked(randomMatch);
@@ -1005,13 +1488,17 @@ if (authLoading || guestLoading) {
       const queueEmpty = guestQueue.length === 0;
       const target = guestSessionData.target_matches || 0;
       const isCurated = guestSessionData.mode === "curated";
+      const isConcurrent = guestSessionData.mode === "concurrent";
       // Curated: every guest-like IS a match (shortlist = host's likes).
-      // Concurrent: "match" requires mutual likes, only known at
-      // reconciliation (B.5). So the target trigger only applies to
-      // curated — concurrent guests just keep swiping until they hit
-      // Submit themselves or reach end of queue.
+      // Concurrent: "match" requires mutual likes, reconciliation polling
+      // populates sessionMatches and the game-end useEffect flips to the
+      // 'submitted' stage when target is reached. So in concurrent we never
+      // show "All done" mid-flow — we just keep swiping and let the trigger
+      // navigate. The only mid-flow end state is queueEmpty.
       const hitTarget = isCurated && target > 0 && guestLikes.length >= target;
-      const showAllDone = guestAtEnd || hitTarget || queueEmpty;
+      const showAllDone = isCurated
+        ? (guestAtEnd || hitTarget || queueEmpty)
+        : queueEmpty;
 
       return (
         <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-start justify-center p-4 pb-40">
@@ -1029,7 +1516,7 @@ if (authLoading || guestLoading) {
                 <div className="text-xs text-neutral-500 shrink-0">
                   {isCurated
                     ? `${guestLikes.length}${target > 0 ? ` / ${target}` : ""} matched`
-                    : `${guestLikes.length} like${guestLikes.length === 1 ? "" : "s"}`}
+                    : `${sessionMatches.length}${target > 0 ? ` / ${target}` : ""} matched`}
                 </div>
               )}
             </div>
@@ -1086,25 +1573,10 @@ if (authLoading || guestLoading) {
                 </div>
               )}
 
-              {!showAllDone && guestSwipedCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleGuestSubmit}
-                  className="mt-2 block w-full text-center text-sm py-2 px-4 rounded-full bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50"
-                >
-                  Submit picks ({guestLikes.length})
-                </button>
-              )}
-
-              {showAllDone && (
-                <button
-                  type="button"
-                  onClick={handleGuestSubmit}
-                  className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
-                >
-                  Submit my picks
-                </button>
-              )}
+              {/* No manual Submit in either mode now — the game ends
+                  automatically when target_matches is reached or the guest
+                  reaches end-of-queue. Auto-flip happens in the joined→
+                  submitted useEffect. */}
             </div>
           </div>
         </div>
@@ -1112,17 +1584,133 @@ if (authLoading || guestLoading) {
     }
 
     if (guestStage === "submitted") {
-      return (
-        <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
-          <div className="w-full max-w-sm text-center">
-            <p className="text-sm text-neutral-500">Submitted (B.4.4c stub)</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-              Thanks, {guestName.trim() || "friend"}
-            </h1>
-            <p className="mt-3 text-sm text-neutral-600">
-              You liked {guestLikes.length} place{guestLikes.length === 1 ? "" : "s"}. B.4.4d will actually persist this and show results.
-            </p>
+      // Match count comes from the reconciliation RPC (populated via live
+      // polling for concurrent, one-shot fetch for curated). Anonymous
+      // users see a sign-up gate first; signed-in (or dev-override) users
+      // see the same SessionResultsView layout as the host and the
+      // historical Your Sessions detail.
+      const matchCount = sessionMatches.length;
+      const isStillAnonymous = session?.user?.is_anonymous !== false;
+      const isDevHost =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1");
+      const showGate = isStillAnonymous && !devRevealOverride;
+
+      // ---------- Sign-up gate (anonymous users) ----------
+      if (showGate) {
+        return (
+          <div className="min-h-screen bg-[#fdf6f0] text-[#111111] p-4">
+            <div className="w-full max-w-sm mx-auto pt-10 pb-20">
+              <div className="text-center mb-6">
+                <p className="text-sm text-neutral-500">
+                  Game over, {guestName.trim() || "friend"}
+                </p>
+                <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+                  You matched on {matchCount} place{matchCount === 1 ? "" : "s"}
+                </h1>
+              </div>
+              <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+                {!guestSignupSent ? (
+                  <>
+                    <h2 className="text-lg font-semibold tracking-tight">
+                      Sign up to see them
+                    </h2>
+                    <p className="mt-2 text-sm text-neutral-600">
+                      We'll send a link to your email. Click it and your matches will appear here.
+                    </p>
+                    <form onSubmit={handleGuestSignup} className="mt-4 space-y-3">
+                      <input
+                        type="email"
+                        required
+                        placeholder="you@example.com"
+                        value={guestSignupEmail}
+                        onChange={(e) => {
+                          setGuestSignupEmail(e.target.value);
+                          if (guestSignupError) setGuestSignupError("");
+                        }}
+                        className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-base focus:outline-none focus:border-[#455d3b]"
+                      />
+                      <div className="flex justify-center">
+                        <Turnstile
+                          ref={guestSignupCaptchaRef}
+                          siteKey={TURNSTILE_SITE_KEY}
+                          onSuccess={setGuestSignupCaptchaToken}
+                          onExpire={() => setGuestSignupCaptchaToken(null)}
+                          onError={() => setGuestSignupCaptchaToken(null)}
+                          options={{ theme: "light" }}
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={
+                          guestSigningUp ||
+                          !guestSignupEmail.trim() ||
+                          !guestSignupCaptchaToken
+                        }
+                        className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {guestSigningUp ? "Sending..." : "Sign up to see matches"}
+                      </button>
+                      {guestSignupError && (
+                        <p className="text-sm text-red-600">{guestSignupError}</p>
+                      )}
+                    </form>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-lg font-semibold tracking-tight">
+                      Check your email
+                    </h2>
+                    <p className="mt-2 text-sm text-neutral-600">
+                      We sent a link to <span className="font-medium">{guestSignupEmail}</span>. Click it and your matches will show up here.
+                    </p>
+                    <p className="mt-3 text-xs text-neutral-500">
+                      Keep this tab open — your matches will reveal automatically once you confirm.
+                    </p>
+                  </>
+                )}
+              </div>
+              {isDevHost && (
+                <button
+                  type="button"
+                  onClick={() => setDevRevealOverride(true)}
+                  className="mt-3 block w-full text-center text-xs py-2 px-3 rounded-full bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100"
+                >
+                  Reveal anyway (dev only · localhost)
+                </button>
+              )}
+            </div>
           </div>
+        );
+      }
+
+      // ---------- Revealed view (signed-in or dev-overridden) ----------
+      return (
+        <div className="fixed inset-0 bg-[#fdf6f0] text-[#111111] flex flex-col pb-16">
+          <div className="bg-white border-b border-neutral-100 px-4 py-5 text-center">
+            <p className="text-sm text-neutral-500">
+              Game over, {guestName.trim() || "friend"}
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+              {matchCount === 0
+                ? "No mutual matches"
+                : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
+            </h1>
+          </div>
+          <SessionResultsView
+            participants={sessionParticipants}
+            sessionMatches={sessionMatches}
+            myLikedIds={guestLikes}
+            venues={venues}
+            userId={session?.user?.id}
+            savedIds={savedVenueIds}
+            onSave={saveVenue}
+            onUnsave={unsaveVenue}
+            onHide={hideVenue}
+            showConfetti={matchCount > 0}
+          />
+          <BottomTabBar tab={null} setTab={goToMainApp} />
         </div>
       );
     }
@@ -1187,10 +1775,28 @@ if (authLoading || guestLoading) {
                 maxLength={40}
                 className="mt-2 w-full rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-sm focus:border-neutral-400 focus:outline-none"
               />
+              {/* Captcha only required for first-time anon signins. Returning
+                  signed-in users (the host visiting their own link) skip it. */}
+              {!session?.user?.id && (
+                <div className="mt-3 flex justify-center">
+                  <Turnstile
+                    ref={guestCaptchaRef}
+                    siteKey={TURNSTILE_SITE_KEY}
+                    onSuccess={setGuestCaptchaToken}
+                    onExpire={() => setGuestCaptchaToken(null)}
+                    onError={() => setGuestCaptchaToken(null)}
+                    options={{ theme: "light" }}
+                  />
+                </div>
+              )}
               <button
                 type="button"
                 onClick={handleJoinSession}
-                disabled={joining || !guestName.trim()}
+                disabled={
+                  joining ||
+                  !guestName.trim() ||
+                  (!session?.user?.id && !guestCaptchaToken)
+                }
                 className="mt-3 w-full rounded-full bg-[#111111] px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
               >
                 {joining ? "Joining..." : "Join"}
@@ -1338,7 +1944,11 @@ if (authLoading || guestLoading) {
                 expandedRegions={expandedRegions}
                 setExpandedRegions={setExpandedRegions}
               />
-              <OpenNowToggle openNow={openNow} setOpenNow={setOpenNow} />
+              {/* Solo only — in multi modes "open now" is either implicit
+                  (Right Now) or irrelevant (Later). */}
+              {matchMode === "solo" && (
+                <OpenNowToggle openNow={openNow} setOpenNow={setOpenNow} />
+              )}
             {!openNow && availableTimes.length > 0 && (
                 <MultiSelectChips
                   label="Time of day"
@@ -1362,6 +1972,27 @@ if (authLoading || guestLoading) {
                 setSelected={setSelectedCuisines}
               />
               <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
+
+              {/* Multi-mode-only fields. Solo doesn't need participants or
+                  a session time limit. */}
+              {(matchMode === "concurrent" || matchMode === "curated") && (
+                <>
+                  <ParticipantsField
+                    value={participants}
+                    onChange={setParticipants}
+                  />
+                  <TimeLimitField
+                    value={timeLimitMinutes}
+                    onChange={setTimeLimitMinutes}
+                    options={
+                      matchMode === "concurrent"
+                        ? TIME_LIMIT_OPTIONS_CONCURRENT
+                        : TIME_LIMIT_OPTIONS_CURATED
+                    }
+                  />
+                </>
+              )}
+
               <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600">
                 {swipeQueue.length} places available with these filters.
               </div>
@@ -1378,15 +2009,20 @@ if (authLoading || guestLoading) {
         {screen === "invite_share" && (
           <InviteShareScreen
             sessionId={currentSessionId}
+            mode={matchMode}
+            matchCount={sessionMatches.length}
+            target={matchLimit}
             onBack={() => setScreen("filters")}
             onContinue={() => setScreen("swipe")}
           />
-        )}        
+        )}
         {screen === "swipe" && (
           <div>
             <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
               <span>
-                Matches: {matches.length} / {matchLimit}
+                Matches:{" "}
+                {matchMode === "concurrent" ? sessionMatches.length : matches.length}
+                {" "}/ {matchLimit}
               </span>
               <span>
                 {currentUserSwipedCount + 1} of {swipeQueue.length}
@@ -1417,64 +2053,103 @@ if (authLoading || guestLoading) {
           </div>
         )}
         
-        {screen === "matches" && (
-          <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
-            <div className="mb-5">
-              <p className="text-sm text-neutral-500">Finished</p>
-              <h2 className="text-2xl font-semibold tracking-tight">
-                {matches.length
-                  ? `You’ve got ${matches.length} match${matches.length > 1 ? "es" : ""}`
-                  : "No matches yet"}
-              </h2>
-            </div>
-            {picked ? (
-              <div className="mb-5 rounded-3xl bg-[#edf2eb] p-5 border border-[#c5d4c2]">
-                <p className="mb-2 text-sm text-neutral-600">Tonight’s pick</p>
-                <h3 className="text-xl font-semibold">{picked.name}</h3>
-                <p className="mt-1 text-sm text-neutral-600">
-                  {picked.suburb} · {picked.type} · {picked.cuisine}
-                </p>
-                <OpenMapsButton url={picked.maps_url} />
+        {screen === "matches" && (() => {
+          // Post-game results — full-screen overlay using the shared
+          // SessionResultsView. Concurrent + Curated both read from live
+          // reconciliation (sessionMatches). Solo doesn't have a matches
+          // concept and falls back to a placeholder (shouldn't be reachable
+          // in practice — solo end-of-queue should land on Filters, see
+          // 06-bugs.md).
+          const isSessionMode =
+            matchMode === "concurrent" || matchMode === "curated";
+          const matchCount = isSessionMode
+            ? sessionMatches.length
+            : matches.length;
+
+          function handleDoneSession() {
+            setScreen("mode");
+            setMatches([]);
+            setMarkLikes([]);
+            setPartnerLikes([]);
+            setMarkPasses([]);
+            setPartnerPasses([]);
+            setSessionMatches([]);
+            setCurrentSessionId(null);
+            setPicked(null);
+            setCardIndex(0);
+          }
+
+          return (
+            <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col pb-24">
+              <div className="bg-white border-b border-neutral-100 px-4 py-5 text-center">
+                <p className="text-sm text-neutral-500">Game over</p>
+                <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+                  {matchCount === 0
+                    ? "No mutual matches"
+                    : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
+                </h1>
               </div>
-            ) : null}
-            <div className="space-y-3">
-              {matches.map((venue) => (
-                <div key={venue.id} className="rounded-2xl bg-neutral-50 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold">{venue.name}</h3>
-                      <p className="text-sm text-neutral-600">
-                        {venue.suburb} · {venue.type} · {venue.cuisine}
-                      </p>
-                    </div>
-                    <a
-                      href={venue.maps_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full bg-white p-2 shadow-sm"
-                    >
-                      <ExternalLink size={16} />
-                    </a>
-                  </div>
+
+              {isSessionMode ? (
+                <SessionResultsView
+                  participants={sessionParticipants}
+                  sessionMatches={sessionMatches}
+                  myLikedIds={markLikes}
+                  venues={venues}
+                  userId={session?.user?.id}
+                  savedIds={savedVenueIds}
+                  onSave={saveVenue}
+                  onUnsave={unsaveVenue}
+                  onHide={hideVenue}
+                  showConfetti={matchCount > 0}
+                />
+              ) : (
+                <div className="flex-1 overflow-y-auto p-6 text-center text-neutral-500 text-sm">
+                  Matches screen isn't used in solo mode.
                 </div>
-              ))}
+              )}
+
+              <div className="fixed bottom-24 left-0 right-0 z-[2050] px-4 pb-2">
+                <div className="max-w-sm mx-auto flex items-center gap-2">
+                  {/* Pick for us — random match selector. Opens the venue
+                      in MapVenueSheet so the user can decide on the spot.
+                      Tap again to re-roll. Disabled when no matches. */}
+                  <button
+                    type="button"
+                    onClick={pickForUs}
+                    disabled={matchCount === 0}
+                    className="flex-1 rounded-2xl bg-white border border-neutral-200 py-3 font-medium text-neutral-800 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Shuffle size={16} /> Pick for us
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDoneSession}
+                    className="flex-1 rounded-2xl bg-[#111111] py-3 font-medium text-white shadow-lg"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+
+              {/* Picked venue lands in MapVenueSheet — same in-app card the
+                  rest of the app uses, so the user sees full details and
+                  the Open in Maps action right there. */}
+              {picked && (
+                <MapVenueSheet
+                  venue={picked}
+                  onClose={() => setPicked(null)}
+                  savedIds={savedVenueIds}
+                  onSave={saveVenue}
+                  onUnsave={unsaveVenue}
+                  onHide={hideVenue}
+                />
+              )}
             </div>
-            {matches.length ? (
-              <button
-                onClick={pickForUs}
-                className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Shuffle size={18} /> Pick for us
-                </span>
-              </button>
-            ) : (
-             <button onClick={resetSwipe} className="mt-5 w-full rounded-2xl bg-[#111111] py-4 font-medium text-white">
-                Try different filters
-              </button>
-            )}
-          </div>
-        )}
+          );
+        })()}
           </div>
         </div>
       )}
@@ -2186,6 +2861,60 @@ function MatchLimitField({ value, onChange }) {
     </div>
   );
 }
+
+function ParticipantsField({ value, onChange }) {
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-medium text-neutral-700">
+        How many of us?
+      </span>
+      <div className="grid gap-2 grid-cols-3">
+        {PARTICIPANT_OPTIONS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={`rounded-2xl py-3 font-medium transition ${
+              value === option
+                ? "bg-[#455d3b] text-white"
+                : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+            }`}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TimeLimitField({ value, onChange, options }) {
+  // Both option sets are length 4 — keep them that length, or update the
+  // grid class here if the design ever needs a different count.
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-medium text-neutral-700">
+        Time limit
+      </span>
+      <div className="grid gap-2 grid-cols-4">
+        {options.map((option) => (
+          <button
+            key={option.minutes}
+            type="button"
+            onClick={() => onChange(option.minutes)}
+            className={`rounded-2xl py-3 text-sm font-medium transition ${
+              value === option.minutes
+                ? "bg-[#455d3b] text-white"
+                : "bg-neutral-50 text-neutral-700 border border-neutral-100"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
  
 function VenueHeroCarousel({ venue }) {
   const images = venue?.image_urls?.length
@@ -2460,6 +3189,29 @@ function ProfileTab({
   onUnhide,
 }) {
   const [showMyList, setShowMyList] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
+  const [sessionsCount, setSessionsCount] = useState(null);
+
+  // Light-touch count fetch just for the card subtitle. The full sessions
+  // list is fetched lazily when the user opens the SessionsScreen.
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setSessionsCount(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("session_participants")
+      .select("session_id", { count: "exact", head: true })
+      .eq("user_id", session.user.id)
+      .then(({ count, error }) => {
+        if (cancelled || error) return;
+        setSessionsCount(count ?? 0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
   const [username, setUsername] = useState(profile?.username || "");
   const [usernameStatus, setUsernameStatus] = useState({ state: "idle" });
@@ -2572,6 +3324,17 @@ function ProfileTab({
           onUnhide={onUnhide}
         />
       )}
+      {showSessions && (
+        <SessionsScreen
+          venues={venues}
+          userId={session?.user?.id}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+          onBack={() => setShowSessions(false)}
+        />
+      )}
       <div className="w-full max-w-sm">
         <div className="mb-5">
           <p className="text-sm text-neutral-500">Account</p>
@@ -2593,7 +3356,7 @@ function ProfileTab({
         <button
           type="button"
           onClick={() => setShowMyList(true)}
-          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
+          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
             <Heart size={18} />
@@ -2602,6 +3365,27 @@ function ProfileTab({
             <p className="font-medium">My List</p>
             <p className="text-xs text-neutral-500">
               {savedIds?.size || 0} saved · {hiddenIds?.size || 0} hidden
+            </p>
+          </div>
+          <span className="text-neutral-400 text-lg leading-none">›</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowSessions(true)}
+          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+            <Users size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium">Your sessions</p>
+            <p className="text-xs text-neutral-500">
+              {sessionsCount === null
+                ? "Loading..."
+                : sessionsCount === 0
+                ? "Nothing yet"
+                : `${sessionsCount} session${sessionsCount === 1 ? "" : "s"}`}
             </p>
           </div>
           <span className="text-neutral-400 text-lg leading-none">›</span>
@@ -2887,6 +3671,707 @@ function MyListScreen({
   );
 }
 
+// One-shot confetti burst rendered on a fixed full-screen canvas. Fires
+// once on mount and self-destructs when all particles fall off screen.
+// No external dependency — small enough to inline. Used on post-game
+// results screens to celebrate the match moment.
+function ConfettiBurst() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = `${window.innerWidth}px`;
+    canvas.style.height = `${window.innerHeight}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    const colors = ["#455d3b", "#c5d4c2", "#fdb22d", "#f06292", "#5e60ce", "#fff"];
+    const particles = [];
+    const centerX = window.innerWidth / 2;
+    const startY = window.innerHeight / 3;
+    for (let i = 0; i < 140; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 12 + 6;
+      particles.push({
+        x: centerX,
+        y: startY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 4,
+        rotation: Math.random() * 360,
+        vr: (Math.random() - 0.5) * 12,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        w: Math.random() * 8 + 6,
+        h: Math.random() * 4 + 3,
+      });
+    }
+    let frame;
+    const gravity = 0.35;
+    const drag = 0.99;
+    function tick() {
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      let alive = false;
+      for (const p of particles) {
+        p.vy += gravity;
+        p.vx *= drag;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rotation += p.vr;
+        if (p.y < window.innerHeight + 50) alive = true;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (alive) frame = requestAnimationFrame(tick);
+    }
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-[9999]"
+      aria-hidden="true"
+    />
+  );
+}
+
+// Shared body for any "session results" surface — the post-game host
+// matches screen, the post-game guest revealed view, and the historical
+// Your Sessions detail view all render this. Accepts data as props rather
+// than fetching internally so each parent can wire it to its own state.
+//
+// Returns body content only (participants strip + Matches/My-likes pill +
+// always-on checkboxes + bulk Save + MapVenueSheet on row tap). The parent
+// is responsible for its own header / footer / wrapper layout.
+function SessionResultsView({
+  participants = [],
+  sessionMatches,
+  myLikedIds,
+  venues,
+  userId,
+  savedIds,
+  onSave,
+  onUnsave,
+  onHide,
+  showConfetti = false,
+}) {
+  const [view, setView] = useState("matches");
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [detailVenue, setDetailVenue] = useState(null);
+
+  // Clear per-row selections when switching tabs.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [view]);
+
+  const venueById = useMemo(
+    () => new Map(venues.map((v) => [v.id, v])),
+    [venues]
+  );
+  const matchedIdSet = new Set(
+    (sessionMatches || []).map((m) => m.venue_id)
+  );
+  const likeCountById = new Map(
+    (sessionMatches || []).map((m) => [m.venue_id, m.like_count])
+  );
+
+  let rows;
+  let loading;
+  let emptyMessage;
+  if (view === "matches") {
+    loading = sessionMatches === null;
+    rows = (sessionMatches || [])
+      .map((m) => {
+        const venue = venueById.get(m.venue_id);
+        if (!venue) return null;
+        return { venue, likeCount: m.like_count, isMatch: true };
+      })
+      .filter(Boolean);
+    emptyMessage = "No mutual matches in this session.";
+  } else {
+    loading = myLikedIds === null;
+    rows = (myLikedIds || [])
+      .map((id) => {
+        const venue = venueById.get(id);
+        if (!venue) return null;
+        return {
+          venue,
+          likeCount: likeCountById.get(id) || 1,
+          isMatch: matchedIdSet.has(id),
+        };
+      })
+      .filter(Boolean);
+    emptyMessage = "You didn't like any places in this session.";
+  }
+
+  const matchesCount = (sessionMatches || []).length;
+  const myLikesCount = (myLikedIds || []).length;
+
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  const allVisibleSelected =
+    rows.length > 0 && rows.every((r) => selectedIds.has(r.venue.id));
+  const someVisibleSelected =
+    !allVisibleSelected && rows.some((r) => selectedIds.has(r.venue.id));
+  function toggleSelectAll() {
+    if (allVisibleSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(rows.map((r) => r.venue.id)));
+  }
+  function bulkSave() {
+    for (const id of selectedIds) {
+      if (!savedIds?.has(id)) onSave(id);
+    }
+    setSelectedIds(new Set());
+  }
+  const newSelectionCount = Array.from(selectedIds).filter(
+    (id) => !savedIds?.has(id)
+  ).length;
+
+  return (
+    <>
+      {showConfetti && <ConfettiBurst />}
+
+      {/* Participants strip */}
+      {participants.length > 0 && (
+        <div className="bg-white border-b border-neutral-100 px-4 py-3">
+          <p className="text-xs text-neutral-500 mb-1.5">
+            {participants.length === 1
+              ? "Just you"
+              : `${participants.length} people`}
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {participants.map((p) => {
+              const name =
+                p.display_name?.trim() ||
+                (p.user_id === userId ? "You" : "Guest");
+              const initial = name.charAt(0).toUpperCase();
+              const isMe = p.user_id === userId;
+              return (
+                <div
+                  key={p.user_id}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-3 py-1"
+                >
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+                      isMe
+                        ? "bg-[#455d3b] text-white"
+                        : "bg-[#edf2eb] text-[#3f5a3a]"
+                    }`}
+                  >
+                    {initial}
+                  </span>
+                  <span className="text-xs font-medium text-neutral-700">
+                    {isMe ? "You" : name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Matches / My likes pill toggle */}
+      <div className="bg-white border-b border-neutral-100 px-4 py-3 flex justify-center">
+        <div className="flex bg-neutral-100 rounded-full p-0.5">
+          <button
+            type="button"
+            onClick={() => setView("matches")}
+            className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
+              view === "matches"
+                ? "bg-white text-[#455d3b] shadow-sm"
+                : "text-neutral-500"
+            }`}
+          >
+            Matches ({matchesCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("my_likes")}
+            className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
+              view === "my_likes"
+                ? "bg-white text-[#455d3b] shadow-sm"
+                : "text-neutral-500"
+            }`}
+          >
+            My likes ({myLikesCount})
+          </button>
+        </div>
+      </div>
+
+      {/* Top action row — select-all checkbox + Save button */}
+      {rows.length > 0 && (
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            aria-label={allVisibleSelected ? "Deselect all" : "Select all"}
+            className={`flex h-5 w-5 items-center justify-center rounded border shrink-0 transition ${
+              allVisibleSelected
+                ? "bg-[#455d3b] border-[#455d3b] text-white"
+                : someVisibleSelected
+                ? "bg-[#455d3b]/40 border-[#455d3b]/40 text-white"
+                : "bg-white border-neutral-300"
+            }`}
+          >
+            {(allVisibleSelected || someVisibleSelected) && <Check size={14} />}
+          </button>
+          <button
+            type="button"
+            onClick={bulkSave}
+            disabled={selectedIds.size === 0 || newSelectionCount === 0}
+            className="rounded-full bg-[#455d3b] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {selectedIds.size === 0
+              ? "Save to my list"
+              : newSelectionCount === 0
+              ? `${selectedIds.size} already saved`
+              : `Save ${newSelectionCount} to my list`}
+          </button>
+        </div>
+      )}
+
+      {/* Venue list */}
+      <div className="flex-1 overflow-y-auto p-4 pb-24">
+        {loading ? (
+          <div className="text-center text-neutral-500 mt-12 text-sm">
+            Loading...
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="text-center text-neutral-500 mt-12 text-sm">
+            {emptyMessage}
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {rows.map(({ venue, likeCount, isMatch }) => {
+              const isSelected = selectedIds.has(venue.id);
+              return (
+                <li key={venue.id}>
+                  <div className="flex items-start gap-3 rounded-2xl border bg-white border-neutral-100 p-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelected(venue.id);
+                      }}
+                      aria-label={isSelected ? "Deselect" : "Select"}
+                      className={`flex h-5 w-5 items-center justify-center rounded border shrink-0 mt-1 transition ${
+                        isSelected
+                          ? "bg-[#455d3b] border-[#455d3b] text-white"
+                          : "bg-white border-neutral-300"
+                      }`}
+                    >
+                      {isSelected && <Check size={14} />}
+                    </button>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setDetailVenue(venue)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setDetailVenue(venue);
+                        }
+                      }}
+                      className="flex-1 min-w-0 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium truncate">{venue.name}</p>
+                        {likeCount > 2 && isMatch && (
+                          <span className="inline-flex items-center rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#3f5a3a] border border-[#c5d4c2] shrink-0">
+                            ×{likeCount}
+                          </span>
+                        )}
+                        {view === "my_likes" && isMatch && (
+                          <span className="inline-flex items-center rounded-full bg-[#455d3b]/10 px-2 py-0.5 text-[10px] font-medium text-[#455d3b] shrink-0">
+                            Matched
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500 truncate">
+                        {venue.type}
+                        {venue.suburb ? ` · ${venue.suburb}` : ""}
+                        {venue.rating ? ` · ⭐ ${venue.rating}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {detailVenue && (
+        <MapVenueSheet
+          venue={detailVenue}
+          onClose={() => setDetailVenue(null)}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+        />
+      )}
+    </>
+  );
+}
+
+// Full-screen overlay showing every session the current user has joined
+// (host or guest). Tap a session to see the matched venues for that
+// session, with per-venue Save toggles to add them to the user's saved
+// list. Uses get_session_matches for mutual-like reconciliation — for
+// curated sessions every host-shortlisted venue counts; for concurrent
+// sessions only venues with >=2 distinct likers appear.
+function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack }) {
+  const [sessions, setSessions] = useState(null); // null = loading
+  const [selectedSession, setSelectedSession] = useState(null);
+  const [sessionMatches, setSessionMatches] = useState(null); // null = loading
+  const [matchesError, setMatchesError] = useState("");
+  // My personal likes in this session (everything I swiped right on, whether
+  // or not it became a mutual match). Hydrated separately because RLS only
+  // lets me read my own rows in session_swipes.
+  const [myLikedIds, setMyLikedIds] = useState(null);
+  // Participants strip — display_name list pulled from session_participants.
+  const [participants, setParticipants] = useState([]);
+  // (View / selection / detail-venue state now lives inside SessionResultsView.)
+
+  // Fetch the list of sessions this user has participated in, plus the
+  // other participants per session so each row can show "With Tomas".
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    async function load() {
+      const { data: participations, error: pErr } = await supabase
+        .from("session_participants")
+        .select("session_id, joined_at, submitted_at")
+        .eq("user_id", userId)
+        .order("joined_at", { ascending: false });
+      if (cancelled) return;
+      if (pErr) {
+        console.error("Failed to fetch participations:", pErr);
+        setSessions([]);
+        return;
+      }
+      const ids = (participations || []).map((p) => p.session_id);
+      if (!ids.length) {
+        setSessions([]);
+        return;
+      }
+      const { data: sessionRows, error: sErr } = await supabase
+        .from("match_sessions")
+        .select("id, name, mode, status, created_at, event_at, host_user_id, target_matches")
+        .in("id", ids);
+      if (cancelled) return;
+      if (sErr) {
+        console.error("Failed to fetch sessions:", sErr);
+        setSessions([]);
+        return;
+      }
+
+      // Batch-fetch every participant across every session in one go, then
+      // hydrate any NULL display_names from profiles (same fallback the
+      // detail view uses for old sessions where the host's name wasn't
+      // written at insert time).
+      const { data: allParticipants, error: apErr } = await supabase
+        .from("session_participants")
+        .select("session_id, user_id, display_name")
+        .in("session_id", ids);
+      if (cancelled) return;
+      if (apErr) {
+        console.error("Failed to fetch participants:", apErr);
+      }
+      const participantRows = allParticipants || [];
+      const missingIds = Array.from(
+        new Set(
+          participantRows
+            .filter((p) => p.user_id !== userId && !p.display_name?.trim())
+            .map((p) => p.user_id)
+        )
+      );
+      let profileNameById = new Map();
+      if (missingIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", missingIds);
+        profileNameById = new Map(
+          (profileRows || []).map((r) => [r.id, r.display_name])
+        );
+      }
+      const otherNamesBySession = new Map();
+      for (const p of participantRows) {
+        if (p.user_id === userId) continue;
+        const name =
+          p.display_name?.trim() ||
+          profileNameById.get(p.user_id) ||
+          "Guest";
+        if (!otherNamesBySession.has(p.session_id)) {
+          otherNamesBySession.set(p.session_id, []);
+        }
+        otherNamesBySession.get(p.session_id).push(name);
+      }
+
+      // Join everything, preserving the participations sort order.
+      const sessionById = new Map((sessionRows || []).map((s) => [s.id, s]));
+      const merged = participations
+        .map((p) => {
+          const s = sessionById.get(p.session_id);
+          if (!s) return null;
+          return {
+            ...s,
+            isHost: s.host_user_id === userId,
+            joined_at: p.joined_at,
+            submitted_at: p.submitted_at,
+            otherNames: otherNamesBySession.get(p.session_id) || [],
+          };
+        })
+        .filter(Boolean);
+      setSessions(merged);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Format a list of other participants' names for the row subtitle.
+  // "With Tomas" / "With Tomas and Sarah" / "With Tomas, Sarah and 2 others".
+  function formatOtherNames(names) {
+    if (!names || names.length === 0) return null;
+    if (names.length === 1) return `With ${names[0]}`;
+    if (names.length === 2) return `With ${names[0]} and ${names[1]}`;
+    const extra = names.length - 2;
+    return `With ${names[0]}, ${names[1]} and ${extra} other${extra === 1 ? "" : "s"}`;
+  }
+
+  // When a session is selected, fetch matches (RPC), my likes (own rows in
+  // session_swipes), and the participant list (display_names). Reset the
+  // view + select-mode UI so we always start fresh on the matches tab.
+  useEffect(() => {
+    if (!selectedSession) {
+      setSessionMatches(null);
+      setMyLikedIds(null);
+      setParticipants([]);
+      setMatchesError("");
+      return;
+    }
+    let cancelled = false;
+    setSessionMatches(null);
+    setMyLikedIds(null);
+    setMatchesError("");
+
+    // Matches (reconciliation RPC — venues with >=2 distinct likers).
+    supabase
+      .rpc("get_session_matches", { p_session_id: selectedSession.id })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch session matches:", error);
+          setMatchesError("Couldn't load matches.");
+          setSessionMatches([]);
+          return;
+        }
+        setSessionMatches(data || []);
+      });
+
+    // My likes (everything I personally swiped right on in this session).
+    if (userId) {
+      supabase
+        .from("session_swipes")
+        .select("venue_id")
+        .eq("session_id", selectedSession.id)
+        .eq("user_id", userId)
+        .eq("action", "like")
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            console.error("Failed to fetch my likes:", error);
+            setMyLikedIds([]);
+            return;
+          }
+          setMyLikedIds((data || []).map((r) => r.venue_id));
+        });
+    } else {
+      setMyLikedIds([]);
+    }
+
+    // Participants (display names for the strip below the title). For any
+    // participant with a NULL display_name (typically the host on sessions
+    // created before display_name was written at insert time), fall back to
+    // their profiles.display_name in a second batched fetch.
+    (async () => {
+      const { data: pData, error: pErr } = await supabase
+        .from("session_participants")
+        .select("user_id, display_name, joined_at")
+        .eq("session_id", selectedSession.id)
+        .order("joined_at", { ascending: true });
+      if (cancelled) return;
+      if (pErr) {
+        console.error("Failed to fetch participants:", pErr);
+        setParticipants([]);
+        return;
+      }
+      const rows = pData || [];
+      const missingIds = rows
+        .filter((p) => !p.display_name?.trim())
+        .map((p) => p.user_id);
+      if (missingIds.length === 0) {
+        setParticipants(rows);
+        return;
+      }
+      const { data: profileRows, error: profileErr } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", missingIds);
+      if (cancelled) return;
+      const profileNameById = new Map(
+        (profileErr ? [] : profileRows || []).map((r) => [r.id, r.display_name])
+      );
+      const hydrated = rows.map((p) =>
+        p.display_name?.trim()
+          ? p
+          : { ...p, display_name: profileNameById.get(p.user_id) || null }
+      );
+      setParticipants(hydrated);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSession, userId]);
+
+  // (View / selection state is owned by SessionResultsView now.)
+
+  function formatSessionDate(s) {
+    const when = s.event_at || s.created_at;
+    if (!when) return "";
+    try {
+      const d = new Date(when);
+      const now = new Date();
+      const isSameDay =
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      const isYesterday =
+        d.getFullYear() === yesterday.getFullYear() &&
+        d.getMonth() === yesterday.getMonth() &&
+        d.getDate() === yesterday.getDate();
+      if (isSameDay) return "Today";
+      if (isYesterday) return "Yesterday";
+      return d.toLocaleDateString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col">
+      <div className="bg-white border-b border-neutral-100 px-4 py-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={selectedSession ? () => setSelectedSession(null) : onBack}
+          aria-label="Back"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100"
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <h1 className="text-lg font-semibold flex-1 truncate">
+          {selectedSession ? selectedSession.name || "Session" : "Your sessions"}
+        </h1>
+      </div>
+
+      {!selectedSession ? (
+        // ---------- Sessions list ----------
+        <div className="flex-1 overflow-y-auto p-4 pb-24">
+          {sessions === null ? (
+            <div className="text-center text-neutral-500 mt-12 text-sm">
+              Loading your sessions...
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="text-center text-neutral-500 mt-12 text-sm">
+              You haven't joined any sessions yet.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {sessions.map((s) => (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSession(s)}
+                    className="w-full flex items-center gap-3 rounded-2xl bg-white border border-neutral-100 p-4 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b] shrink-0">
+                      {s.mode === "concurrent" ? <Zap size={18} /> : <Calendar size={18} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium truncate">
+                          {formatSessionDate(s) || "Session"}
+                        </p>
+                        {s.isHost && (
+                          <span className="inline-flex items-center rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#3f5a3a] border border-[#c5d4c2] shrink-0">
+                            Host
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500 truncate">
+                        {s.mode === "concurrent" ? "Right now" : "Later"}
+                      </p>
+                      {formatOtherNames(s.otherNames) && (
+                        <p className="text-xs text-neutral-600 truncate mt-0.5">
+                          {formatOtherNames(s.otherNames)}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-neutral-400 text-lg leading-none">›</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        // ---------- Session detail ----------
+        <>
+          {matchesError && (
+            <div className="bg-white border-b border-neutral-100 px-4 py-2 text-center text-red-600 text-sm">
+              {matchesError}
+            </div>
+          )}
+          <SessionResultsView
+            participants={participants}
+            sessionMatches={sessionMatches}
+            myLikedIds={myLikedIds}
+            venues={venues}
+            userId={userId}
+            savedIds={savedIds}
+            onSave={onSave}
+            onUnsave={onUnsave}
+            onHide={onHide}
+            showConfetti={false}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 function ModeChooserScreen({ onPickMode }) {
   return (
     <div className="flex items-start justify-center p-4 pb-24">
@@ -2955,7 +4440,7 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
         <SessionSetupCard
           icon={<Zap size={18} />}
           title="Right now"
-          subtitle="Swipe together, decide fast"
+          subtitle="Swipe together, find a place in 10 min"
           expanded={expanded === "right_now"}
           onToggle={() =>
             setExpanded(expanded === "right_now" ? null : "right_now")
@@ -3087,11 +4572,19 @@ function SessionSetupCard({
   );
 }
 
-function InviteShareScreen({ sessionId, onBack, onContinue }) {
+function InviteShareScreen({
+  sessionId,
+  mode = "concurrent",
+  matchCount = 0,
+  target = 0,
+  onBack,
+  onContinue,
+}) {
   const [copied, setCopied] = useState(false);
   const shareUrl = sessionId
     ? `${window.location.origin}/s/${sessionId}`
     : "";
+  const isCurated = mode === "curated";
 
   async function copyLink() {
     try {
@@ -3132,11 +4625,21 @@ function InviteShareScreen({ sessionId, onBack, onContinue }) {
             <ArrowLeft size={18} />
           </button>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Invite your friends
+            {isCurated ? "Sent! Now invite friends" : "Invite your friends"}
           </h1>
         </div>
 
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-4">
+          {shareUrl && (
+            <div className="flex flex-col items-center mb-4">
+              <div className="rounded-2xl bg-white p-3 border border-neutral-100">
+                <QRCodeSVG value={shareUrl} size={180} />
+              </div>
+              <p className="mt-2 text-xs uppercase tracking-wide text-neutral-500">
+                Scan to join
+              </p>
+            </div>
+          )}
           <p className="text-sm text-neutral-500 mb-2">Share this link</p>
           <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-700 mb-3 break-all border border-neutral-100">
             {shareUrl}
@@ -3159,17 +4662,49 @@ function InviteShareScreen({ sessionId, onBack, onContinue }) {
           </div>
         </div>
 
+        {/* Live match indicator — curated only, since the host's already
+            done swiping and is now waiting for guests. Concurrent host
+            still has the swipe screen for their own progress. */}
+        {isCurated && (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-4 text-center">
+            <p className="text-xs uppercase tracking-wide text-neutral-500">
+              Waiting for friends
+            </p>
+            <p className="mt-2 text-3xl font-semibold tracking-tight">
+              {matchCount}
+              {target > 0 && (
+                <span className="text-neutral-400"> / {target}</span>
+              )}
+            </p>
+            <p className="mt-1 text-sm text-neutral-600">
+              {matchCount === 0
+                ? "Matches will appear here as friends swipe."
+                : matchCount === 1
+                ? "1 match so far"
+                : `${matchCount} matches so far`}
+            </p>
+          </div>
+        )}
+
         <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600 mb-4">
-          Your friends will swipe the same places as you. The session ends when everyone submits or time runs out.
+          {isCurated
+            ? "When enough friends swipe and you hit your match goal, we'll show you the results."
+            : "Your friends will swipe the same places as you. The session ends when everyone submits or time runs out."}
         </div>
 
-        <button
-          type="button"
-          onClick={onContinue}
-          className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
-        >
-          Start swiping
-        </button>
+        {/* Concurrent host needs a "Start swiping" CTA to get into their
+            own swipe flow. Curated host has already finished swiping (the
+            curation pass) — no CTA needed; auto-flips to matches when
+            target is hit. */}
+        {!isCurated && (
+          <button
+            type="button"
+            onClick={onContinue}
+            className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
+          >
+            Start swiping
+          </button>
+        )}
       </div>
     </div>
   );
