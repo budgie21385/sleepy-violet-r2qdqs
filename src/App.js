@@ -162,7 +162,7 @@ function SignInScreen() {
             className="w-56 h-auto mb-10"
           />
           <h1 className="text-3xl font-semibold tracking-tight leading-tight max-w-[18rem]">
-            A place to experience your city with friends.
+            A place to discover your city with friends.
           </h1>
           <button
             type="button"
