@@ -9,15 +9,18 @@
     "@supabase/supabase-js": "^2.49.1",
     "ajv": "^8.17.1",
     "ajv-keywords": "^5.1.0",
+    "csv-parse": "^6.2.1",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
     "lucide-react": "1.9.0",
+    "node-fetch": "^2.7.0",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-leaflet": "^4.2.1",
     "react-leaflet-cluster": "^2.1.0",
-    "react-scripts": "^5.0.0"
+    "react-scripts": "^5.0.0",
+    "unzipper": "^0.12.3"
   },
   "devDependencies": {
     "@types/react": "19.0.0",
