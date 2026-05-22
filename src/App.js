@@ -774,6 +774,15 @@ useEffect(() => {
       const whoamiResult = await supabase.rpc("whoami");
       console.log("Server whoami:", whoamiResult);
 
+      // Debug: evaluate the policy condition server-side with the exact
+      // values being inserted. Shows whether auth.uid() matches user_id
+      // at policy-eval time, plus the raw JWT claims.
+      const debugResult = await supabase.rpc("debug_can_insert", {
+        p_session_id: guestSessionId,
+        p_user_id: userId,
+      });
+      console.log("debug_can_insert:", JSON.stringify(debugResult.data, null, 2));
+
       // Insert participant row. ignoreDuplicates handles the case where
       // the user has already joined this session (e.g. host opening their
       // own link, or a guest refreshing the page).
