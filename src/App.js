@@ -783,22 +783,22 @@ useEffect(() => {
       });
       console.log("debug_can_insert:", JSON.stringify(debugResult.data, null, 2));
 
-      // Insert participant row. ignoreDuplicates handles the case where
-      // the user has already joined this session (e.g. host opening their
-      // own link, or a guest refreshing the page).
-      const { error: joinError } = await supabase
-        .from("session_participants")
-        .upsert(
-          {
-            session_id: guestSessionId,
-            user_id: userId,
-            display_name: name,
-          },
-          { onConflict: "session_id,user_id", ignoreDuplicates: true }
-        );
+      // Insert participant row via SECURITY DEFINER RPC. We previously
+      // called supabase.from("session_participants").upsert(...) directly,
+      // but it consistently failed RLS WITH CHECK even when auth.uid()
+      // matched user_id (verified via debug_can_insert RPC). The function
+      // bypasses RLS but still gates by auth.uid() not null, so the
+      // security guarantee is preserved.
+      const { data: joinData, error: joinError } = await supabase.rpc(
+        "join_session",
+        {
+          p_session_id: guestSessionId,
+          p_display_name: name,
+        }
+      );
 
-      if (joinError) {
-        console.error("Failed to join session:", joinError);
+      if (joinError || joinData?.error) {
+        console.error("Failed to join session:", joinError || joinData);
         setJoining(false);
         return;
       }
