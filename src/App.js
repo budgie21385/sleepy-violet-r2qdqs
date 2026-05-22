@@ -2086,6 +2086,23 @@ if (authLoading || guestLoading) {
                   onDoneAndSend={handleDoneAndSend}
                 />
               </>
+            ) : matchMode === "curated" ? (
+              // Curated host has reached the end of curation without
+              // explicitly tapping Done & Send. Auto-route them through
+              // handleDoneAndSend so the session flips to 'open', the
+              // shortlist is persisted, and they land on InviteShareScreen
+              // — otherwise the session "ends" with no shareable state
+              // (06-bugs.md, May 20).
+              <EmptyState
+                title="You've reviewed every place"
+                text="Send your shortlist to friends to start matching."
+                action={handleDoneAndSend}
+                actionText={
+                  markLikes.length > 0
+                    ? `Send shortlist (${markLikes.length})`
+                    : "Send to friends"
+                }
+              />
             ) : (
               <EmptyState
                 title="No more places"
