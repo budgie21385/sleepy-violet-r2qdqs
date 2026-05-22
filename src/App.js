@@ -766,6 +766,14 @@ useEffect(() => {
         justSignedInAnon,
       });
 
+      // Debug: ask the SERVER who it thinks we are. If this returns the same
+      // UUID as userId above, JWT validation works and the issue is
+      // elsewhere. If it returns 'NULL', the JWT isn't being validated
+      // (which would explain the RLS 403 — auth.uid()=NULL fails the
+      // INSERT WITH CHECK).
+      const whoamiResult = await supabase.rpc("whoami");
+      console.log("Server whoami:", whoamiResult);
+
       // Insert participant row. ignoreDuplicates handles the case where
       // the user has already joined this session (e.g. host opening their
       // own link, or a guest refreshing the page).
