@@ -738,8 +738,33 @@ useEffect(() => {
           setJoining(false);
           return;
         }
+        // Explicit session verification: after signInAnonymously resolves,
+        // the SDK should have updated its internal session, but in some
+        // cases the next REST call uses a stale (or empty) JWT, causing
+        // RLS WITH CHECK to fail because server-side auth.uid() doesn't
+        // match the user_id we're inserting. Force a getSession() to
+        // settle the auth state before continuing.
+        const { data: { session: verifySession } } = await supabase.auth.getSession();
+        if (!verifySession?.access_token || !verifySession.user?.id) {
+          console.error("Post-signIn session check failed", { verifySession });
+          setJoining(false);
+          return;
+        }
+        // Prefer the verified session's user id over the signIn response
+        // — they should be identical but the verified one matches what
+        // the JWT will actually send.
+        userId = verifySession.user.id;
         justSignedInAnon = true;
       }
+
+      // Debug: capture exact state at point of upsert. Remove once the
+      // anon-join 403 bug is fully understood.
+      console.log("Pre-upsert state:", {
+        guestSessionId,
+        userId,
+        sessionUser: session?.user?.id,
+        justSignedInAnon,
+      });
 
       // Insert participant row. ignoreDuplicates handles the case where
       // the user has already joined this session (e.g. host opening their
