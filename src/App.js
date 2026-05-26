@@ -4580,24 +4580,30 @@ function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToast }) {
     // load only depends on viewerUserId + hostUserId.
   }, [viewerUserId, hostUserId]);
 
+  // See ProfileLookupScreen.sendRequest for why declined rows need DELETE +
+  // INSERT (RLS UPDATE policy filters out non-pending rows).
   async function handleAdd() {
     if (!viewerUserId || !hostUserId) return;
     setSending(true);
-    let error;
-    if (friendship && friendship.status !== "accepted") {
-      ({ error } = await supabase
+    if (friendship && friendship.status === "declined") {
+      const { error: delError } = await supabase
         .from("friendships")
-        .update({ status: "pending" })
-        .eq("id", friendship.id));
-    } else {
-      ({ error } = await supabase
-        .from("friendships")
-        .insert({
-          requester_id: viewerUserId,
-          addressee_id: hostUserId,
-          status: "pending",
-        }));
+        .delete()
+        .eq("id", friendship.id);
+      if (delError) {
+        setSending(false);
+        console.error("AddHostFriendCard delete failed:", delError);
+        showToast?.("Couldn't send request");
+        return;
+      }
     }
+    const { error } = await supabase
+      .from("friendships")
+      .insert({
+        requester_id: viewerUserId,
+        addressee_id: hostUserId,
+        status: "pending",
+      });
     setSending(false);
     if (error) {
       console.error("AddHostFriendCard insert failed:", error);
@@ -4748,25 +4754,31 @@ function SessionResultsView({
     return "none";
   }
 
+  // See ProfileLookupScreen.sendRequest for why declined rows need DELETE +
+  // INSERT (RLS UPDATE policy filters out non-pending rows).
   async function sendRequestTo(otherId) {
     if (!userId || !otherId) return;
     setChipActingOn(otherId);
     const existing = friendshipByOtherId.get(otherId);
-    let error;
-    if (existing) {
-      ({ error } = await supabase
+    if (existing && existing.status === "declined") {
+      const { error: delError } = await supabase
         .from("friendships")
-        .update({ status: "pending" })
-        .eq("id", existing.id));
-    } else {
-      ({ error } = await supabase
-        .from("friendships")
-        .insert({
-          requester_id: userId,
-          addressee_id: otherId,
-          status: "pending",
-        }));
+        .delete()
+        .eq("id", existing.id);
+      if (delError) {
+        setChipActingOn(null);
+        console.error("sendRequestTo delete failed:", delError);
+        showToast?.("Couldn't send request");
+        return;
+      }
     }
+    const { error } = await supabase
+      .from("friendships")
+      .insert({
+        requester_id: userId,
+        addressee_id: otherId,
+        status: "pending",
+      });
     setChipActingOn(null);
     if (error) {
       console.error("sendRequestTo failed:", error);
@@ -6350,34 +6362,39 @@ function ProfileLookupScreen({
   // for D.1 first ship we'll let the insert error surface if it conflicts.
 
   // Action: send a new friend request.
+  // RLS on friendships only allows UPDATE of rows whose status is 'pending'
+  // (see friendships_table.sql). Once a row is declined / blocked / accepted
+  // it's effectively immutable, so attempting to UPDATE it back to 'pending'
+  // silently no-ops. For declined rows we DELETE then INSERT fresh, which
+  // also lets the new initiator become requester_id even if the original
+  // request went the other direction. RLS allows either party to DELETE
+  // (delete_party) and the new initiator to INSERT (insert_as_requester).
   async function sendRequest() {
     setActing(true);
-    if (friendship && status !== "accepted") {
-      // Existing row in declined/blocked/pending — flip status to pending.
-      const { error } = await supabase
+    if (friendship && status === "declined") {
+      const { error: delError } = await supabase
         .from("friendships")
-        .update({ status: "pending" })
+        .delete()
         .eq("id", friendship.id);
-      setActing(false);
-      if (error) {
-        showToast?.("Couldn't send request");
-        console.error(error);
+      if (delError) {
+        setActing(false);
+        showToast?.("Couldn't reset previous decline");
+        console.error(delError);
         return;
       }
-    } else {
-      const { error } = await supabase
-        .from("friendships")
-        .insert({
-          requester_id: viewerUserId,
-          addressee_id: userId,
-          status: "pending",
-        });
-      setActing(false);
-      if (error) {
-        showToast?.("Couldn't send request");
-        console.error(error);
-        return;
-      }
+    }
+    const { error } = await supabase
+      .from("friendships")
+      .insert({
+        requester_id: viewerUserId,
+        addressee_id: userId,
+        status: "pending",
+      });
+    setActing(false);
+    if (error) {
+      showToast?.("Couldn't send request");
+      console.error(error);
+      return;
     }
     await load();
   }
