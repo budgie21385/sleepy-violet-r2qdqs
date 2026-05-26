@@ -116,9 +116,14 @@ function createEmojiIcon(emoji) {
   });
 }
  
-function SignInScreen() {
+function SignInScreen({ inviteHandle }) {
   // "landing" = brand + tagline + Get started CTA
   // "email"   = magic-link email form
+  // When inviteHandle is set we entered via /u/@handle — show that context on
+  // the landing card and use the current URL as the magic-link redirect so
+  // the user lands back on the same invite path post-confirmation. (Local-
+  // Storage is the real source of truth — see App-level URL parser — but the
+  // redirect helps the new-tab case too.)
   const [view, setView] = useState("landing");
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
@@ -136,7 +141,9 @@ function SignInScreen() {
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: inviteHandle
+          ? `${window.location.origin}/u/@${inviteHandle}`
+          : window.location.origin,
         captchaToken,
       },
     });
@@ -166,12 +173,17 @@ function SignInScreen() {
           <h1 className="text-3xl font-semibold tracking-tight leading-tight max-w-[18rem]">
             A place to discover your city with friends.
           </h1>
+          {inviteHandle && (
+            <div className="mt-6 rounded-2xl bg-white border border-[#c5d4c2] px-4 py-3 text-sm text-neutral-700">
+              You're joining to connect with <span className="font-medium">@{inviteHandle}</span>.
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setView("email")}
             className="mt-10 inline-flex items-center justify-center gap-2 rounded-full bg-[#455d3b] px-7 py-3.5 text-base font-medium text-white active:scale-[0.98] transition shadow-sm"
           >
-            Get started →
+            {inviteHandle ? "Sign up to continue →" : "Get started →"}
           </button>
         </div>
       </div>
@@ -295,6 +307,11 @@ export default function RestaurantSwipeMVP() {
   // dedicated notifications table yet. unreadCount drives the bell's red dot.
   const [showDrawer, setShowDrawer] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
+  // handle to a user_id once session + profile are loaded, then push it into
+  // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up
+  // so a magic-link sign-in that loses the URL still resumes correctly.
+  const [friendInviteHandle, setFriendInviteHandle] = useState(null);
   const [guestSessionId, setGuestSessionId] = useState(null);
   const [guestSessionData, setGuestSessionData] = useState(null);
   const [guestLoading, setGuestLoading] = useState(true);
@@ -332,9 +349,40 @@ export default function RestaurantSwipeMVP() {
   const guestSignupCaptchaRef = useRef(null);
 
 useEffect(() => {
-    // Parse window.location.pathname for /s/<uuid> — guest invite landing.
-    // UUID v4 pattern. If no match, this is a normal app load.
+    // Parse window.location.pathname for two known shapes:
+    //   /s/<uuid>     — guest session invite landing
+    //   /u/@<handle>  — friend invite landing (Phase D.1 task #11)
+    //
+    // For /u/@handle we set friendInviteHandle (and stash in localStorage so
+    // the magic-link round trip survives). The actual handle → user_id
+    // resolution happens in a separate useEffect once session is loaded.
     const path = window.location.pathname;
+
+    // First: check for /u/@handle. URL-decode the path so %40 encodings of
+    // the @ work the same as a literal @.
+    const decodedPath = (() => {
+      try { return decodeURIComponent(path); } catch { return path; }
+    })();
+    const handleMatch = decodedPath.match(/^\/u\/@?([A-Za-z0-9_]{2,30})\/?$/);
+    if (handleMatch) {
+      const handle = handleMatch[1].toLowerCase();
+      setFriendInviteHandle(handle);
+      try {
+        localStorage.setItem("flanit_pending_invite_handle", handle);
+      } catch {}
+      setGuestLoading(false);
+      return;
+    }
+
+    // Second: check for resumed invite from localStorage (magic-link return)
+    try {
+      const stashed = localStorage.getItem("flanit_pending_invite_handle");
+      if (stashed) {
+        setFriendInviteHandle(stashed.toLowerCase());
+      }
+    } catch {}
+
+    // Third: existing /s/<uuid> guest session path.
     const match = path.match(
       /^\/s\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
     );
@@ -688,6 +736,51 @@ useEffect(() => {
       cancelled = true;
     };
   }, [session?.user?.id]);
+
+  // Resolve a pending /u/@handle invite once session is loaded. Three
+  // branches:
+  //   - handle resolves to the viewer themselves → clear and route to Profile
+  //   - handle resolves to another user → push into lookupUserId so
+  //     ProfileLookupScreen opens with state-aware Add friend / Accept / etc.
+  //   - handle not found → toast + clear (no surface to route to)
+  // localStorage gets cleared regardless so the handle doesn't re-trigger on
+  // every refresh once it's been consumed. We don't wait for `profile` to
+  // load — brand-new users don't have a profile row yet, so self-detection
+  // happens via comparing resolved id to session.user.id instead.
+  useEffect(() => {
+    if (!friendInviteHandle) return;
+    if (!session?.user?.id) return; // wait for sign-in
+
+    let cancelled = false;
+
+    supabase
+      .from("profiles")
+      .select("id, username")
+      .ilike("username", friendInviteHandle)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        try { localStorage.removeItem("flanit_pending_invite_handle"); } catch {}
+        try { window.history.replaceState({}, "", "/"); } catch {}
+        if (error || !data) {
+          showToast(`No @${friendInviteHandle} on Flanit`);
+          setFriendInviteHandle(null);
+          return;
+        }
+        // Self-handle: route to Profile tab instead of opening lookup.
+        if (data.id === session.user.id) {
+          setFriendInviteHandle(null);
+          setTab("profile");
+          return;
+        }
+        setLookupUserId(data.id);
+        setFriendInviteHandle(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [friendInviteHandle, session?.user?.id]);
 
   // Refetch the unread (pending request) count on session change and whenever
   // the drawer closes — closing means the user just acted on (or saw) the
@@ -1923,7 +2016,7 @@ if (authLoading || guestLoading) {
   }
 
   if (!session) {
-    return <SignInScreen />;
+    return <SignInScreen inviteHandle={friendInviteHandle} />;
   }
 
   if (loading) {
