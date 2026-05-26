@@ -3,7 +3,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Plus, Bell } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -276,6 +276,25 @@ export default function RestaurantSwipeMVP() {
   const [savedVenueIds, setSavedVenueIds] = useState(() => new Set());
   const [hiddenVenueIds, setHiddenVenueIds] = useState(() => new Set());
   const [isGuest, setIsGuest] = useState(false);
+  // Lightweight global toast surface. Set the message to render; auto-clears
+  // after a couple of seconds via the Toast component's own timer. Used by
+  // the FAB stubs for "Coming soon" actions in D.1.
+  const [toastMessage, setToastMessage] = useState(null);
+  const showToast = (msg) => setToastMessage(msg);
+  // Lifted from ProfileTab so the FAB on either Profile or Map can trigger
+  // the same Import from Google Maps overlay. The overlay itself renders at
+  // App level (below) and is full-screen, so it covers whatever tab is active.
+  const [showImport, setShowImport] = useState(false);
+  // Find Friends sheet — opened by the FAB's Add friend option AND by the
+  // FriendsScreen header + icon. Lifted to App level for that shared access.
+  const [showFindFriends, setShowFindFriends] = useState(false);
+  // Profile lookup overlay — set to a user_id to open. Lifted from ProfileTab
+  // so FindFriendsSheet search results can also open profiles.
+  const [lookupUserId, setLookupUserId] = useState(null);
+  // Activity drawer (bell icon). Derived from existing tables for D.1 — no
+  // dedicated notifications table yet. unreadCount drives the bell's red dot.
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [guestSessionId, setGuestSessionId] = useState(null);
   const [guestSessionData, setGuestSessionData] = useState(null);
   const [guestLoading, setGuestLoading] = useState(true);
@@ -669,6 +688,29 @@ useEffect(() => {
       cancelled = true;
     };
   }, [session?.user?.id]);
+
+  // Refetch the unread (pending request) count on session change and whenever
+  // the drawer closes — closing means the user just acted on (or saw) the
+  // items, so the count should re-sync.
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("friendships")
+      .select("id", { count: "exact", head: true })
+      .eq("addressee_id", session.user.id)
+      .eq("status", "pending")
+      .then(({ count, error }) => {
+        if (cancelled || error) return;
+        setUnreadCount(count ?? 0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, showDrawer]);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -1742,17 +1784,28 @@ if (authLoading || guestLoading) {
                 : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
             </h1>
           </div>
+          {/* Add-host-as-friend CTA — high-intent moment, hides itself if
+              already friends or pending in either direction. */}
+          <AddHostFriendCard
+            hostUserId={guestSessionData?.host_user_id}
+            hostName={hostName}
+            viewerUserId={session?.user?.id}
+            showToast={showToast}
+          />
           <SessionResultsView
             participants={sessionParticipants}
             sessionMatches={sessionMatches}
             myLikedIds={guestLikes}
             venues={venues}
             userId={session?.user?.id}
+            hostUserId={guestSessionData?.host_user_id}
             savedIds={savedVenueIds}
             onSave={saveVenue}
             onUnsave={unsaveVenue}
             onHide={hideVenue}
+            onOpenProfile={(uid) => setLookupUserId(uid)}
             showConfetti={matchCount > 0}
+            showToast={showToast}
           />
           <BottomTabBar tab={null} setTab={goToMainApp} />
         </div>
@@ -2158,11 +2211,14 @@ if (authLoading || guestLoading) {
                   myLikedIds={markLikes}
                   venues={venues}
                   userId={session?.user?.id}
+                  hostUserId={session?.user?.id}
                   savedIds={savedVenueIds}
                   onSave={saveVenue}
                   onUnsave={unsaveVenue}
                   onHide={hideVenue}
+                  onOpenProfile={(uid) => setLookupUserId(uid)}
                   showConfetti={matchCount > 0}
+                  showToast={showToast}
                 />
               ) : (
                 <div className="flex-1 overflow-y-auto p-6 text-center text-neutral-500 text-sm">
@@ -2236,13 +2292,68 @@ if (authLoading || guestLoading) {
           onUnsave={unsaveVenue}
           onHide={hideVenue}
           onUnhide={unhideVenue}
+          showImport={showImport}
+          setShowImport={setShowImport}
+          showToast={showToast}
+          onOpenProfile={(uid) => setLookupUserId(uid)}
+          onFindFriends={() => setShowFindFriends(true)}
         />
       )}
+      {showImport && (
+        <ImportGoogleMapsScreen
+          userId={session?.user?.id}
+          onBack={() => setShowImport(false)}
+        />
+      )}
+      {showFindFriends && (
+        <FindFriendsSheet
+          profile={profile}
+          viewerUserId={session?.user?.id}
+          onBack={() => setShowFindFriends(false)}
+          onOpenProfile={(uid) => {
+            setShowFindFriends(false);
+            setLookupUserId(uid);
+          }}
+          showToast={showToast}
+        />
+      )}
+      {lookupUserId && (
+        <ProfileLookupScreen
+          userId={lookupUserId}
+          viewerUserId={session?.user?.id}
+          onBack={() => setLookupUserId(null)}
+          showToast={showToast}
+        />
+      )}
+      {session?.user?.id && (
+        <BellButton
+          unreadCount={unreadCount}
+          onClick={() => setShowDrawer(true)}
+        />
+      )}
+      {showDrawer && (
+        <ActivityDrawer
+          userId={session?.user?.id}
+          onClose={() => setShowDrawer(false)}
+          onOpenProfile={(uid) => {
+            setShowDrawer(false);
+            setLookupUserId(uid);
+          }}
+          showToast={showToast}
+        />
+      )}
+      <FloatingActionButton
+        tab={tab}
+        showToast={showToast}
+        onAddFriend={() => setShowFindFriends(true)}
+        onImportMap={() => setShowImport(true)}
+      />
+      <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
       <BottomTabBar tab={tab} setTab={setTab} />
     </div>
   );
 }
- 
+
 function venueMatchesAreas(venue, selectedAreas, radiusKm) {
   if (!selectedAreas || selectedAreas.length === 0) return true;
   const lat = Number(venue.latitude);
@@ -3230,6 +3341,406 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
   );
 }
 
+// FAB rendered above the BottomTabBar on Profile and Map tabs. Tap to expand
+// a tap-to-pick menu of add actions; per-tab option list. Find Friends is
+// the only target wired in D.1 (via onAddFriend); the other actions are stubs
+// that fire a "Coming soon" toast until #17 / #21 ship.
+function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap }) {
+  const [open, setOpen] = useState(false);
+
+  // Don't render outside Profile + Map tabs.
+  if (tab !== "profile" && tab !== "map") return null;
+
+  const profileOptions = [
+    {
+      key: "add_friend",
+      icon: <UserPlus size={16} />,
+      label: "Add friend",
+      action: () => {
+        setOpen(false);
+        onAddFriend();
+      },
+    },
+    {
+      key: "add_venue",
+      icon: <MapPin size={16} />,
+      label: "Add a venue",
+      action: () => {
+        setOpen(false);
+        showToast("Add a venue — coming soon");
+      },
+    },
+    {
+      key: "import_map",
+      icon: <Upload size={16} />,
+      label: "Import a map",
+      action: () => {
+        setOpen(false);
+        onImportMap();
+      },
+    },
+  ];
+
+  const mapOptions = profileOptions.filter((o) => o.key !== "add_friend");
+  const options = tab === "profile" ? profileOptions : mapOptions;
+
+  return (
+    <>
+      {open && (
+        <button
+          type="button"
+          aria-label="Close add menu"
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-[3050] bg-black/25"
+        />
+      )}
+      {open && (
+        <div className="fixed bottom-[136px] right-4 z-[3060] flex flex-col items-end gap-2">
+          {options.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={opt.action}
+              className="flex items-center gap-2 bg-white border border-neutral-200 rounded-full pl-3 pr-4 py-2 text-sm font-medium shadow-sm active:scale-95 transition"
+            >
+              <span className="text-neutral-600">{opt.icon}</span>
+              <span>{opt.label}</span>
+              {opt.soon && (
+                <span className="text-[10px] bg-amber-50 text-amber-700 rounded-full px-2 py-0.5 font-medium ml-1">
+                  soon
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        aria-label={open ? "Close add menu" : "Open add menu"}
+        onClick={() => setOpen((v) => !v)}
+        className={`fixed bottom-20 right-4 z-[3060] w-12 h-12 rounded-full flex items-center justify-center shadow-md active:scale-95 transition ${
+          open ? "bg-neutral-900 text-white" : "bg-[#455d3b] text-white"
+        }`}
+      >
+        {open ? <X size={20} /> : <Plus size={20} />}
+      </button>
+    </>
+  );
+}
+
+// Bell button anchored top-right. z-[2950] sits above tab content but below
+// full-screen sub-screens (z-[3500]+) and below BottomTabBar at z-[3000] —
+// since the bell is at the top of the viewport and the tab bar at the bottom
+// they don't overlap geometrically, so the order doesn't matter visually.
+function BellButton({ unreadCount, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={
+        unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"
+      }
+      className="fixed top-4 right-4 z-[2950] w-10 h-10 rounded-full bg-white border border-neutral-200 shadow-sm flex items-center justify-center text-neutral-700 hover:bg-neutral-50 active:scale-95 transition"
+    >
+      <Bell size={18} />
+      {unreadCount > 0 && (
+        <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-medium flex items-center justify-center border-2 border-white">
+          {unreadCount > 9 ? "9+" : unreadCount}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// Activity drawer — slides in from the right (~78% width). Items are derived
+// on the fly from existing tables (no `notifications` table yet — that's D.5).
+// Two derivation sources for D.1:
+//   - friendships pending (you're addressee) → "X sent you a friend request"
+//     with inline Accept/Decline
+//   - friendships accepted (you're requester, responded_at set) → "X accepted
+//     your friend request" — informational
+// NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
+// Items with their relevant timestamp after last_seen are NEW. Updated when
+// the drawer closes.
+function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
+  const [items, setItems] = useState(null); // null = loading
+  const [acting, setActing] = useState(null); // friendship.id mid-update
+  const [lastSeen] = useState(() => {
+    const stored = localStorage.getItem("flanit_drawer_last_seen");
+    return stored ? new Date(stored) : new Date(0);
+  });
+
+  async function load() {
+    if (!userId) return;
+    const [incomingRes, acceptedRes] = await Promise.all([
+      // Pending requests where I'm addressee — actionable items.
+      supabase
+        .from("friendships")
+        .select("id, requester_id, created_at, status")
+        .eq("addressee_id", userId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false }),
+      // Accepted requests where I'm requester, recently — they accepted me.
+      supabase
+        .from("friendships")
+        .select("id, addressee_id, responded_at, status")
+        .eq("requester_id", userId)
+        .eq("status", "accepted")
+        .not("responded_at", "is", null)
+        .order("responded_at", { ascending: false })
+        .limit(20),
+    ]);
+
+    const incomingRows = incomingRes.data || [];
+    const acceptedRows = acceptedRes.data || [];
+
+    // Hydrate profiles for every referenced other-party user_id.
+    const otherIds = new Set();
+    incomingRows.forEach((r) => otherIds.add(r.requester_id));
+    acceptedRows.forEach((r) => otherIds.add(r.addressee_id));
+
+    let profilesById = {};
+    if (otherIds.size > 0) {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("id, display_name, username")
+        .in("id", Array.from(otherIds));
+      profilesById = Object.fromEntries(
+        (profileRows || []).map((p) => [p.id, p])
+      );
+    }
+
+    // Shape into a flat sortable list of activity items.
+    const incomingItems = incomingRows.map((r) => ({
+      kind: "request_received",
+      id: `req_${r.id}`,
+      friendshipId: r.id,
+      otherId: r.requester_id,
+      profile: profilesById[r.requester_id] || null,
+      timestamp: r.created_at,
+    }));
+    const acceptedItems = acceptedRows.map((r) => ({
+      kind: "request_accepted",
+      id: `acc_${r.id}`,
+      otherId: r.addressee_id,
+      profile: profilesById[r.addressee_id] || null,
+      timestamp: r.responded_at,
+    }));
+
+    const all = [...incomingItems, ...acceptedItems].sort(
+      (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    setItems(all);
+  }
+
+  useEffect(() => {
+    load();
+    // Stamp the timestamp on close, not open — closing means "you've seen it."
+    return () => {
+      localStorage.setItem(
+        "flanit_drawer_last_seen",
+        new Date().toISOString()
+      );
+    };
+    // load only depends on userId.
+  }, [userId]);
+
+  async function setStatus(friendshipId, newStatus) {
+    setActing(friendshipId);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: newStatus })
+      .eq("id", friendshipId);
+    setActing(null);
+    if (error) {
+      console.error("Drawer action failed:", error);
+      showToast?.("Couldn't update");
+      return;
+    }
+    await load();
+  }
+
+  const newItems = (items || []).filter(
+    (i) => new Date(i.timestamp) > lastSeen
+  );
+  const earlierItems = (items || []).filter(
+    (i) => new Date(i.timestamp) <= lastSeen
+  );
+
+  return (
+    <>
+      {/* Scrim covers everything; click closes. */}
+      <button
+        type="button"
+        aria-label="Close notifications"
+        onClick={onClose}
+        className="fixed inset-0 z-[3490] bg-black/25"
+      />
+      {/* Drawer panel — ~78% width, full height, slides from the right. */}
+      <div className="fixed top-0 right-0 bottom-0 z-[3500] w-[78%] max-w-sm bg-[#fdf6f0] overflow-y-auto shadow-xl">
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {items === null && (
+            <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
+          )}
+
+          {items !== null && items.length === 0 && (
+            <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+              <p className="text-sm text-neutral-600">
+                Nothing here yet.
+              </p>
+              <p className="text-xs text-neutral-500 mt-1">
+                Friend requests and accepted connections will show up here.
+              </p>
+            </div>
+          )}
+
+          {newItems.length > 0 && (
+            <>
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+                New
+              </p>
+              <div className="space-y-2 mb-4">
+                {newItems.map((item) => (
+                  <ActivityItem
+                    key={item.id}
+                    item={item}
+                    isNew
+                    acting={acting === item.friendshipId}
+                    onAccept={() => setStatus(item.friendshipId, "accepted")}
+                    onDecline={() => setStatus(item.friendshipId, "declined")}
+                    onOpenProfile={onOpenProfile}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {earlierItems.length > 0 && (
+            <>
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+                Earlier
+              </p>
+              <div className="space-y-2">
+                {earlierItems.map((item) => (
+                  <ActivityItem
+                    key={item.id}
+                    item={item}
+                    acting={acting === item.friendshipId}
+                    onAccept={() => setStatus(item.friendshipId, "accepted")}
+                    onDecline={() => setStatus(item.friendshipId, "declined")}
+                    onOpenProfile={onOpenProfile}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Single drawer item row. Visually distinguishes NEW with a soft green tinted
+// background. Friend-request items get inline Accept/Decline; accepted-back
+// items are informational.
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile }) {
+  const name = item.profile?.display_name || "Someone";
+  const handle = item.profile?.username ? `@${item.profile.username}` : "";
+  const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
+
+  if (item.kind === "request_received") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <button
+          type="button"
+          onClick={() => onOpenProfile?.(item.otherId)}
+          className="w-full flex items-center gap-3 text-left mb-3"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong> sent you a friend request
+            </p>
+            {handle && (
+              <p className="text-[11px] text-neutral-500 truncate">{handle}</p>
+            )}
+          </div>
+        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onAccept}
+            className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onDecline}
+            className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Decline
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "request_accepted") {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.(item.otherId)}
+        className={`w-full rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <FriendAvatar profile={item.profile} small />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{name}</strong> accepted your friend request
+          </p>
+          {handle && (
+            <p className="text-[11px] text-neutral-500 truncate">{handle}</p>
+          )}
+        </div>
+        <Check size={16} className="text-[#455d3b]" />
+      </button>
+    );
+  }
+
+  return null;
+}
+
+// Single-message toast pinned above the BottomTabBar. Self-clears after 2.2s.
+// Render anywhere; controlled via App-level toastMessage state.
+function Toast({ message, onDismiss }) {
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(onDismiss, 2200);
+    return () => clearTimeout(t);
+  }, [message, onDismiss]);
+
+  if (!message) return null;
+  return (
+    <div className="fixed bottom-36 left-1/2 -translate-x-1/2 z-[3070] bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg pointer-events-none">
+      {message}
+    </div>
+  );
+}
+
 function BottomTabBar({ tab, setTab }) {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-[3000] bg-white border-t border-neutral-100 shadow-lg">
@@ -3245,7 +3756,7 @@ function BottomTabBar({ tab, setTab }) {
             size={20}
             fill={tab === "matches" ? "#455d3b" : "none"}
           />
-          <span className="text-xs font-medium">Matches</span>
+          <span className="text-xs font-medium">With friends</span>
         </button>
         <button
           type="button"
@@ -3287,11 +3798,21 @@ function ProfileTab({
   onUnsave,
   onHide,
   onUnhide,
+  showImport,
+  setShowImport,
+  showToast,
+  onOpenProfile,
+  onFindFriends,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
-  const [showImport, setShowImport] = useState(false);
   const [sessionsCount, setSessionsCount] = useState(null);
+  // Friend graph counts for the entry card subtitle. Two queries kept simple
+  // (count, head:true). Task #8 will lift requestCount to App level so the
+  // bell badge shares the same source.
+  const [showFriends, setShowFriends] = useState(false);
+  const [friendCount, setFriendCount] = useState(null);
+  const [requestCount, setRequestCount] = useState(null);
 
   // Light-touch count fetch just for the card subtitle. The full sessions
   // list is fetched lazily when the user opens the SessionsScreen.
@@ -3308,6 +3829,40 @@ function ProfileTab({
       .then(({ count, error }) => {
         if (cancelled || error) return;
         setSessionsCount(count ?? 0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
+  // Friend + request counts. Accepted friendships (either party) drive the
+  // "N friends" subtitle; incoming pending requests (I'm addressee) drive the
+  // red badge. Two separate count queries — cheaper than fetching rows.
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) {
+      setFriendCount(null);
+      setRequestCount(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("friendships")
+      .select("id", { count: "exact", head: true })
+      .or(`requester_id.eq.${uid},addressee_id.eq.${uid}`)
+      .eq("status", "accepted")
+      .then(({ count, error }) => {
+        if (cancelled || error) return;
+        setFriendCount(count ?? 0);
+      });
+    supabase
+      .from("friendships")
+      .select("id", { count: "exact", head: true })
+      .eq("addressee_id", uid)
+      .eq("status", "pending")
+      .then(({ count, error }) => {
+        if (cancelled || error) return;
+        setRequestCount(count ?? 0);
       });
     return () => {
       cancelled = true;
@@ -3425,6 +3980,15 @@ function ProfileTab({
           onUnhide={onUnhide}
         />
       )}
+      {showFriends && (
+        <FriendsScreen
+          userId={session?.user?.id}
+          onBack={() => setShowFriends(false)}
+          showToast={showToast}
+          onOpenProfile={onOpenProfile}
+          onAddFriend={onFindFriends}
+        />
+      )}
       {showSessions && (
         <SessionsScreen
           venues={venues}
@@ -3434,12 +3998,8 @@ function ProfileTab({
           onUnsave={onUnsave}
           onHide={onHide}
           onBack={() => setShowSessions(false)}
-        />
-      )}
-      {showImport && (
-        <ImportGoogleMapsScreen
-          userId={session?.user?.id}
-          onBack={() => setShowImport(false)}
+          showToast={showToast}
+          onOpenProfile={(uid) => setLookupUserId(uid)}
         />
       )}
       <div className="w-full max-w-sm">
@@ -3493,6 +4053,32 @@ function ProfileTab({
                 : sessionsCount === 0
                 ? "Nothing yet"
                 : `${sessionsCount} session${sessionsCount === 1 ? "" : "s"}`}
+            </p>
+          </div>
+          <span className="text-neutral-400 text-lg leading-none">›</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowFriends(true)}
+          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+            <Heart size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium">Friends</p>
+            <p className="text-xs text-neutral-500 flex items-center gap-2">
+              {friendCount === null
+                ? "Loading..."
+                : friendCount === 0
+                ? "Nobody yet"
+                : `${friendCount} friend${friendCount === 1 ? "" : "s"}`}
+              {requestCount > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-red-600 text-white text-[10px] font-medium px-2 py-0.5">
+                  {requestCount} request{requestCount === 1 ? "" : "s"}
+                </span>
+              )}
             </p>
           </div>
           <span className="text-neutral-400 text-lg leading-none">›</span>
@@ -3864,6 +4450,118 @@ function ConfettiBurst() {
   );
 }
 
+// Post-match-reveal CTA card for guests: "X hosted this session — add as a
+// friend?" Renders between the title and the SessionResultsView body on the
+// guest's end-of-game screen. Hides itself when:
+//   - viewer IS the host (defensive — shouldn't happen on guest side)
+//   - viewer + host are already friends
+//   - host already sent the viewer a pending request (Accept happens in the
+//     participants strip / drawer instead)
+// When the viewer already sent a pending request (or just sent one this
+// session), shows a frozen "Request sent" pill instead of the Add button.
+function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToast }) {
+  const [friendship, setFriendship] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [justSent, setJustSent] = useState(false);
+
+  async function load() {
+    if (!viewerUserId || !hostUserId || viewerUserId === hostUserId) {
+      setLoading(false);
+      return;
+    }
+    const { data } = await supabase
+      .from("friendships")
+      .select("id, requester_id, addressee_id, status")
+      .or(`requester_id.eq.${viewerUserId},addressee_id.eq.${viewerUserId}`);
+    const rows = data || [];
+    const match = rows.find(
+      (r) => r.requester_id === hostUserId || r.addressee_id === hostUserId
+    );
+    setFriendship(match || null);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+    // load only depends on viewerUserId + hostUserId.
+  }, [viewerUserId, hostUserId]);
+
+  async function handleAdd() {
+    if (!viewerUserId || !hostUserId) return;
+    setSending(true);
+    let error;
+    if (friendship && friendship.status !== "accepted") {
+      ({ error } = await supabase
+        .from("friendships")
+        .update({ status: "pending" })
+        .eq("id", friendship.id));
+    } else {
+      ({ error } = await supabase
+        .from("friendships")
+        .insert({
+          requester_id: viewerUserId,
+          addressee_id: hostUserId,
+          status: "pending",
+        }));
+    }
+    setSending(false);
+    if (error) {
+      console.error("AddHostFriendCard insert failed:", error);
+      showToast?.("Couldn't send request");
+      return;
+    }
+    setJustSent(true);
+    await load();
+  }
+
+  // Don't render at all in these cases.
+  if (loading) return null;
+  if (!viewerUserId || !hostUserId) return null;
+  if (viewerUserId === hostUserId) return null;
+  if (friendship?.status === "accepted") return null;
+  if (
+    friendship?.status === "pending" &&
+    friendship?.addressee_id === viewerUserId
+  ) {
+    // Host sent viewer a request — surfaced via drawer / participants strip.
+    return null;
+  }
+
+  const alreadySent =
+    justSent ||
+    (friendship?.status === "pending" &&
+      friendship?.requester_id === viewerUserId);
+
+  return (
+    <div className="bg-[#fdf6f0] px-4 pt-3 pb-1">
+      <div className="max-w-sm mx-auto rounded-2xl border border-[#c5d4c2] bg-white p-4 shadow-sm">
+        <p className="text-sm text-neutral-700">
+          <span className="font-medium">{hostName}</span> hosted this session — add as a friend?
+        </p>
+        <div className="mt-3 flex justify-end">
+          {alreadySent ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-white border border-neutral-200 text-neutral-500 text-xs font-medium px-3 py-1.5">
+              <Check size={12} />
+              Request sent
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={sending}
+              className="inline-flex items-center gap-1 rounded-full bg-[#455d3b] text-white text-xs font-medium px-4 py-1.5 disabled:opacity-50"
+            >
+              <UserPlus size={12} />
+              {sending ? "Sending..." : "Add friend"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Shared body for any "session results" surface — the post-game host
 // matches screen, the post-game guest revealed view, and the historical
 // Your Sessions detail view all render this. Accepts data as props rather
@@ -3878,15 +4576,131 @@ function SessionResultsView({
   myLikedIds,
   venues,
   userId,
+  hostUserId,
   savedIds,
   onSave,
   onUnsave,
   onHide,
+  onOpenProfile,
   showConfetti = false,
+  showToast,
 }) {
   const [view, setView] = useState("matches");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [detailVenue, setDetailVenue] = useState(null);
+  // Friendship-state derivation for participant chips (Task #9).
+  // Two-step fetch (no FK between friendships and profiles): pull all my
+  // friendship rows where either party is me, plus profile rows for every
+  // non-me participant. The chip per row is derived in JS.
+  const [friendshipByOtherId, setFriendshipByOtherId] = useState(() => new Map());
+  const [profileExistsSet, setProfileExistsSet] = useState(() => new Set());
+  const [chipActingOn, setChipActingOn] = useState(null); // user_id mid-update
+
+  const otherIds = useMemo(
+    () =>
+      participants
+        .map((p) => p.user_id)
+        .filter((id) => id && id !== userId),
+    [participants, userId]
+  );
+
+  async function loadFriendshipState() {
+    if (!userId || otherIds.length === 0) {
+      setFriendshipByOtherId(new Map());
+      setProfileExistsSet(new Set());
+      return;
+    }
+    const [friendshipsRes, profilesRes] = await Promise.all([
+      supabase
+        .from("friendships")
+        .select("id, requester_id, addressee_id, status")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
+      supabase
+        .from("profiles")
+        .select("id")
+        .in("id", otherIds),
+    ]);
+    const otherIdSet = new Set(otherIds);
+    const map = new Map();
+    for (const row of friendshipsRes.data || []) {
+      const other =
+        row.requester_id === userId ? row.addressee_id : row.requester_id;
+      if (otherIdSet.has(other)) map.set(other, row);
+    }
+    setFriendshipByOtherId(map);
+    setProfileExistsSet(new Set((profilesRes.data || []).map((r) => r.id)));
+  }
+
+  // Re-derive when the viewer or the set of other participants changes.
+  // Using a string key for otherIds so identity changes don't trigger refetches.
+  const otherIdsKey = otherIds.join("|");
+  useEffect(() => {
+    loadFriendshipState();
+    // loadFriendshipState closes over userId + otherIds (captured via otherIdsKey).
+  }, [userId, otherIdsKey]);
+
+  function getRowState(p) {
+    if (!p.user_id) return "invite"; // shouldn't happen in practice
+    if (p.user_id === userId) return "self";
+    const row = friendshipByOtherId.get(p.user_id);
+    if (row) {
+      if (row.status === "accepted") return "friends";
+      if (row.status === "pending") {
+        return row.addressee_id === userId ? "incoming" : "outgoing";
+      }
+    }
+    // No active friendship row. If the participant has no profile they
+    // likely joined anonymously and never signed up — show Invite.
+    if (!profileExistsSet.has(p.user_id)) return "invite";
+    return "none";
+  }
+
+  async function sendRequestTo(otherId) {
+    if (!userId || !otherId) return;
+    setChipActingOn(otherId);
+    const existing = friendshipByOtherId.get(otherId);
+    let error;
+    if (existing) {
+      ({ error } = await supabase
+        .from("friendships")
+        .update({ status: "pending" })
+        .eq("id", existing.id));
+    } else {
+      ({ error } = await supabase
+        .from("friendships")
+        .insert({
+          requester_id: userId,
+          addressee_id: otherId,
+          status: "pending",
+        }));
+    }
+    setChipActingOn(null);
+    if (error) {
+      console.error("sendRequestTo failed:", error);
+      showToast?.("Couldn't send request");
+      return;
+    }
+    showToast?.("Request sent");
+    await loadFriendshipState();
+  }
+
+  async function acceptRequestFrom(otherId) {
+    const row = friendshipByOtherId.get(otherId);
+    if (!row) return;
+    setChipActingOn(otherId);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted" })
+      .eq("id", row.id);
+    setChipActingOn(null);
+    if (error) {
+      console.error("acceptRequestFrom failed:", error);
+      showToast?.("Couldn't accept");
+      return;
+    }
+    showToast?.("Friend added");
+    await loadFriendshipState();
+  }
 
   // Clear per-row selections when switching tabs.
   useEffect(() => {
@@ -3981,23 +4795,86 @@ function SessionResultsView({
                 (p.user_id === userId ? "You" : "Guest");
               const initial = name.charAt(0).toUpperCase();
               const isMe = p.user_id === userId;
+              const isHost = !!hostUserId && p.user_id === hostUserId;
+              const state = getRowState(p);
+              const acting = chipActingOn === p.user_id;
               return (
                 <div
                   key={p.user_id}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-3 py-1"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-2 py-1"
                 >
-                  <span
-                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-                      isMe
-                        ? "bg-[#455d3b] text-white"
-                        : "bg-[#edf2eb] text-[#3f5a3a]"
-                    }`}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isMe) return;
+                      if (state === "invite") return;
+                      onOpenProfile?.(p.user_id);
+                    }}
+                    aria-label={isMe ? "You" : `Open ${name}'s profile`}
+                    disabled={isMe || state === "invite"}
+                    className="inline-flex items-center gap-1.5"
                   >
-                    {initial}
-                  </span>
-                  <span className="text-xs font-medium text-neutral-700">
-                    {isMe ? "You" : name}
-                  </span>
+                    <span
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+                        isMe
+                          ? "bg-[#455d3b] text-white"
+                          : "bg-[#edf2eb] text-[#3f5a3a]"
+                      }`}
+                    >
+                      {initial}
+                    </span>
+                    <span className="text-xs font-medium text-neutral-700">
+                      {isMe ? "You" : name}
+                    </span>
+                  </button>
+                  {isHost && (
+                    <span className="text-[9px] uppercase tracking-wide font-semibold text-neutral-500 px-1">
+                      Host
+                    </span>
+                  )}
+                  {/* Friendship-state chip. Self has no chip. */}
+                  {!isMe && state === "friends" && (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-[#edf2eb] text-[#3f5a3a] text-[10px] font-medium px-1.5 py-0.5 border border-[#c5d4c2]">
+                      <Check size={10} />
+                      Friends
+                    </span>
+                  )}
+                  {!isMe && state === "incoming" && (
+                    <button
+                      type="button"
+                      onClick={() => acceptRequestFrom(p.user_id)}
+                      disabled={acting}
+                      className="rounded-full bg-[#455d3b] text-white text-[10px] font-medium px-2 py-0.5 disabled:opacity-50"
+                    >
+                      {acting ? "…" : "Accept"}
+                    </button>
+                  )}
+                  {!isMe && state === "outgoing" && (
+                    <span className="rounded-full bg-white border border-neutral-200 text-neutral-500 text-[10px] font-medium px-2 py-0.5">
+                      Requested
+                    </span>
+                  )}
+                  {!isMe && state === "none" && (
+                    <button
+                      type="button"
+                      onClick={() => sendRequestTo(p.user_id)}
+                      disabled={acting}
+                      className="rounded-full bg-[#455d3b] text-white text-[10px] font-medium px-2 py-0.5 disabled:opacity-50"
+                    >
+                      {acting ? "…" : "Add"}
+                    </button>
+                  )}
+                  {!isMe && state === "invite" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        showToast?.("Invite flow coming soon — share your link from Find Friends")
+                      }
+                      className="rounded-full bg-white border border-neutral-200 text-neutral-600 text-[10px] font-medium px-2 py-0.5"
+                    >
+                      Invite
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -4257,7 +5134,7 @@ function ImportGoogleMapsScreen({ userId, onBack }) {
   const totalRaw = Object.values(perListCounts).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="fixed inset-0 z-30 bg-[#fdf6f0] overflow-y-auto pb-20">
+    <div className="fixed inset-0 z-[3500] bg-[#fdf6f0] overflow-y-auto pb-20">
       <div className="max-w-sm mx-auto p-4">
         <button
           type="button"
@@ -4279,21 +5156,26 @@ function ImportGoogleMapsScreen({ userId, onBack }) {
             <h2 className="text-base font-semibold tracking-tight mb-2">
               Step 1 — Export from Google
             </h2>
-            <ol className="text-sm text-neutral-700 space-y-2 mb-4 list-decimal list-inside">
+            <ol className="text-sm text-neutral-700 space-y-3 mb-4 list-decimal list-outside ml-5">
               <li>
-                Go to{" "}
+                Open{" "}
                 <a
-                  href="https://takeout.google.com/settings/takeout/custom/maps"
+                  href="https://takeout.google.com/settings/takeout"
                   target="_blank"
                   rel="noreferrer"
                   className="text-[#455d3b] underline"
                 >
                   Google Takeout
-                </a>{" "}
-                and select <strong>Saved</strong> only.
+                </a>
+                <ul className="list-disc list-outside ml-5 mt-2 space-y-1 text-neutral-600">
+                  <li>Click <strong>Deselect all</strong></li>
+                  <li>Scroll to the option <strong>Saved</strong> and select (near the bottom)</li>
+                  <li>Click <strong>Next step</strong></li>
+                  <li>Click <strong>Create export</strong></li>
+                </ul>
               </li>
-              <li>Download the zip (usually arrives by email in a few minutes).</li>
-              <li>Upload it here.</li>
+              <li>Download the zip from your email.</li>
+              <li>Upload it below.</li>
             </ol>
             <input
               ref={fileInputRef}
@@ -4401,7 +5283,7 @@ function ImportGoogleMapsScreen({ userId, onBack }) {
   );
 }
 
-function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack }) {
+function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile }) {
   const [sessions, setSessions] = useState(null); // null = loading
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionMatches, setSessionMatches] = useState(null); // null = loading
@@ -4729,14 +5611,900 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
             myLikedIds={myLikedIds}
             venues={venues}
             userId={userId}
+            hostUserId={selectedSession.host_user_id}
             savedIds={savedIds}
             onSave={onSave}
             onUnsave={onUnsave}
             onHide={onHide}
+            onOpenProfile={onOpenProfile}
             showConfetti={false}
+            showToast={showToast}
           />
         </>
       )}
+    </div>
+  );
+}
+
+// Full-screen Friends overlay. Pattern of MyListScreen / SessionsScreen.
+// Renders two views via a segmented toggle:
+//   - friends: search + list of accepted friendships
+//   - requests: Incoming (others requested me) + Pending (I requested others)
+//
+// Two-step fetch: friendships → profiles for referenced user_ids → merge in JS.
+// friendships table has no FK to profiles (both link to auth.users), so no
+// implicit Supabase join. Refetch on every mount + after every action.
+function FriendsScreen({ userId, onBack, showToast, onOpenProfile, onAddFriend }) {
+  const [view, setView] = useState("friends");
+  const [friends, setFriends] = useState(null); // null = loading; array when loaded
+  const [incoming, setIncoming] = useState(null);
+  const [pending, setPending] = useState(null);
+  const [search, setSearch] = useState("");
+  const [actingId, setActingId] = useState(null); // friendship.id mid-update, blocks double-tap
+
+  // Loads all three datasets in parallel then resolves profile rows for
+  // referenced user_ids in a single batch fetch. Profile lookups indexed by
+  // id so each friendship/request row can hydrate display_name + username.
+  async function load() {
+    if (!userId) return;
+    const [acceptedRes, incomingRes, sentRes] = await Promise.all([
+      supabase
+        .from("friendships")
+        .select("id, requester_id, addressee_id, created_at")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+        .eq("status", "accepted"),
+      supabase
+        .from("friendships")
+        .select("id, requester_id, created_at")
+        .eq("addressee_id", userId)
+        .eq("status", "pending"),
+      supabase
+        .from("friendships")
+        .select("id, addressee_id, created_at")
+        .eq("requester_id", userId)
+        .eq("status", "pending"),
+    ]);
+
+    const acceptedRows = acceptedRes.data || [];
+    const incomingRows = incomingRes.data || [];
+    const sentRows = sentRes.data || [];
+
+    // Collect every other-party user_id we need to hydrate from profiles.
+    const otherIds = new Set();
+    acceptedRows.forEach((r) => {
+      otherIds.add(r.requester_id === userId ? r.addressee_id : r.requester_id);
+    });
+    incomingRows.forEach((r) => otherIds.add(r.requester_id));
+    sentRows.forEach((r) => otherIds.add(r.addressee_id));
+
+    let profilesById = {};
+    if (otherIds.size > 0) {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("id, display_name, username")
+        .in("id", Array.from(otherIds));
+      profilesById = Object.fromEntries(
+        (profileRows || []).map((p) => [p.id, p])
+      );
+    }
+
+    setFriends(
+      acceptedRows.map((r) => {
+        const otherId = r.requester_id === userId ? r.addressee_id : r.requester_id;
+        return { ...r, otherId, profile: profilesById[otherId] || null };
+      })
+    );
+    setIncoming(
+      incomingRows.map((r) => ({
+        ...r,
+        otherId: r.requester_id,
+        profile: profilesById[r.requester_id] || null,
+      }))
+    );
+    setPending(
+      sentRows.map((r) => ({
+        ...r,
+        otherId: r.addressee_id,
+        profile: profilesById[r.addressee_id] || null,
+      }))
+    );
+  }
+
+  useEffect(() => {
+    load();
+    // load is defined inside the component; userId is the only external it
+    // reads, so the dep array is intentionally just [userId].
+  }, [userId]);
+
+  // Update helpers: set status then refetch. Single source of truth.
+  async function setStatus(friendshipId, newStatus) {
+    setActingId(friendshipId);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: newStatus })
+      .eq("id", friendshipId);
+    setActingId(null);
+    if (error) {
+      console.error("Friendship update failed:", error);
+      showToast?.("Something went wrong");
+      return;
+    }
+    await load();
+  }
+
+  const friendCount = friends?.length ?? 0;
+  const requestCount = (incoming?.length ?? 0) + (pending?.length ?? 0);
+
+  // Search filter applies to the Friends view only — case-insensitive match on
+  // display_name or username.
+  const filteredFriends = (friends || []).filter((f) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    const name = (f.profile?.display_name || "").toLowerCase();
+    const handle = (f.profile?.username || "").toLowerCase();
+    return name.includes(q) || handle.includes(q);
+  });
+
+  return (
+    <div className="fixed inset-0 z-[3500] bg-[#fdf6f0] overflow-y-auto pb-24">
+      <div className="max-w-sm mx-auto p-4">
+        <div className="flex items-center justify-between mb-4">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            className="inline-flex items-center gap-1 text-sm text-neutral-600"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          <button
+            type="button"
+            onClick={onAddFriend}
+            aria-label="Add friend"
+            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-[#455d3b] hover:bg-[#455d3b]/10 transition"
+          >
+            <UserPlus size={18} />
+          </button>
+        </div>
+
+        <h1 className="text-2xl font-semibold tracking-tight mb-4">
+          With friends
+        </h1>
+
+        {/* Segmented toggle — same style as the All venues / My List pill. */}
+        <div className="flex bg-white border border-neutral-200 rounded-full p-1 mb-4 text-sm">
+          <button
+            type="button"
+            onClick={() => setView("friends")}
+            className={`flex-1 py-2 rounded-full font-medium transition ${
+              view === "friends"
+                ? "bg-[#455d3b] text-white"
+                : "text-neutral-600"
+            }`}
+          >
+            Friends · {friendCount}
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("requests")}
+            className={`flex-1 py-2 rounded-full font-medium transition ${
+              view === "requests"
+                ? "bg-[#455d3b] text-white"
+                : "text-neutral-600"
+            }`}
+          >
+            Requests · {requestCount}
+          </button>
+        </div>
+
+        {view === "friends" && (
+          <>
+            <div className="relative mb-4">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
+              />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search your friends"
+                className="w-full pl-9 pr-3 py-2 rounded-full border border-neutral-200 bg-white text-sm focus:outline-none focus:border-[#455d3b]"
+              />
+            </div>
+
+            {friends === null && (
+              <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
+            )}
+            {friends !== null && filteredFriends.length === 0 && (
+              <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+                <p className="text-sm text-neutral-600 mb-3">
+                  {friends.length === 0
+                    ? "No friends yet. Tap the + to invite someone."
+                    : "No matches for that search."}
+                </p>
+              </div>
+            )}
+            {friends !== null && filteredFriends.length > 0 && (
+              <div className="rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden">
+                {filteredFriends.map((f, idx) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => onOpenProfile?.(f.otherId)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition ${
+                      idx > 0 ? "border-t border-neutral-100" : ""
+                    }`}
+                  >
+                    <FriendAvatar profile={f.profile} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {f.profile?.display_name || "Unknown"}
+                      </p>
+                      {f.profile?.username && (
+                        <p className="text-xs text-neutral-500 truncate">
+                          @{f.profile.username}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-neutral-400 text-lg leading-none">›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {view === "requests" && (
+          <>
+            <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+              Incoming · {incoming?.length ?? 0}
+            </p>
+            {incoming === null && (
+              <p className="text-sm text-neutral-500 text-center py-4">Loading…</p>
+            )}
+            {incoming !== null && incoming.length === 0 && (
+              <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-4">
+                <p className="text-sm text-neutral-600">
+                  No incoming requests.
+                </p>
+              </div>
+            )}
+            {incoming !== null && incoming.length > 0 && (
+              <div className="rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden mb-4">
+                {incoming.map((r, idx) => (
+                  <div
+                    key={r.id}
+                    className={`px-4 py-3 ${
+                      idx > 0 ? "border-t border-neutral-100" : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenProfile?.(r.otherId)}
+                      className="w-full flex items-center gap-3 text-left mb-3"
+                    >
+                      <FriendAvatar profile={r.profile} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">
+                          {r.profile?.display_name || "Unknown"}
+                        </p>
+                        {r.profile?.username && (
+                          <p className="text-xs text-neutral-500 truncate">
+                            @{r.profile.username}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={actingId === r.id}
+                        onClick={() => setStatus(r.id, "accepted")}
+                        className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actingId === r.id}
+                        onClick={() => setStatus(r.id, "declined")}
+                        className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actingId === r.id}
+                        onClick={() => setStatus(r.id, "blocked")}
+                        aria-label="Block"
+                        className="rounded-full border border-neutral-300 px-3 py-2 text-neutral-500 disabled:opacity-50"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pending sent — boxed sub-block, visually distinct from incoming. */}
+            <div className="bg-neutral-100 rounded-3xl p-4">
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
+                Pending · you sent · {pending?.length ?? 0}
+              </p>
+              {pending === null && (
+                <p className="text-sm text-neutral-500 text-center py-2">Loading…</p>
+              )}
+              {pending !== null && pending.length === 0 && (
+                <p className="text-sm text-neutral-600">
+                  No outgoing requests.
+                </p>
+              )}
+              {pending !== null && pending.length > 0 && (
+                <div className="space-y-2">
+                  {pending.map((r) => (
+                    <div
+                      key={r.id}
+                      className="flex items-center gap-3 bg-white rounded-2xl px-3 py-2"
+                    >
+                      <FriendAvatar profile={r.profile} small />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">
+                          {r.profile?.display_name || "Unknown"}
+                        </p>
+                        {r.profile?.username && (
+                          <p className="text-[11px] text-neutral-500 truncate">
+                            @{r.profile.username}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={actingId === r.id}
+                        onClick={() => setStatus(r.id, "declined")}
+                        className="text-xs text-neutral-500 hover:text-red-600 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Find Friends overlay — opened from the FAB's Add friend option AND from
+// the FriendsScreen header + button. Three paths to a new connection:
+//   - @handle search → live results from `profiles` table
+//   - QR / share link → in-person / async
+//   - Email invite → mailto stub for D.1 (proper Resend-backed flow is later)
+//
+// Auto-routes the search input: a string matching *@*.* is treated as an
+// email and shows a "coming soon" hint since email lookup needs an RPC to
+// query auth.users (deferred). Otherwise it's an @handle search against
+// profiles.username with ilike.
+function FindFriendsSheet({
+  profile,
+  viewerUserId,
+  onBack,
+  onOpenProfile,
+  showToast,
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState(null); // null = no search yet, [] = no results
+  const [searching, setSearching] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const isEmail = /\S+@\S+\.\S+/.test(query.trim());
+  const trimmed = query.trim().replace(/^@/, ""); // drop a leading @ if typed
+
+  const myHandle = profile?.username || "";
+  const inviteUrl = myHandle
+    ? `https://flanit.co/u/@${myHandle}`
+    : "https://flanit.co";
+
+  // Debounced search against profiles.username. Skips if too short or empty
+  // or looks like an email (handled separately).
+  useEffect(() => {
+    if (isEmail) {
+      setResults(null);
+      return;
+    }
+    if (!trimmed || trimmed.length < 2) {
+      setResults(null);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, tier")
+        .ilike("username", `%${trimmed}%`)
+        .neq("id", viewerUserId) // never list myself
+        .limit(20);
+      if (cancelled) return;
+      setSearching(false);
+      if (error) {
+        console.error("Search failed:", error);
+        setResults([]);
+        return;
+      }
+      setResults(data || []);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [trimmed, isEmail, viewerUserId]);
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast?.("Couldn't copy — long-press the link instead");
+    }
+  }
+
+  function emailInvite() {
+    const subject = encodeURIComponent("Join me on Flanit");
+    const body = encodeURIComponent(
+      `Hey — join me on Flanit, we'll find places to eat together.\n\n${inviteUrl}`
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[3500] bg-[#fdf6f0] overflow-y-auto pb-24">
+      <div className="max-w-sm mx-auto p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back"
+          className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
+
+        <h1 className="text-2xl font-semibold tracking-tight mb-4">
+          Find friends
+        </h1>
+
+        {/* Search input */}
+        <div className="relative mb-4">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
+          />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search @username or email"
+            className="w-full pl-9 pr-3 py-2.5 rounded-full border border-neutral-200 bg-white text-sm focus:outline-none focus:border-[#455d3b]"
+            autoFocus
+          />
+        </div>
+
+        {/* Search results / states */}
+        {isEmail && query.trim() && (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 text-center mb-4">
+            <p className="text-sm text-neutral-600 mb-1">
+              Email search coming soon
+            </p>
+            <p className="text-xs text-neutral-500">
+              For now, invite by email below or share your link.
+            </p>
+          </div>
+        )}
+
+        {!isEmail && trimmed.length >= 2 && searching && (
+          <p className="text-sm text-neutral-500 text-center py-3">
+            Searching…
+          </p>
+        )}
+
+        {!isEmail && trimmed.length >= 2 && !searching && results !== null && results.length === 0 && (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 text-center mb-4">
+            <p className="text-sm text-neutral-600">
+              No @{trimmed} on Flanit yet
+            </p>
+          </div>
+        )}
+
+        {!isEmail && results !== null && results.length > 0 && (
+          <div className="rounded-3xl bg-white shadow-sm border border-neutral-100 overflow-hidden mb-4">
+            {results.map((r, idx) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onOpenProfile?.(r.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition ${
+                  idx > 0 ? "border-t border-neutral-100" : ""
+                }`}
+              >
+                <FriendAvatar profile={r} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">
+                    {r.display_name || "Unknown"}
+                  </p>
+                  {r.username && (
+                    <p className="text-xs text-neutral-500 truncate">
+                      @{r.username}
+                    </p>
+                  )}
+                </div>
+                <span className="text-neutral-400 text-lg leading-none">›</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* QR + share link block */}
+        <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-3 text-center">
+          <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-3">
+            Or share your code
+          </p>
+          {myHandle ? (
+            <>
+              <div className="inline-block p-3 bg-white border border-neutral-200 rounded-2xl mb-3">
+                <QRCodeSVG value={inviteUrl} size={140} />
+              </div>
+              <p className="text-sm text-neutral-700 mb-3 break-all">
+                flanit.co/u/<strong>@{myHandle}</strong>
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-neutral-500 mb-3">
+              Set a @username on your profile first.
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={copyLink}
+              disabled={!myHandle}
+              className="flex-1 rounded-full border border-neutral-300 py-2 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {copied ? <Check size={14} /> : <Upload size={14} />}
+              {copied ? "Copied" : "Copy link"}
+            </button>
+            <button
+              type="button"
+              onClick={emailInvite}
+              disabled={!myHandle}
+              className="flex-1 rounded-full border border-neutral-300 py-2 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              Invite by email
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Profile lookup overlay — opened when tapping a row from FriendsScreen, a
+// SessionsScreen participant chip (task #9), or eventually the drawer. Two
+// render states gated by friendship status:
+//   - locked: only the hero + Add friend CTA visible. List / Friends / Activity
+//     are placeholders explaining they unlock on connect.
+//   - unlocked: hero + Friends ✓ chip + three sections. In D.1 the sections
+//     are still placeholders (their content needs SECURITY DEFINER RPCs to
+//     bypass owner-only RLS on saved_venues + friendships — D.2 work).
+//
+// Friendship-state derivation: fetch all my friendships, find any row where
+// the other party is the viewed user. That row's status drives the CTA.
+function ProfileLookupScreen({
+  userId,
+  viewerUserId,
+  onBack,
+  showToast,
+}) {
+  const [profile, setProfile] = useState(null);
+  const [friendship, setFriendship] = useState(null); // null = no row found
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState(false);
+  const [avatarExpanded, setAvatarExpanded] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    const [profileRes, friendshipsRes] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, display_name, username, tier")
+        .eq("id", userId)
+        .maybeSingle(),
+      // RLS limits this to rows where the viewer is a party. Find the one
+      // (if any) where the other party is the user being looked up.
+      supabase
+        .from("friendships")
+        .select("id, requester_id, addressee_id, status")
+        .or(`requester_id.eq.${viewerUserId},addressee_id.eq.${viewerUserId}`),
+    ]);
+    setProfile(profileRes.data || null);
+    const rows = friendshipsRes.data || [];
+    const match = rows.find(
+      (r) => r.requester_id === userId || r.addressee_id === userId
+    );
+    setFriendship(match || null);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    if (!userId || !viewerUserId) return;
+    load();
+    // load reads userId + viewerUserId only.
+  }, [userId, viewerUserId]);
+
+  // Derived friendship state.
+  const status = friendship?.status; // 'pending' | 'accepted' | 'declined' | 'blocked' | undefined
+  const iAmRequester = friendship?.requester_id === viewerUserId;
+  const isFriends = status === "accepted";
+  const pendingFromMe = status === "pending" && iAmRequester;
+  const pendingToMe = status === "pending" && !iAmRequester;
+  // 'declined' or 'blocked' or no row → treat as openable (Add friend).
+  // Re-requesting after a decline is allowed via insert (the UNIQUE constraint
+  // is on (requester, addressee) — we'd update the existing row instead, but
+  // for D.1 first ship we'll let the insert error surface if it conflicts.
+
+  // Action: send a new friend request.
+  async function sendRequest() {
+    setActing(true);
+    if (friendship && status !== "accepted") {
+      // Existing row in declined/blocked/pending — flip status to pending.
+      const { error } = await supabase
+        .from("friendships")
+        .update({ status: "pending" })
+        .eq("id", friendship.id);
+      setActing(false);
+      if (error) {
+        showToast?.("Couldn't send request");
+        console.error(error);
+        return;
+      }
+    } else {
+      const { error } = await supabase
+        .from("friendships")
+        .insert({
+          requester_id: viewerUserId,
+          addressee_id: userId,
+          status: "pending",
+        });
+      setActing(false);
+      if (error) {
+        showToast?.("Couldn't send request");
+        console.error(error);
+        return;
+      }
+    }
+    await load();
+  }
+
+  async function acceptRequest() {
+    if (!friendship) return;
+    setActing(true);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted" })
+      .eq("id", friendship.id);
+    setActing(false);
+    if (error) {
+      showToast?.("Couldn't accept request");
+      return;
+    }
+    await load();
+  }
+
+  async function cancelOrDecline() {
+    if (!friendship) return;
+    setActing(true);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "declined" })
+      .eq("id", friendship.id);
+    setActing(false);
+    if (error) {
+      showToast?.("Couldn't update request");
+      return;
+    }
+    await load();
+  }
+
+  async function unfriend() {
+    if (!friendship) return;
+    if (!window.confirm("Remove this friend?")) return;
+    setActing(true);
+    const { error } = await supabase
+      .from("friendships")
+      .delete()
+      .eq("id", friendship.id);
+    setActing(false);
+    if (error) {
+      showToast?.("Couldn't unfriend");
+      return;
+    }
+    await load();
+  }
+
+  const displayName = profile?.display_name || "Loading…";
+  const handle = profile?.username ? `@${profile.username}` : "";
+  const initial =
+    (profile?.display_name || profile?.username || "?").trim()[0]?.toUpperCase() || "?";
+
+  return (
+    <div className="fixed inset-0 z-[3500] bg-[#fdf6f0] overflow-y-auto pb-24">
+      <div className="max-w-sm mx-auto p-4">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back"
+          className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
+
+        {/* Hero */}
+        <div className="flex flex-col items-center text-center mb-6">
+          <button
+            type="button"
+            onClick={() => setAvatarExpanded((v) => !v)}
+            aria-label="Expand avatar"
+            className={`rounded-full bg-[#455d3b] text-white font-medium flex items-center justify-center transition-all ${
+              avatarExpanded ? "w-40 h-40 text-6xl" : "w-20 h-20 text-3xl"
+            }`}
+          >
+            {initial}
+          </button>
+          <h1 className="text-2xl font-semibold tracking-tight mt-3">
+            {displayName}
+          </h1>
+          {handle && (
+            <p className="text-sm text-neutral-500">{handle}</p>
+          )}
+          {profile?.tier && profile.tier !== "active" && (
+            <span className="inline-block mt-2 text-xs text-[#455d3b] bg-[#455d3b]/10 rounded-full px-3 py-1">
+              {profile.tier.replace("_", " ")}
+            </span>
+          )}
+        </div>
+
+        {/* CTA — derived from friendship state */}
+        {loading && (
+          <p className="text-sm text-neutral-500 text-center mb-6">Loading…</p>
+        )}
+
+        {!loading && !isFriends && !pendingToMe && !pendingFromMe && (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={sendRequest}
+            className="w-full rounded-full bg-[#455d3b] text-white font-medium py-3 mb-6 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <UserPlus size={16} /> Add friend
+          </button>
+        )}
+
+        {!loading && pendingToMe && (
+          <div className="flex gap-2 mb-6">
+            <button
+              type="button"
+              disabled={acting}
+              onClick={acceptRequest}
+              className="flex-1 rounded-full bg-[#455d3b] text-white font-medium py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Check size={16} /> Accept request
+            </button>
+            <button
+              type="button"
+              disabled={acting}
+              onClick={cancelOrDecline}
+              className="rounded-full border border-neutral-300 px-4 py-3 text-sm disabled:opacity-50"
+            >
+              Decline
+            </button>
+          </div>
+        )}
+
+        {!loading && pendingFromMe && (
+          <div className="flex gap-2 mb-6">
+            <div className="flex-1 rounded-full bg-neutral-100 text-neutral-600 font-medium py-3 flex items-center justify-center gap-2">
+              <Check size={16} /> Request sent
+            </div>
+            <button
+              type="button"
+              disabled={acting}
+              onClick={cancelOrDecline}
+              className="rounded-full border border-neutral-300 px-4 py-3 text-sm disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {!loading && isFriends && (
+          <div className="flex gap-2 mb-6">
+            <div className="flex-1 rounded-full bg-[#455d3b]/10 text-[#455d3b] font-medium py-3 flex items-center justify-center gap-2">
+              <Check size={16} /> Friends
+            </div>
+            <button
+              type="button"
+              disabled={acting}
+              onClick={unfriend}
+              aria-label="Unfriend"
+              className="rounded-full border border-neutral-300 px-4 py-3 text-neutral-500 disabled:opacity-50"
+            >
+              <UserMinus size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* Locked sections (pre-friend) */}
+        {!loading && !isFriends && (
+          <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+            <p className="text-sm text-neutral-600 mb-1">
+              Add as a friend to see
+            </p>
+            <p className="text-xs text-neutral-500">
+              their list, friends, and activity unlock once you're connected.
+            </p>
+          </div>
+        )}
+
+        {/* Unlocked sections (post-friend) — placeholders for D.2 */}
+        {!loading && isFriends && (
+          <>
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-3">
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
+                Their list
+              </p>
+              <p className="text-sm text-neutral-600">
+                Coming soon — friend list visibility ships with D.2.
+              </p>
+            </div>
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-3">
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
+                Their friends
+              </p>
+              <p className="text-sm text-neutral-600">
+                Coming soon — friends-of-friends ships with D.2.
+              </p>
+            </div>
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
+                Recent activity
+              </p>
+              <p className="text-sm text-neutral-600">
+                Coming soon — check-ins and reviews ship with D.2.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Small avatar that renders initials from display_name or @handle. Olive bg
+// to match the rest of the app's primary palette.
+function FriendAvatar({ profile, small = false }) {
+  const seed =
+    (profile?.display_name || profile?.username || "?").trim() || "?";
+  const initial = seed[0].toUpperCase();
+  const size = small ? "w-8 h-8 text-xs" : "w-10 h-10 text-sm";
+  return (
+    <div
+      className={`flex-shrink-0 ${size} rounded-full bg-[#455d3b]/10 text-[#455d3b] flex items-center justify-center font-medium`}
+    >
+      {initial}
     </div>
   );
 }
