@@ -320,6 +320,10 @@ export default function RestaurantSwipeMVP() {
   const [guestName, setGuestName] = useState("");
   const [guestStage, setGuestStage] = useState("splash");
   const [guestShortlistIds, setGuestShortlistIds] = useState([]);
+  // Full venue rows for the curated shortlist, fetched via SECURITY DEFINER
+  // RPC so guests can see host-imported (unverified) venues that the general
+  // venues query's RLS (verified OR own) would otherwise hide.
+  const [guestShortlistVenues, setGuestShortlistVenues] = useState([]);
   const [guestLikes, setGuestLikes] = useState([]);
   const [guestPasses, setGuestPasses] = useState([]);
   const [guestCardIndex, setGuestCardIndex] = useState(0);
@@ -440,32 +444,34 @@ useEffect(() => {
   }, [guestSessionId, guestSessionData?.host_user_id]);
 
   useEffect(() => {
-    if (!isGuest || !guestSessionId) {
+    // Clear unless we're a guest in an OPEN curated session (the shortlist
+    // RPC returns nothing until the host hits "Done & send"; concurrent
+    // sessions have no shortlist — guests swipe the captured filter set).
+    if (
+      !isGuest ||
+      !guestSessionId ||
+      guestSessionData?.mode !== "curated" ||
+      guestSessionData?.status !== "open"
+    ) {
       setGuestShortlistIds([]);
-      return;
-    }
-    if (guestSessionData?.mode !== "curated") {
-      // Concurrent sessions don't have a shortlist — guests swipe the
-      // session's captured filter set instead.
-      setGuestShortlistIds([]);
-      return;
-    }
-    if (guestSessionData?.status !== "open") {
-      // RPC returns nothing until host hits "Done & send".
-      setGuestShortlistIds([]);
+      setGuestShortlistVenues([]);
       return;
     }
     let cancelled = false;
+    // Full venue rows via SECURITY DEFINER RPC — bypasses venues RLS so
+    // host-imported (unverified) shortlist venues aren't dropped for guests.
     supabase
-      .rpc("get_session_shortlist", { p_session_id: guestSessionId })
+      .rpc("get_session_shortlist_venues", { p_session_id: guestSessionId })
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
-          console.error("Failed to fetch shortlist:", error);
+          console.error("Failed to fetch shortlist venues:", error);
           setGuestShortlistIds([]);
+          setGuestShortlistVenues([]);
           return;
         }
-        setGuestShortlistIds((data || []).map((r) => r.venue_id));
+        setGuestShortlistVenues(data || []);
+        setGuestShortlistIds((data || []).map((v) => v.id));
       });
     return () => {
       cancelled = true;
@@ -572,9 +578,9 @@ useEffect(() => {
     if (!target || sessionMatches.length < target) return;
     if (matchMode === "concurrent" && screen === "swipe") {
       setScreen("matches");
-    } else if (matchMode === "curated" && screen === "invite_share") {
-      setScreen("matches");
     }
+    // Curated ("Send options") no longer auto-flips on a match count — the
+    // host opens the results board manually via the "See results" CTA.
   }, [matchMode, screen, matchLimit, sessionMatches.length]);
 
   // Refetch reconciliation when the guest hits the submitted screen. Two
@@ -639,14 +645,12 @@ useEffect(() => {
       // Concurrent: reconciliation polling tells us when target is reached.
       shouldFlip = target > 0 && sessionMatches.length >= target;
     } else if (mode === "curated") {
-      // Curated: every guest-like is a mutual match by construction (the
-      // shortlist IS the host's likes). target hit, or end of shortlist.
+      // "Send options": the guest votes the WHOLE shortlist — no target-based
+      // early stop (that was the old mutual-match model). Flip only when they
+      // reach the end of the shortlist (or it's empty).
       const queueEmpty = guestQueue.length === 0 && guestCardIndex === 0;
       const reachedEnd = guestQueue.length > 0 && guestCardIndex >= guestQueue.length;
-      shouldFlip =
-        (target > 0 && guestLikes.length >= target) ||
-        reachedEnd ||
-        queueEmpty;
+      shouldFlip = reachedEnd || queueEmpty;
     }
 
     if (shouldFlip) {
@@ -982,13 +986,15 @@ useEffect(() => {
     //   surface live on the host's invite_share screen.
     if (!guestSessionId || !session?.user?.id) return;
     if (!guestSessionData?.mode) return;
+    // Via SECURITY DEFINER RPC, not a direct insert: anon guests' direct
+    // session_swipes writes fail RLS WITH CHECK (auth.uid()=NULL at policy
+    // eval), so votes were silently dropped. The RPC writes user_id =
+    // auth.uid() server-side. Same fix pattern as join_session.
     supabase
-      .from("session_swipes")
-      .insert({
-        session_id: guestSessionId,
-        user_id: session.user.id,
-        venue_id: venueId,
-        action,
+      .rpc("record_session_swipe", {
+        p_session_id: guestSessionId,
+        p_venue_id: venueId,
+        p_action: action,
       })
       .then(({ error }) => {
         if (error) console.error("Failed to record guest swipe:", error);
@@ -1375,9 +1381,9 @@ loadAreas();
 
     // Curated: intersect with host's shortlist.
     if (guestSessionData.mode === "curated") {
-      if (!guestShortlistIds.length) return [];
-      const shortlistSet = new Set(guestShortlistIds);
-      return venues.filter((v) => shortlistSet.has(v.id));
+      // Use the RPC-fetched shortlist venue rows directly (not the RLS-limited
+      // `venues` array) so host-imported venues are included for the guest.
+      return guestShortlistVenues;
     }
 
     // Concurrent: apply the host's captured filter set.
@@ -1414,7 +1420,7 @@ loadAreas();
 
       return true;
     });
-  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds]);
+  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues]);
 
   const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
@@ -1474,6 +1480,8 @@ loadAreas();
             day: "numeric",
             month: "short",
           })
+        : matchMode === "curated"
+        ? "Send options"
         : "Right now";
 
       const { data, error } = await supabase
@@ -1484,7 +1492,7 @@ loadAreas();
           source_type: matchSource === "my_list" ? "list" : "filters",
           filters: sessionFilters,
           list_id: null,
-          target_matches: matchLimit || null,
+          target_matches: matchMode === "curated" ? null : matchLimit || null,
           event_at: eventDate ? eventDate.toISOString() : null,
           expires_at: expiresAt.toISOString(),
           status: matchMode === "curated" ? "host_curating" : "open",
@@ -1674,9 +1682,10 @@ if (authLoading || guestLoading) {
       // 'submitted' stage when target is reached. So in concurrent we never
       // show "All done" mid-flow — we just keep swiping and let the trigger
       // navigate. The only mid-flow end state is queueEmpty.
-      const hitTarget = isCurated && target > 0 && guestLikes.length >= target;
+      // "Send options": the guest votes the whole shortlist — done only when
+      // they reach the end of it. No target-based early stop.
       const showAllDone = isCurated
-        ? (guestAtEnd || hitTarget || queueEmpty)
+        ? (guestAtEnd || queueEmpty)
         : queueEmpty;
 
       return (
@@ -1694,7 +1703,7 @@ if (authLoading || guestLoading) {
               {!queueEmpty && !showAllDone && (
                 <div className="text-xs text-neutral-500 shrink-0">
                   {isCurated
-                    ? `${guestLikes.length}${target > 0 ? ` / ${target}` : ""} matched`
+                    ? `${guestLikes.length} picked`
                     : `${sessionMatches.length}${target > 0 ? ` / ${target}` : ""} matched`}
                 </div>
               )}
@@ -1711,14 +1720,14 @@ if (authLoading || guestLoading) {
               <div className="rounded-2xl bg-white shadow-sm border border-neutral-100 p-6 text-center">
                 <h2 className="text-lg font-semibold tracking-tight">All done!</h2>
                 <p className="mt-2 text-sm text-neutral-600">
-                  {hitTarget && !guestAtEnd
-                    ? `You've matched ${guestLikes.length}. Submit now or keep swiping if you want more options.`
-                    : isCurated
-                    ? "Submit your picks and we'll show you what you matched on."
+                  {isCurated
+                    ? `Send your picks to ${hostName} — they'll choose from everyone's options.`
                     : `Submit your picks — we'll show you what you and ${hostName} both liked.`}
                 </p>
                 <p className="mt-3 text-xs text-neutral-500">
-                  {guestLikes.length} like{guestLikes.length === 1 ? "" : "s"}, {guestPasses.length} pass{guestPasses.length === 1 ? "" : "es"}
+                  {isCurated
+                    ? `${guestLikes.length} picked, ${guestPasses.length} skipped`
+                    : `${guestLikes.length} like${guestLikes.length === 1 ? "" : "s"}, ${guestPasses.length} pass${guestPasses.length === 1 ? "" : "es"}`}
                 </p>
               </div>
             ) : guestCurrentVenue ? (
@@ -1763,6 +1772,107 @@ if (authLoading || guestLoading) {
     }
 
     if (guestStage === "submitted") {
+      // "Send my options" (curated): the guest just votes — no match reveal
+      // and no signup gate. Show a confirmation; the host chooses from
+      // everyone's options and (for signed-in/friend guests) the decision
+      // lands in their Activity drawer once the host confirms.
+      if (guestSessionData.mode === "curated") {
+        const stillAnon = session?.user?.is_anonymous !== false;
+        return (
+          <div className="min-h-screen bg-[#fdf6f0] text-[#111111] p-4">
+            <div className="w-full max-w-sm mx-auto pt-12 pb-20">
+              <div className="text-center">
+                <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+                  <Check size={28} />
+                </div>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  Sent to {hostName}
+                </h1>
+                <p className="mt-3 text-sm text-neutral-600">
+                  Your picks are in. {hostName} will choose from everyone's
+                  options and let you know where you're going.
+                </p>
+                <p className="mt-4 text-xs text-neutral-500">
+                  You picked {guestLikes.length} place{guestLikes.length === 1 ? "" : "s"}.
+                </p>
+              </div>
+
+              {stillAnon ? (
+                <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+                  {!guestSignupSent ? (
+                    <>
+                      <h2 className="text-lg font-semibold tracking-tight">
+                        Want to know the plan?
+                      </h2>
+                      <p className="mt-2 text-sm text-neutral-600">
+                        Create an account and we'll let you know where {hostName} lands — your picks and saved places stay with you.
+                      </p>
+                      <form onSubmit={handleGuestSignup} className="mt-4 space-y-3">
+                        <input
+                          type="email"
+                          required
+                          placeholder="you@example.com"
+                          value={guestSignupEmail}
+                          onChange={(e) => {
+                            setGuestSignupEmail(e.target.value);
+                            if (guestSignupError) setGuestSignupError("");
+                          }}
+                          className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-base focus:outline-none focus:border-[#455d3b]"
+                        />
+                        <div className="flex justify-center">
+                          <Turnstile
+                            ref={guestSignupCaptchaRef}
+                            siteKey={TURNSTILE_SITE_KEY}
+                            onSuccess={setGuestSignupCaptchaToken}
+                            onExpire={() => setGuestSignupCaptchaToken(null)}
+                            onError={() => setGuestSignupCaptchaToken(null)}
+                            options={{ theme: "light" }}
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={
+                            guestSigningUp ||
+                            !guestSignupEmail.trim() ||
+                            !guestSignupCaptchaToken
+                          }
+                          className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {guestSigningUp ? "Sending..." : "Create account"}
+                        </button>
+                        {guestSignupError && (
+                          <p className="text-sm text-red-600">{guestSignupError}</p>
+                        )}
+                      </form>
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="text-lg font-semibold tracking-tight">
+                        Check your email
+                      </h2>
+                      <p className="mt-2 text-sm text-neutral-600">
+                        We sent a link to <span className="font-medium">{guestSignupEmail}</span>. Click it to finish creating your account.
+                      </p>
+                      <p className="mt-3 text-xs text-neutral-500">
+                        Keep this tab open — you'll be signed in automatically once you confirm.
+                      </p>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => goToMainApp("map")}
+                  className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                >
+                  Explore the app
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      }
+
       // Match count comes from the reconciliation RPC (populated via live
       // polling for concurrent, one-shot fetch for curated). Anonymous
       // users see a sign-up gate first; signed-in (or dev-override) users
@@ -2161,7 +2271,12 @@ if (authLoading || guestLoading) {
                 selected={selectedCuisines}
                 setSelected={setSelectedCuisines}
               />
-              <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
+              {/* "How many matches?" is a stop-after-N target — only
+                  meaningful for Right Now (concurrent). Send options
+                  (curated) curates the whole shortlist, so no target. */}
+              {matchMode !== "curated" && (
+                <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
+              )}
 
               {/* Multi-mode-only fields. Solo doesn't need participants or
                   a session time limit. */}
@@ -2203,16 +2318,22 @@ if (authLoading || guestLoading) {
             matchCount={sessionMatches.length}
             target={matchLimit}
             onBack={() => setScreen("filters")}
-            onContinue={() => setScreen("swipe")}
+            onContinue={() => setScreen(matchMode === "curated" ? "curated_results" : "swipe")}
           />
         )}
         {screen === "swipe" && (
           <div>
             <div className="mb-3 flex items-center justify-between text-sm text-neutral-500">
               <span>
-                Matches:{" "}
-                {matchMode === "concurrent" ? sessionMatches.length : matches.length}
-                {" "}/ {matchLimit}
+                {matchMode === "curated" ? (
+                  <>Shortlisted: {matches.length}</>
+                ) : (
+                  <>
+                    Matches:{" "}
+                    {matchMode === "concurrent" ? sessionMatches.length : matches.length}
+                    {" "}/ {matchLimit}
+                  </>
+                )}
               </span>
               <span>
                 {currentUserSwipedCount + 1} of {swipeQueue.length}
@@ -2260,6 +2381,36 @@ if (authLoading || guestLoading) {
           </div>
         )}
         
+        {screen === "curated_results" && (
+          <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col pb-24">
+            <div className="bg-white border-b border-neutral-100 px-4 py-5 text-center">
+              <p className="text-sm text-neutral-500">Everyone's picks</p>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+                Who's in for what
+              </h1>
+            </div>
+            <CuratedResultsBoard
+              sessionId={currentSessionId}
+              venues={venues}
+              hostUserId={session?.user?.id}
+              savedIds={savedVenueIds}
+              onSave={saveVenue}
+              onUnsave={unsaveVenue}
+              onHide={hideVenue}
+              onDone={() => {
+                setScreen("mode");
+                setMatches([]);
+                setMarkLikes([]);
+                setMarkPasses([]);
+                setSessionMatches([]);
+                setCurrentSessionId(null);
+                setPicked(null);
+                setCardIndex(0);
+              }}
+              showToast={showToast}
+            />
+          </div>
+        )}
         {screen === "matches" && (() => {
           // Post-game results — full-screen overlay using the shared
           // SessionResultsView. Concurrent + Curated both read from live
@@ -4669,6 +4820,300 @@ function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToast }) {
 // Returns body content only (participants strip + Matches/My-likes pill +
 // always-on checkboxes + bulk Save + MapVenueSheet on row tap). The parent
 // is responsible for its own header / footer / wrapper layout.
+// Host results board for "Send my options" (curated). Reads get_curated_results
+// (every shortlisted venue ranked by GUEST votes, host's own likes excluded),
+// resolves voter display names from session_participants, and lets the host
+// commit to a venue via set_curated_decision ("We're going here").
+function CuratedResultsBoard({ sessionId, venues, hostUserId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide }) {
+  const [results, setResults] = useState(null);
+  const [venueRows, setVenueRows] = useState([]);
+  const [names, setNames] = useState({});
+  const [decidedVenueId, setDecidedVenueId] = useState(null);
+  const [deciding, setDeciding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [detailVenue, setDetailVenue] = useState(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    async function load(initial) {
+      if (initial) setLoading(true);
+      const [resRpc, venuesRpc, partsRpc, sessRpc] = await Promise.all([
+        supabase.rpc("get_curated_results", { p_session_id: sessionId }),
+        supabase.rpc("get_session_shortlist_venues", { p_session_id: sessionId }),
+        supabase
+          .from("session_participants")
+          .select("user_id, display_name")
+          .eq("session_id", sessionId),
+        supabase
+          .from("match_sessions")
+          .select("decided_venue_id")
+          .eq("id", sessionId)
+          .single(),
+      ]);
+      if (cancelled) return;
+      if (resRpc.error) console.error("get_curated_results failed:", resRpc.error);
+      setResults(resRpc.data || []);
+      setVenueRows(venuesRpc.data || []);
+      const nameMap = {};
+      (partsRpc.data || []).forEach((p) => {
+        if (p.user_id !== hostUserId) nameMap[p.user_id] = p.display_name || "Friend";
+      });
+      setNames(nameMap);
+      if (initial) setDecidedVenueId(sessRpc.data?.decided_venue_id ?? null);
+      if (initial) setLoading(false);
+    }
+    load(true);
+    // Poll so guest votes appear live without leaving/reopening the board.
+    const pollId = setInterval(() => load(false), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(pollId);
+    };
+  }, [sessionId, hostUserId]);
+
+  // Venue details come from the shortlist RPC (bypasses venues RLS so
+  // host-imported venues resolve for guests too); fall back to the venues prop.
+  const venueById = useMemo(() => {
+    const m = {};
+    (venues || []).forEach((v) => {
+      m[v.id] = v;
+    });
+    (venueRows || []).forEach((v) => {
+      m[v.id] = v;
+    });
+    return m;
+  }, [venues, venueRows]);
+
+  async function decide(venueId) {
+    setDeciding(true);
+    const { error } = await supabase.rpc("set_curated_decision", {
+      p_session_id: sessionId,
+      p_venue_id: venueId,
+    });
+    setDeciding(false);
+    if (error) {
+      console.error("set_curated_decision failed:", error);
+      if (showToast) showToast("Couldn't save — try again");
+      return;
+    }
+    setDecidedVenueId(venueId);
+    if (showToast) showToast("Locked it in");
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 p-8 text-center text-sm text-neutral-500">
+        Loading results…
+      </div>
+    );
+  }
+
+  const list = results || [];
+  const topCount = list.length ? list[0].vote_count : 0;
+  // Badge a "top pick" only when ONE venue holds the lead. A single venue on
+  // 1 vote (others on 0) is a clear winner → badge. A multi-way tie at the top
+  // (e.g. everything on 1) has no standout → no badge.
+  const leaderCount = list.filter((r) => r.vote_count === topCount).length;
+  const hasClearLeader = topCount > 0 && leaderCount === 1;
+
+  // Only rows whose venue resolved (RPC rows merged into venueById).
+  const rows = list
+    .map((r) => ({ r, v: venueById[r.venue_id] }))
+    .filter((x) => x.v);
+
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  const allSelected = rows.length > 0 && rows.every((x) => selectedIds.has(x.v.id));
+  const someSelected = !allSelected && rows.some((x) => selectedIds.has(x.v.id));
+  function toggleSelectAll() {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(rows.map((x) => x.v.id)));
+  }
+  function bulkSave() {
+    for (const id of selectedIds) {
+      if (!savedIds?.has(id)) onSave(id);
+    }
+    setSelectedIds(new Set());
+  }
+  const newSelectionCount = Array.from(selectedIds).filter(
+    (id) => !savedIds?.has(id)
+  ).length;
+
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-4">
+      {decidedVenueId && (
+        <div className="mb-4 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-4 text-center">
+          <p className="text-xs uppercase tracking-wide text-[#455d3b]">
+            You're going to
+          </p>
+          <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
+            {venueById[decidedVenueId]?.name || "your pick"}
+          </p>
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="rounded-2xl bg-white p-6 text-center shadow-sm border border-neutral-100">
+          <p className="text-sm text-neutral-600">
+            No shortlist yet — add some places first.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Select-all + bulk save (mirrors the Right Now results view) */}
+          {onSave && (
+            <div className="mb-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={toggleSelectAll}
+                aria-label={allSelected ? "Deselect all" : "Select all"}
+                className={`flex h-5 w-5 items-center justify-center rounded border shrink-0 transition ${
+                  allSelected
+                    ? "bg-[#455d3b] border-[#455d3b] text-white"
+                    : someSelected
+                    ? "bg-[#455d3b]/40 border-[#455d3b]/40 text-white"
+                    : "bg-white border-neutral-300"
+                }`}
+              >
+                {(allSelected || someSelected) && <Check size={14} />}
+              </button>
+              <button
+                type="button"
+                onClick={bulkSave}
+                disabled={selectedIds.size === 0 || newSelectionCount === 0}
+                className="rounded-full bg-[#455d3b] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {selectedIds.size === 0
+                  ? "Save to my list"
+                  : newSelectionCount === 0
+                  ? `${selectedIds.size} already saved`
+                  : `Save ${newSelectionCount} to my list`}
+              </button>
+            </div>
+          )}
+
+          <ul className="space-y-2">
+            {rows.map(({ r, v }) => {
+              const isTop = hasClearLeader && r.vote_count === topCount;
+              const isDecided = decidedVenueId === r.venue_id;
+              const isSelected = selectedIds.has(v.id);
+              const voterNames = (r.voter_user_ids || []).map(
+                (id) => names[id] || "Friend"
+              );
+              return (
+                <li key={r.venue_id}>
+                  <div
+                    className={`flex items-start gap-3 rounded-2xl bg-white p-3 border ${
+                      isDecided
+                        ? "border-[#455d3b] ring-1 ring-[#455d3b]"
+                        : isTop
+                        ? "border-[#cdd9c6]"
+                        : "border-neutral-100"
+                    }`}
+                  >
+                    {onSave && (
+                      <button
+                        type="button"
+                        onClick={() => toggleSelected(v.id)}
+                        aria-label={isSelected ? "Deselect" : "Select"}
+                        className={`flex h-5 w-5 items-center justify-center rounded border shrink-0 mt-1 transition ${
+                          isSelected
+                            ? "bg-[#455d3b] border-[#455d3b] text-white"
+                            : "bg-white border-neutral-300"
+                        }`}
+                      >
+                        {isSelected && <Check size={14} />}
+                      </button>
+                    )}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setDetailVenue(v)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setDetailVenue(v);
+                        }
+                      }}
+                      className="flex-1 min-w-0 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium truncate">{v.name}</p>
+                        {isTop && (
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide bg-[#edf2eb] text-[#455d3b] rounded-full px-2 py-0.5">
+                            Top pick
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500 truncate">
+                        {r.vote_count === 0
+                          ? "No votes yet"
+                          : `${r.vote_count} vote${r.vote_count === 1 ? "" : "s"}${
+                              voterNames.length ? " · " + voterNames.join(", ") : ""
+                            }`}
+                      </p>
+                      <p className="text-xs text-neutral-500 truncate">
+                        {v.type}
+                        {v.suburb ? ` · ${v.suburb}` : ""}
+                        {v.rating ? ` · ⭐ ${v.rating}` : ""}
+                      </p>
+                    </div>
+                    {canDecide ? (
+                      <button
+                        type="button"
+                        disabled={deciding || isDecided}
+                        onClick={() => decide(r.venue_id)}
+                        className={`shrink-0 self-center rounded-xl px-3 py-2 text-sm font-medium transition ${
+                          isDecided
+                            ? "bg-[#455d3b] text-white"
+                            : "bg-[#edf2eb] text-[#455d3b] active:scale-[0.98]"
+                        } disabled:opacity-60`}
+                      >
+                        {isDecided ? "Going ✓" : "We're going here"}
+                      </button>
+                    ) : isDecided ? (
+                      <span className="shrink-0 self-center rounded-xl px-3 py-2 text-sm font-medium bg-[#455d3b] text-white">
+                        Going ✓
+                      </span>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={onDone}
+        className="mt-6 w-full rounded-2xl bg-neutral-100 py-3 font-medium text-neutral-700"
+      >
+        Done
+      </button>
+
+      {detailVenue && (
+        <MapVenueSheet
+          venue={detailVenue}
+          onClose={() => setDetailVenue(null)}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+        />
+      )}
+    </div>
+  );
+}
+
 function SessionResultsView({
   participants = [],
   sessionMatches,
@@ -5710,21 +6155,36 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               {matchesError}
             </div>
           )}
-          <SessionResultsView
-            participants={participants}
-            sessionMatches={sessionMatches}
-            myLikedIds={myLikedIds}
-            venues={venues}
-            userId={userId}
-            hostUserId={selectedSession.host_user_id}
-            savedIds={savedIds}
-            onSave={onSave}
-            onUnsave={onUnsave}
-            onHide={onHide}
-            onOpenProfile={onOpenProfile}
-            showConfetti={false}
-            showToast={showToast}
-          />
+          {selectedSession.mode === "curated" ? (
+            <CuratedResultsBoard
+              sessionId={selectedSession.id}
+              venues={venues}
+              hostUserId={selectedSession.host_user_id}
+              canDecide={userId === selectedSession.host_user_id}
+              savedIds={savedIds}
+              onSave={onSave}
+              onUnsave={onUnsave}
+              onHide={onHide}
+              onDone={() => setSelectedSession(null)}
+              showToast={showToast}
+            />
+          ) : (
+            <SessionResultsView
+              participants={participants}
+              sessionMatches={sessionMatches}
+              myLikedIds={myLikedIds}
+              venues={venues}
+              userId={userId}
+              hostUserId={selectedSession.host_user_id}
+              savedIds={savedIds}
+              onSave={onSave}
+              onUnsave={onUnsave}
+              onHide={onHide}
+              onOpenProfile={onOpenProfile}
+              showConfetti={false}
+              showToast={showToast}
+            />
+          )}
         </>
       )}
     </div>
@@ -6663,9 +7123,6 @@ function ModeChooserScreen({ onPickMode }) {
 
 function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
   const [expanded, setExpanded] = useState(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState("");
-  const todayIso = new Date().toISOString().split("T")[0];
 
   return (
     <div className="flex items-start justify-center p-4 pb-24">
@@ -6716,44 +7173,12 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
             "Pick your filters",
             "Build your shortlist",
             "Send to friends",
-            "See your matches",
+            "See their picks",
           ]}
-          ctaLabel="Pick your date"
-          onCta={() => setPickerOpen(true)}
+          ctaLabel="Continue"
+          onCta={() => onPickLater(null)}
         />
       </div>
-
-      {pickerOpen && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/30 z-[3400]"
-            onClick={() => setPickerOpen(false)}
-          />
-          <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl p-5 z-[3500] max-w-md mx-auto shadow-2xl">
-            <div className="w-10 h-1 bg-neutral-200 rounded-full mx-auto mb-4" />
-            <h2 className="text-lg font-semibold mb-1">Pick your date</h2>
-            <p className="text-sm text-neutral-500 mb-4">When are you all going?</p>
-            <input
-              type="date"
-              value={selectedDate}
-              min={todayIso}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full rounded-2xl bg-neutral-50 px-4 py-3 text-base outline-none border border-neutral-100 mb-4"
-            />
-            <button
-              type="button"
-              disabled={!selectedDate}
-              onClick={() => {
-                onPickLater(new Date(selectedDate));
-                setPickerOpen(false);
-              }}
-              className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
-            >
-              Continue
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -6917,41 +7342,29 @@ function InviteShareScreen({
             <p className="text-xs uppercase tracking-wide text-neutral-500">
               Waiting for friends
             </p>
-            <p className="mt-2 text-3xl font-semibold tracking-tight">
-              {matchCount}
-              {target > 0 && (
-                <span className="text-neutral-400"> / {target}</span>
-              )}
-            </p>
-            <p className="mt-1 text-sm text-neutral-600">
-              {matchCount === 0
-                ? "Matches will appear here as friends swipe."
-                : matchCount === 1
-                ? "1 match so far"
-                : `${matchCount} matches so far`}
+            <p className="mt-3 text-sm text-neutral-600">
+              Your shortlist is sent. As friends pick the places that work for
+              them, their choices land here — then you make the call.
             </p>
           </div>
         )}
 
         <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600 mb-4">
           {isCurated
-            ? "When enough friends swipe and you hit your match goal, we'll show you the results."
+            ? "Once your friends have picked from your shortlist, you'll see everyone's choices here and can choose where you're going."
             : "Your friends will swipe the same places as you. The session ends when everyone submits or time runs out."}
         </div>
 
-        {/* Concurrent host needs a "Start swiping" CTA to get into their
-            own swipe flow. Curated host has already finished swiping (the
-            curation pass) — no CTA needed; auto-flips to matches when
-            target is hit. */}
-        {!isCurated && (
-          <button
-            type="button"
-            onClick={onContinue}
-            className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
-          >
-            Start swiping
-          </button>
-        )}
+        {/* Concurrent host gets a "Start swiping" CTA into their own swipe
+            flow. Curated ("Send options") host has already curated — they get
+            a "See results" CTA to open the votes board when ready. */}
+        <button
+          type="button"
+          onClick={onContinue}
+          className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
+        >
+          {isCurated ? "See results" : "Start swiping"}
+        </button>
       </div>
     </div>
   );
