@@ -307,6 +307,9 @@ export default function RestaurantSwipeMVP() {
   // dedicated notifications table yet. unreadCount drives the bell's red dot.
   const [showDrawer, setShowDrawer] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Session id to deep-link into from a tapped notification — opens that
+  // session's Your Sessions detail / results board.
+  const [notifSessionId, setNotifSessionId] = useState(null);
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
   // handle to a user_id once session + profile are loaded, then push it into
   // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up
@@ -2651,7 +2654,25 @@ if (authLoading || guestLoading) {
             setShowDrawer(false);
             setLookupUserId(uid);
           }}
+          onOpenSession={(sid) => {
+            setShowDrawer(false);
+            setNotifSessionId(sid);
+          }}
           showToast={showToast}
+        />
+      )}
+      {notifSessionId && (
+        <SessionsScreen
+          venues={venues}
+          userId={session?.user?.id}
+          savedIds={savedVenueIds}
+          onSave={saveVenue}
+          onUnsave={unsaveVenue}
+          onHide={hideVenue}
+          onBack={() => setNotifSessionId(null)}
+          showToast={showToast}
+          onOpenProfile={(uid) => setLookupUserId(uid)}
+          initialSessionId={notifSessionId}
         />
       )}
       <FloatingActionButton
@@ -3774,7 +3795,7 @@ function BellButton({ unreadCount, onClick }) {
 // NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes.
-function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
+function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToast }) {
   const [items, setItems] = useState(null); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [lastSeen] = useState(() => {
@@ -3867,6 +3888,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
       submittedItems = (subRows || []).map((r) => ({
         kind: "session_submitted",
         id: `sub_${r.session_id}_${r.user_id}`,
+        sessionId: r.session_id,
         guestName: r.display_name || "A guest",
         sessionName: hostedNameById[r.session_id] || "your session",
         timestamp: r.submitted_at,
@@ -3897,6 +3919,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
           return {
             kind: "session_decided",
             id: `dec_${s.id}`,
+            sessionId: s.id,
             venueName,
             sessionName: s.name || "your session",
             timestamp: s.updated_at,
@@ -4002,6 +4025,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
                     onAccept={() => setStatus(item.friendshipId, "accepted")}
                     onDecline={() => setStatus(item.friendshipId, "declined")}
                     onOpenProfile={onOpenProfile}
+                    onOpenSession={onOpenSession}
                   />
                 ))}
               </div>
@@ -4022,6 +4046,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
                     onAccept={() => setStatus(item.friendshipId, "accepted")}
                     onDecline={() => setStatus(item.friendshipId, "declined")}
                     onOpenProfile={onOpenProfile}
+                    onOpenSession={onOpenSession}
                   />
                 ))}
               </div>
@@ -4036,7 +4061,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile, onOpenSession }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -4104,7 +4129,11 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile 
 
   if (item.kind === "session_submitted") {
     return (
-      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+      <button
+        type="button"
+        onClick={() => onOpenSession?.(item.sessionId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
           <Check size={16} />
         </span>
@@ -4114,13 +4143,18 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile 
           </p>
           <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
         </div>
-      </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
     );
   }
 
   if (item.kind === "session_decided") {
     return (
-      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+      <button
+        type="button"
+        onClick={() => onOpenSession?.(item.sessionId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
           <MapPin size={16} />
         </span>
@@ -4130,7 +4164,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile 
           </p>
           <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
         </div>
-      </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
     );
   }
 
@@ -6002,7 +6037,7 @@ function ImportGoogleMapsScreen({ userId, onBack }) {
   );
 }
 
-function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile }) {
+function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId }) {
   const [sessions, setSessions] = useState(null); // null = loading
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionMatches, setSessionMatches] = useState(null); // null = loading
@@ -6014,6 +6049,18 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
   // Participants strip — display_name list pulled from session_participants.
   const [participants, setParticipants] = useState([]);
   // (View / selection / detail-venue state now lives inside SessionResultsView.)
+
+  // Deep-link from a tapped notification: auto-select that session once the
+  // list loads. Once only, so backing out of the detail shows the list.
+  const didAutoSelect = useRef(false);
+  useEffect(() => {
+    if (didAutoSelect.current || !initialSessionId || !sessions) return;
+    const s = sessions.find((x) => x.id === initialSessionId);
+    if (s) {
+      setSelectedSession(s);
+      didAutoSelect.current = true;
+    }
+  }, [initialSessionId, sessions]);
 
   // Fetch the list of sessions this user has participated in, plus the
   // other participants per session so each row can show "With Tomas".
