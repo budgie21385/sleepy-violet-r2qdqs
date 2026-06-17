@@ -259,7 +259,15 @@ export default function RestaurantSwipeMVP() {
   const [partnerLikes, setPartnerLikes] = useState([]);
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
-  const [tab, setTab] = useState("matches");
+  const [tab, setTab] = useState(
+    () =>
+      (typeof window !== "undefined" && localStorage.getItem("flanit_tab")) ||
+      "matches"
+  );
+  // Persist the active tab so a page refresh stays on the current tab.
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("flanit_tab", tab);
+  }, [tab]);
   const [screen, setScreen] = useState("session_setup");
   const [matchMode, setMatchMode] = useState("solo");
   const [matchSource, setMatchSource] = useState("all");
