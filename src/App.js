@@ -337,6 +337,8 @@ export default function RestaurantSwipeMVP() {
   const [guestShortlistVenues, setGuestShortlistVenues] = useState([]);
   // Host's final pick for this session — polled on the guest "Sent" screen.
   const [guestDecidedVenueId, setGuestDecidedVenueId] = useState(null);
+  // Host's saved list ("My List") for a concurrent source='list' session.
+  const [guestListVenues, setGuestListVenues] = useState([]);
   const [guestLikes, setGuestLikes] = useState([]);
   const [guestPasses, setGuestPasses] = useState([]);
   const [guestCardIndex, setGuestCardIndex] = useState(0);
@@ -516,6 +518,36 @@ useEffect(() => {
       clearInterval(id);
     };
   }, [isGuest, guestStage, guestSessionData?.mode, guestSessionId]);
+
+  // Concurrent + source='list': fetch the host's saved list via SECURITY
+  // DEFINER RPC (saved_venues is owner-only RLS) so the guest swipes the
+  // host's My List rather than the captured filters.
+  useEffect(() => {
+    if (
+      !isGuest ||
+      !guestSessionId ||
+      guestSessionData?.mode !== "concurrent" ||
+      guestSessionData?.source_type !== "list"
+    ) {
+      setGuestListVenues([]);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .rpc("get_session_list_venues", { p_session_id: guestSessionId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch session list venues:", error);
+          setGuestListVenues([]);
+          return;
+        }
+        setGuestListVenues(data || []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, guestSessionId, guestSessionData?.mode, guestSessionData?.source_type]);
 
   // Fetch session_participants once per concurrent session so the matches
   // screen can label each match with display_names. Re-fetches when a new
@@ -1455,16 +1487,20 @@ loadAreas();
 
   const guestQueue = useMemo(() => {
     if (!isGuest || !guestSessionData) return [];
-    if (!venues.length) return [];
 
-    // Curated: intersect with host's shortlist.
+    // Curated: vote the host's shortlist (RPC rows, bypass venues RLS so
+    // host-imported venues are included for the guest).
     if (guestSessionData.mode === "curated") {
-      // Use the RPC-fetched shortlist venue rows directly (not the RLS-limited
-      // `venues` array) so host-imported venues are included for the guest.
       return guestShortlistVenues;
     }
 
-    // Concurrent: apply the host's captured filter set.
+    // Concurrent + My List: swipe the host's saved list (RPC rows).
+    if (guestSessionData.source_type === "list") {
+      return guestListVenues;
+    }
+
+    // Concurrent + filters: apply the host's captured filter set.
+    if (!venues.length) return [];
     const filters = guestSessionData.filters || {};
     const todayKey = getTodayDayKey();
     const sessionAreas = filters.selectedAreaIds && areas.length
@@ -1498,7 +1534,7 @@ loadAreas();
 
       return true;
     });
-  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues]);
+  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues, guestListVenues]);
 
   const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
