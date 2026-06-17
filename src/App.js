@@ -324,6 +324,8 @@ export default function RestaurantSwipeMVP() {
   // RPC so guests can see host-imported (unverified) venues that the general
   // venues query's RLS (verified OR own) would otherwise hide.
   const [guestShortlistVenues, setGuestShortlistVenues] = useState([]);
+  // Host's final pick for this session — polled on the guest "Sent" screen.
+  const [guestDecidedVenueId, setGuestDecidedVenueId] = useState(null);
   const [guestLikes, setGuestLikes] = useState([]);
   const [guestPasses, setGuestPasses] = useState([]);
   const [guestCardIndex, setGuestCardIndex] = useState(0);
@@ -477,6 +479,32 @@ useEffect(() => {
       cancelled = true;
     };
   }, [isGuest, guestSessionId, guestSessionData?.mode, guestSessionData?.status]);
+
+  // Poll for the host's final pick while a curated guest is on the "Sent"
+  // confirmation, so anon guests still on the page see "See you at [venue]"
+  // without needing an account.
+  useEffect(() => {
+    if (!isGuest || guestStage !== "submitted") return;
+    if (guestSessionData?.mode !== "curated" || !guestSessionId) return;
+    let cancelled = false;
+    function poll() {
+      supabase
+        .from("match_sessions")
+        .select("decided_venue_id")
+        .eq("id", guestSessionId)
+        .single()
+        .then(({ data }) => {
+          if (cancelled) return;
+          setGuestDecidedVenueId(data?.decided_venue_id ?? null);
+        });
+    }
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isGuest, guestStage, guestSessionData?.mode, guestSessionId]);
 
   // Fetch session_participants once per concurrent session so the matches
   // screen can label each match with display_names. Re-fetches when a new
@@ -794,16 +822,55 @@ useEffect(() => {
       setUnreadCount(0);
       return;
     }
+    const uid = session.user.id;
     let cancelled = false;
-    supabase
-      .from("friendships")
-      .select("id", { count: "exact", head: true })
-      .eq("addressee_id", session.user.id)
-      .eq("status", "pending")
-      .then(({ count, error }) => {
-        if (cancelled || error) return;
-        setUnreadCount(count ?? 0);
-      });
+    const lastSeen =
+      localStorage.getItem("flanit_drawer_last_seen") ||
+      new Date(0).toISOString();
+    (async () => {
+      const reqRes = await supabase
+        .from("friendships")
+        .select("id", { count: "exact", head: true })
+        .eq("addressee_id", uid)
+        .eq("status", "pending");
+
+      const [hostedRes, myPartsRes] = await Promise.all([
+        supabase.from("match_sessions").select("id").eq("host_user_id", uid),
+        supabase
+          .from("session_participants")
+          .select("session_id")
+          .eq("user_id", uid),
+      ]);
+
+      let submittedCount = 0;
+      const hostedIds = (hostedRes.data || []).map((s) => s.id);
+      if (hostedIds.length) {
+        const { count } = await supabase
+          .from("session_participants")
+          .select("session_id", { count: "exact", head: true })
+          .in("session_id", hostedIds)
+          .neq("user_id", uid)
+          .not("submitted_at", "is", null)
+          .gt("submitted_at", lastSeen);
+        submittedCount = count ?? 0;
+      }
+
+      let decidedCount = 0;
+      const partIds = (myPartsRes.data || []).map((p) => p.session_id);
+      if (partIds.length) {
+        const { count } = await supabase
+          .from("match_sessions")
+          .select("id", { count: "exact", head: true })
+          .in("id", partIds)
+          .not("decided_venue_id", "is", null)
+          .neq("host_user_id", uid)
+          .gt("updated_at", lastSeen);
+        decidedCount = count ?? 0;
+      }
+
+      if (cancelled) return;
+      setUnreadCount((reqRes.count ?? 0) + submittedCount + decidedCount);
+    })();
     return () => {
       cancelled = true;
     };
@@ -1781,6 +1848,19 @@ if (authLoading || guestLoading) {
         return (
           <div className="min-h-screen bg-[#fdf6f0] text-[#111111] p-4">
             <div className="w-full max-w-sm mx-auto pt-12 pb-20">
+              {guestDecidedVenueId && (
+                <div className="mb-5 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-4 text-center">
+                  <p className="text-xs uppercase tracking-wide text-[#455d3b]">
+                    It's decided
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
+                    {guestShortlistVenues.find((v) => v.id === guestDecidedVenueId)?.name || "your spot"}
+                  </p>
+                  <p className="mt-1 text-xs text-[#455d3b]">
+                    {hostName} picked the place — see you there!
+                  </p>
+                </div>
+              )}
               <div className="text-center">
                 <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
                   <Check size={28} />
@@ -3704,7 +3784,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
 
   async function load() {
     if (!userId) return;
-    const [incomingRes, acceptedRes] = await Promise.all([
+    const [incomingRes, acceptedRes, hostedRes, myPartsRes] = await Promise.all([
       // Pending requests where I'm addressee — actionable items.
       supabase
         .from("friendships")
@@ -3721,6 +3801,16 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
         .not("responded_at", "is", null)
         .order("responded_at", { ascending: false })
         .limit(20),
+      // Sessions I host — to surface guests who've submitted their picks.
+      supabase
+        .from("match_sessions")
+        .select("id, name")
+        .eq("host_user_id", userId),
+      // Sessions I'm in — to surface a host's final decision.
+      supabase
+        .from("session_participants")
+        .select("session_id")
+        .eq("user_id", userId),
     ]);
 
     const incomingRows = incomingRes.data || [];
@@ -3759,9 +3849,68 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, showToast }) {
       timestamp: r.responded_at,
     }));
 
-    const all = [...incomingItems, ...acceptedItems].sort(
-      (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+    // ---- Host: guests who submitted their picks on sessions I host ----
+    const hostedRows = hostedRes.data || [];
+    const hostedNameById = Object.fromEntries(
+      hostedRows.map((s) => [s.id, s.name])
     );
+    let submittedItems = [];
+    if (hostedRows.length > 0) {
+      const { data: subRows } = await supabase
+        .from("session_participants")
+        .select("session_id, user_id, display_name, submitted_at")
+        .in("session_id", hostedRows.map((s) => s.id))
+        .neq("user_id", userId)
+        .not("submitted_at", "is", null)
+        .order("submitted_at", { ascending: false })
+        .limit(30);
+      submittedItems = (subRows || []).map((r) => ({
+        kind: "session_submitted",
+        id: `sub_${r.session_id}_${r.user_id}`,
+        guestName: r.display_name || "A guest",
+        sessionName: hostedNameById[r.session_id] || "your session",
+        timestamp: r.submitted_at,
+      }));
+    }
+
+    // ---- Guest: a host's final pick on a session I'm in (not hosting) ----
+    const myPartRows = myPartsRes.data || [];
+    let decidedItems = [];
+    if (myPartRows.length > 0) {
+      const { data: decidedRows } = await supabase
+        .from("match_sessions")
+        .select("id, name, host_user_id, decided_venue_id, updated_at")
+        .in("id", myPartRows.map((p) => p.session_id))
+        .not("decided_venue_id", "is", null)
+        .neq("host_user_id", userId);
+      // Resolve venue names via the shortlist RPC (bypasses venues RLS so
+      // host-imported decided venues still show their name).
+      decidedItems = await Promise.all(
+        (decidedRows || []).map(async (s) => {
+          let venueName = "a spot";
+          const { data: vts } = await supabase.rpc(
+            "get_session_shortlist_venues",
+            { p_session_id: s.id }
+          );
+          const v = (vts || []).find((x) => x.id === s.decided_venue_id);
+          if (v?.name) venueName = v.name;
+          return {
+            kind: "session_decided",
+            id: `dec_${s.id}`,
+            venueName,
+            sessionName: s.name || "your session",
+            timestamp: s.updated_at,
+          };
+        })
+      );
+    }
+
+    const all = [
+      ...incomingItems,
+      ...acceptedItems,
+      ...submittedItems,
+      ...decidedItems,
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setItems(all);
   }
 
@@ -3950,6 +4099,38 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile 
         </div>
         <Check size={16} className="text-[#455d3b]" />
       </button>
+    );
+  }
+
+  if (item.kind === "session_submitted") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+          <Check size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.guestName}</strong> sent their picks
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "session_decided") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+          <MapPin size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            You're going to <strong className="font-medium">{item.venueName}</strong>
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+        </div>
+      </div>
     );
   }
 
