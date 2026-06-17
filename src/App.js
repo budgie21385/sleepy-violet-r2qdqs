@@ -2682,7 +2682,13 @@ if (authLoading || guestLoading) {
         onImportMap={() => setShowImport(true)}
       />
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
-      <BottomTabBar tab={tab} setTab={setTab} />
+      <BottomTabBar
+        tab={tab}
+        setTab={(t) => {
+          setNotifSessionId(null);
+          setTab(t);
+        }}
+      />
     </div>
   );
 }
@@ -6052,13 +6058,16 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
 
   // Deep-link from a tapped notification: auto-select that session once the
   // list loads. Once only, so backing out of the detail shows the list.
-  const didAutoSelect = useRef(false);
+  const autoSelectedId = useRef(null);
   useEffect(() => {
-    if (didAutoSelect.current || !initialSessionId || !sessions) return;
+    if (!initialSessionId || !sessions) return;
+    // Re-select whenever the deep-link target changes (tapping a different
+    // notification), but not after the user backs out of the same one.
+    if (autoSelectedId.current === initialSessionId) return;
     const s = sessions.find((x) => x.id === initialSessionId);
     if (s) {
       setSelectedSession(s);
-      didAutoSelect.current = true;
+      autoSelectedId.current = initialSessionId;
     }
   }, [initialSessionId, sessions]);
 
