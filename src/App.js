@@ -2510,6 +2510,7 @@ if (authLoading || guestLoading) {
               venues={venues}
               hostUserId={session?.user?.id}
               userId={session?.user?.id}
+              onOpenProfile={(uid) => setLookupUserId(uid)}
               savedIds={savedVenueIds}
               onSave={saveVenue}
               onUnsave={unsaveVenue}
@@ -5081,7 +5082,7 @@ function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToast }) {
 // (every shortlisted venue ranked by GUEST votes, host's own likes excluded),
 // resolves voter display names from session_participants, and lets the host
 // commit to a venue via set_curated_decision ("We're going here").
-function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide }) {
+function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile }) {
   const [results, setResults] = useState(null);
   const [venueRows, setVenueRows] = useState([]);
   const [names, setNames] = useState({});
@@ -5208,46 +5209,15 @@ function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, sh
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4">
-      {participantsList.length > 0 && (
-        <div className="mb-4">
-          <p className="text-xs text-neutral-500 mb-1.5">
-            {participantsList.length === 1
-              ? "Just you"
-              : `${participantsList.length} people`}
-          </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            {participantsList.map((p) => {
-              const isMe = p.user_id === userId;
-              const isHost = p.user_id === hostUserId;
-              const nm =
-                (p.display_name && p.display_name.trim()) ||
-                (isMe ? "You" : "Guest");
-              return (
-                <div
-                  key={p.user_id}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-2 py-1"
-                >
-                  <span
-                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-                      isMe ? "bg-[#455d3b] text-white" : "bg-[#edf2eb] text-[#3f5a3a]"
-                    }`}
-                  >
-                    {nm.charAt(0).toUpperCase()}
-                  </span>
-                  <span className="text-xs font-medium text-neutral-700">
-                    {isMe ? "You" : nm}
-                  </span>
-                  {isHost && (
-                    <span className="text-[9px] uppercase tracking-wide font-semibold text-neutral-500 px-1">
-                      Host
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <div className="mb-4 -mx-4">
+        <ParticipantsStrip
+          participants={participantsList}
+          userId={userId}
+          hostUserId={hostUserId}
+          onOpenProfile={onOpenProfile}
+          showToast={showToast}
+        />
+      </div>
       {decidedVenueId && (
         <div className="mb-4 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-4 text-center">
           <p className="text-xs uppercase tracking-wide text-[#455d3b]">
@@ -5413,6 +5383,207 @@ function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, sh
   );
 }
 
+// Shared participants strip — avatars + names + Host/You labels, with inline
+// friend-state chips (Friends / Accept / Requested / Add / Invite). Used by
+// both the concurrent results (SessionResultsView) and the curated board.
+function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfile, showToast }) {
+  const [friendshipByOtherId, setFriendshipByOtherId] = useState(() => new Map());
+  const [profileExistsSet, setProfileExistsSet] = useState(() => new Set());
+  const [chipActingOn, setChipActingOn] = useState(null);
+
+  const otherIds = useMemo(
+    () => participants.map((p) => p.user_id).filter((id) => id && id !== userId),
+    [participants, userId]
+  );
+
+  async function loadFriendshipState() {
+    if (!userId || otherIds.length === 0) {
+      setFriendshipByOtherId(new Map());
+      setProfileExistsSet(new Set());
+      return;
+    }
+    const [friendshipsRes, profilesRes] = await Promise.all([
+      supabase
+        .from("friendships")
+        .select("id, requester_id, addressee_id, status")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
+      supabase.from("profiles").select("id").in("id", otherIds),
+    ]);
+    const otherIdSet = new Set(otherIds);
+    const map = new Map();
+    for (const row of friendshipsRes.data || []) {
+      const other =
+        row.requester_id === userId ? row.addressee_id : row.requester_id;
+      if (otherIdSet.has(other)) map.set(other, row);
+    }
+    setFriendshipByOtherId(map);
+    setProfileExistsSet(new Set((profilesRes.data || []).map((r) => r.id)));
+  }
+
+  const otherIdsKey = otherIds.join("|");
+  useEffect(() => {
+    loadFriendshipState();
+  }, [userId, otherIdsKey]);
+
+  function getRowState(p) {
+    if (!p.user_id) return "invite";
+    if (p.user_id === userId) return "self";
+    const row = friendshipByOtherId.get(p.user_id);
+    if (row) {
+      if (row.status === "accepted") return "friends";
+      if (row.status === "pending") {
+        return row.addressee_id === userId ? "incoming" : "outgoing";
+      }
+    }
+    if (!profileExistsSet.has(p.user_id)) return "invite";
+    return "none";
+  }
+
+  async function sendRequestTo(otherId) {
+    if (!userId || !otherId) return;
+    setChipActingOn(otherId);
+    const existing = friendshipByOtherId.get(otherId);
+    if (existing && existing.status === "declined") {
+      const { error: delError } = await supabase
+        .from("friendships")
+        .delete()
+        .eq("id", existing.id);
+      if (delError) {
+        setChipActingOn(null);
+        console.error("sendRequestTo delete failed:", delError);
+        showToast?.("Couldn't send request");
+        return;
+      }
+    }
+    const { error } = await supabase
+      .from("friendships")
+      .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    setChipActingOn(null);
+    if (error) {
+      console.error("sendRequestTo failed:", error);
+      showToast?.("Couldn't send request");
+      return;
+    }
+    showToast?.("Request sent");
+    await loadFriendshipState();
+  }
+
+  async function acceptRequestFrom(otherId) {
+    const row = friendshipByOtherId.get(otherId);
+    if (!row) return;
+    setChipActingOn(otherId);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted" })
+      .eq("id", row.id);
+    setChipActingOn(null);
+    if (error) {
+      console.error("acceptRequestFrom failed:", error);
+      showToast?.("Couldn't accept");
+      return;
+    }
+    showToast?.("Friend added");
+    await loadFriendshipState();
+  }
+
+  if (participants.length === 0) return null;
+
+  return (
+    <div className="bg-white border-b border-neutral-100 px-4 py-3">
+      <p className="text-xs text-neutral-500 mb-1.5">
+        {participants.length === 1 ? "Just you" : `${participants.length} people`}
+      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        {participants.map((p) => {
+          const name =
+            p.display_name?.trim() || (p.user_id === userId ? "You" : "Guest");
+          const initial = name.charAt(0).toUpperCase();
+          const isMe = p.user_id === userId;
+          const isHost = !!hostUserId && p.user_id === hostUserId;
+          const state = getRowState(p);
+          const acting = chipActingOn === p.user_id;
+          return (
+            <div
+              key={p.user_id}
+              className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-2 py-1"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (isMe) return;
+                  if (state === "invite") return;
+                  onOpenProfile?.(p.user_id);
+                }}
+                aria-label={isMe ? "You" : `Open ${name}'s profile`}
+                disabled={isMe || state === "invite"}
+                className="inline-flex items-center gap-1.5"
+              >
+                <span
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+                    isMe ? "bg-[#455d3b] text-white" : "bg-[#edf2eb] text-[#3f5a3a]"
+                  }`}
+                >
+                  {initial}
+                </span>
+                <span className="text-xs font-medium text-neutral-700">
+                  {isMe ? "You" : name}
+                </span>
+              </button>
+              {isHost && (
+                <span className="text-[9px] uppercase tracking-wide font-semibold text-neutral-500 px-1">
+                  Host
+                </span>
+              )}
+              {!isMe && state === "friends" && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-[#edf2eb] text-[#3f5a3a] text-[10px] font-medium px-1.5 py-0.5 border border-[#c5d4c2]">
+                  <Check size={10} />
+                  Friends
+                </span>
+              )}
+              {!isMe && state === "incoming" && (
+                <button
+                  type="button"
+                  onClick={() => acceptRequestFrom(p.user_id)}
+                  disabled={acting}
+                  className="rounded-full bg-[#455d3b] text-white text-[10px] font-medium px-2 py-0.5 disabled:opacity-50"
+                >
+                  {acting ? "…" : "Accept"}
+                </button>
+              )}
+              {!isMe && state === "outgoing" && (
+                <span className="rounded-full bg-white border border-neutral-200 text-neutral-500 text-[10px] font-medium px-2 py-0.5">
+                  Requested
+                </span>
+              )}
+              {!isMe && state === "none" && (
+                <button
+                  type="button"
+                  onClick={() => sendRequestTo(p.user_id)}
+                  disabled={acting}
+                  className="rounded-full bg-[#455d3b] text-white text-[10px] font-medium px-2 py-0.5 disabled:opacity-50"
+                >
+                  {acting ? "…" : "Add"}
+                </button>
+              )}
+              {!isMe && state === "invite" && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    showToast?.("Invite flow coming soon — share your link from Find Friends")
+                  }
+                  className="rounded-full bg-white border border-neutral-200 text-neutral-600 text-[10px] font-medium px-2 py-0.5"
+                >
+                  Invite
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SessionResultsView({
   participants = [],
   sessionId,
@@ -5432,13 +5603,6 @@ function SessionResultsView({
   const [view, setView] = useState("matches");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [detailVenue, setDetailVenue] = useState(null);
-  // Friendship-state derivation for participant chips (Task #9).
-  // Two-step fetch (no FK between friendships and profiles): pull all my
-  // friendship rows where either party is me, plus profile rows for every
-  // non-me participant. The chip per row is derived in JS.
-  const [friendshipByOtherId, setFriendshipByOtherId] = useState(() => new Map());
-  const [profileExistsSet, setProfileExistsSet] = useState(() => new Set());
-  const [chipActingOn, setChipActingOn] = useState(null); // user_id mid-update
   // Host's final pick for this session ("We're going here") — reuses the same
   // decided_venue_id mechanism as the curated board.
   const [decidedVenueId, setDecidedVenueId] = useState(null);
@@ -5476,118 +5640,6 @@ function SessionResultsView({
     }
     setDecidedVenueId(venueId);
     showToast?.("Locked it in");
-  }
-
-  const otherIds = useMemo(
-    () =>
-      participants
-        .map((p) => p.user_id)
-        .filter((id) => id && id !== userId),
-    [participants, userId]
-  );
-
-  async function loadFriendshipState() {
-    if (!userId || otherIds.length === 0) {
-      setFriendshipByOtherId(new Map());
-      setProfileExistsSet(new Set());
-      return;
-    }
-    const [friendshipsRes, profilesRes] = await Promise.all([
-      supabase
-        .from("friendships")
-        .select("id, requester_id, addressee_id, status")
-        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
-      supabase
-        .from("profiles")
-        .select("id")
-        .in("id", otherIds),
-    ]);
-    const otherIdSet = new Set(otherIds);
-    const map = new Map();
-    for (const row of friendshipsRes.data || []) {
-      const other =
-        row.requester_id === userId ? row.addressee_id : row.requester_id;
-      if (otherIdSet.has(other)) map.set(other, row);
-    }
-    setFriendshipByOtherId(map);
-    setProfileExistsSet(new Set((profilesRes.data || []).map((r) => r.id)));
-  }
-
-  // Re-derive when the viewer or the set of other participants changes.
-  // Using a string key for otherIds so identity changes don't trigger refetches.
-  const otherIdsKey = otherIds.join("|");
-  useEffect(() => {
-    loadFriendshipState();
-    // loadFriendshipState closes over userId + otherIds (captured via otherIdsKey).
-  }, [userId, otherIdsKey]);
-
-  function getRowState(p) {
-    if (!p.user_id) return "invite"; // shouldn't happen in practice
-    if (p.user_id === userId) return "self";
-    const row = friendshipByOtherId.get(p.user_id);
-    if (row) {
-      if (row.status === "accepted") return "friends";
-      if (row.status === "pending") {
-        return row.addressee_id === userId ? "incoming" : "outgoing";
-      }
-    }
-    // No active friendship row. If the participant has no profile they
-    // likely joined anonymously and never signed up — show Invite.
-    if (!profileExistsSet.has(p.user_id)) return "invite";
-    return "none";
-  }
-
-  // See ProfileLookupScreen.sendRequest for why declined rows need DELETE +
-  // INSERT (RLS UPDATE policy filters out non-pending rows).
-  async function sendRequestTo(otherId) {
-    if (!userId || !otherId) return;
-    setChipActingOn(otherId);
-    const existing = friendshipByOtherId.get(otherId);
-    if (existing && existing.status === "declined") {
-      const { error: delError } = await supabase
-        .from("friendships")
-        .delete()
-        .eq("id", existing.id);
-      if (delError) {
-        setChipActingOn(null);
-        console.error("sendRequestTo delete failed:", delError);
-        showToast?.("Couldn't send request");
-        return;
-      }
-    }
-    const { error } = await supabase
-      .from("friendships")
-      .insert({
-        requester_id: userId,
-        addressee_id: otherId,
-        status: "pending",
-      });
-    setChipActingOn(null);
-    if (error) {
-      console.error("sendRequestTo failed:", error);
-      showToast?.("Couldn't send request");
-      return;
-    }
-    showToast?.("Request sent");
-    await loadFriendshipState();
-  }
-
-  async function acceptRequestFrom(otherId) {
-    const row = friendshipByOtherId.get(otherId);
-    if (!row) return;
-    setChipActingOn(otherId);
-    const { error } = await supabase
-      .from("friendships")
-      .update({ status: "accepted" })
-      .eq("id", row.id);
-    setChipActingOn(null);
-    if (error) {
-      console.error("acceptRequestFrom failed:", error);
-      showToast?.("Couldn't accept");
-      return;
-    }
-    showToast?.("Friend added");
-    await loadFriendshipState();
   }
 
   // Clear per-row selections when switching tabs.
@@ -5669,106 +5721,13 @@ function SessionResultsView({
       {showConfetti && <ConfettiBurst />}
 
       {/* Participants strip */}
-      {participants.length > 0 && (
-        <div className="bg-white border-b border-neutral-100 px-4 py-3">
-          <p className="text-xs text-neutral-500 mb-1.5">
-            {participants.length === 1
-              ? "Just you"
-              : `${participants.length} people`}
-          </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            {participants.map((p) => {
-              const name =
-                p.display_name?.trim() ||
-                (p.user_id === userId ? "You" : "Guest");
-              const initial = name.charAt(0).toUpperCase();
-              const isMe = p.user_id === userId;
-              const isHost = !!hostUserId && p.user_id === hostUserId;
-              const state = getRowState(p);
-              const acting = chipActingOn === p.user_id;
-              return (
-                <div
-                  key={p.user_id}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-2 py-1"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isMe) return;
-                      if (state === "invite") return;
-                      onOpenProfile?.(p.user_id);
-                    }}
-                    aria-label={isMe ? "You" : `Open ${name}'s profile`}
-                    disabled={isMe || state === "invite"}
-                    className="inline-flex items-center gap-1.5"
-                  >
-                    <span
-                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-                        isMe
-                          ? "bg-[#455d3b] text-white"
-                          : "bg-[#edf2eb] text-[#3f5a3a]"
-                      }`}
-                    >
-                      {initial}
-                    </span>
-                    <span className="text-xs font-medium text-neutral-700">
-                      {isMe ? "You" : name}
-                    </span>
-                  </button>
-                  {isHost && (
-                    <span className="text-[9px] uppercase tracking-wide font-semibold text-neutral-500 px-1">
-                      Host
-                    </span>
-                  )}
-                  {/* Friendship-state chip. Self has no chip. */}
-                  {!isMe && state === "friends" && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-[#edf2eb] text-[#3f5a3a] text-[10px] font-medium px-1.5 py-0.5 border border-[#c5d4c2]">
-                      <Check size={10} />
-                      Friends
-                    </span>
-                  )}
-                  {!isMe && state === "incoming" && (
-                    <button
-                      type="button"
-                      onClick={() => acceptRequestFrom(p.user_id)}
-                      disabled={acting}
-                      className="rounded-full bg-[#455d3b] text-white text-[10px] font-medium px-2 py-0.5 disabled:opacity-50"
-                    >
-                      {acting ? "…" : "Accept"}
-                    </button>
-                  )}
-                  {!isMe && state === "outgoing" && (
-                    <span className="rounded-full bg-white border border-neutral-200 text-neutral-500 text-[10px] font-medium px-2 py-0.5">
-                      Requested
-                    </span>
-                  )}
-                  {!isMe && state === "none" && (
-                    <button
-                      type="button"
-                      onClick={() => sendRequestTo(p.user_id)}
-                      disabled={acting}
-                      className="rounded-full bg-[#455d3b] text-white text-[10px] font-medium px-2 py-0.5 disabled:opacity-50"
-                    >
-                      {acting ? "…" : "Add"}
-                    </button>
-                  )}
-                  {!isMe && state === "invite" && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        showToast?.("Invite flow coming soon — share your link from Find Friends")
-                      }
-                      className="rounded-full bg-white border border-neutral-200 text-neutral-600 text-[10px] font-medium px-2 py-0.5"
-                    >
-                      Invite
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <ParticipantsStrip
+        participants={participants}
+        userId={userId}
+        hostUserId={hostUserId}
+        onOpenProfile={onOpenProfile}
+        showToast={showToast}
+      />
 
       {/* Matches / My likes pill toggle */}
       <div className="bg-white border-b border-neutral-100 px-4 py-3 flex justify-center">
@@ -6536,6 +6495,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               venues={venues}
               hostUserId={selectedSession.host_user_id}
               userId={userId}
+              onOpenProfile={onOpenProfile}
               canDecide={userId === selectedSession.host_user_id}
               savedIds={savedIds}
               onSave={onSave}
