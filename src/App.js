@@ -2124,6 +2124,7 @@ if (authLoading || guestLoading) {
           />
           <SessionResultsView
             participants={sessionParticipants}
+            sessionId={guestSessionId}
             sessionMatches={sessionMatches}
             myLikedIds={guestLikes}
             venues={venues}
@@ -2508,6 +2509,7 @@ if (authLoading || guestLoading) {
               sessionId={currentSessionId}
               venues={venues}
               hostUserId={session?.user?.id}
+              userId={session?.user?.id}
               savedIds={savedVenueIds}
               onSave={saveVenue}
               onUnsave={unsaveVenue}
@@ -2566,6 +2568,7 @@ if (authLoading || guestLoading) {
               {isSessionMode ? (
                 <SessionResultsView
                   participants={sessionParticipants}
+                  sessionId={currentSessionId}
                   sessionMatches={sessionMatches}
                   myLikedIds={markLikes}
                   venues={venues}
@@ -5078,10 +5081,11 @@ function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToast }) {
 // (every shortlisted venue ranked by GUEST votes, host's own likes excluded),
 // resolves voter display names from session_participants, and lets the host
 // commit to a venue via set_curated_decision ("We're going here").
-function CuratedResultsBoard({ sessionId, venues, hostUserId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide }) {
+function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide }) {
   const [results, setResults] = useState(null);
   const [venueRows, setVenueRows] = useState([]);
   const [names, setNames] = useState({});
+  const [participantsList, setParticipantsList] = useState([]);
   const [decidedVenueId, setDecidedVenueId] = useState(null);
   const [deciding, setDeciding] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -5115,6 +5119,7 @@ function CuratedResultsBoard({ sessionId, venues, hostUserId, onDone, showToast,
         if (p.user_id !== hostUserId) nameMap[p.user_id] = p.display_name || "Friend";
       });
       setNames(nameMap);
+      setParticipantsList(partsRpc.data || []);
       if (initial) setDecidedVenueId(sessRpc.data?.decided_venue_id ?? null);
       if (initial) setLoading(false);
     }
@@ -5203,6 +5208,46 @@ function CuratedResultsBoard({ sessionId, venues, hostUserId, onDone, showToast,
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4">
+      {participantsList.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs text-neutral-500 mb-1.5">
+            {participantsList.length === 1
+              ? "Just you"
+              : `${participantsList.length} people`}
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {participantsList.map((p) => {
+              const isMe = p.user_id === userId;
+              const isHost = p.user_id === hostUserId;
+              const nm =
+                (p.display_name && p.display_name.trim()) ||
+                (isMe ? "You" : "Guest");
+              return (
+                <div
+                  key={p.user_id}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-neutral-50 border border-neutral-100 pl-1 pr-2 py-1"
+                >
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+                      isMe ? "bg-[#455d3b] text-white" : "bg-[#edf2eb] text-[#3f5a3a]"
+                    }`}
+                  >
+                    {nm.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="text-xs font-medium text-neutral-700">
+                    {isMe ? "You" : nm}
+                  </span>
+                  {isHost && (
+                    <span className="text-[9px] uppercase tracking-wide font-semibold text-neutral-500 px-1">
+                      Host
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {decidedVenueId && (
         <div className="mb-4 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-4 text-center">
           <p className="text-xs uppercase tracking-wide text-[#455d3b]">
@@ -5370,6 +5415,7 @@ function CuratedResultsBoard({ sessionId, venues, hostUserId, onDone, showToast,
 
 function SessionResultsView({
   participants = [],
+  sessionId,
   sessionMatches,
   myLikedIds,
   venues,
@@ -5393,6 +5439,44 @@ function SessionResultsView({
   const [friendshipByOtherId, setFriendshipByOtherId] = useState(() => new Map());
   const [profileExistsSet, setProfileExistsSet] = useState(() => new Set());
   const [chipActingOn, setChipActingOn] = useState(null); // user_id mid-update
+  // Host's final pick for this session ("We're going here") — reuses the same
+  // decided_venue_id mechanism as the curated board.
+  const [decidedVenueId, setDecidedVenueId] = useState(null);
+  const [deciding, setDeciding] = useState(false);
+  const canDecide = !!sessionId && !!userId && userId === hostUserId;
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    supabase
+      .from("match_sessions")
+      .select("decided_venue_id")
+      .eq("id", sessionId)
+      .single()
+      .then(({ data }) => {
+        if (!cancelled) setDecidedVenueId(data?.decided_venue_id ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  async function decideVenue(venueId) {
+    if (!canDecide) return;
+    setDeciding(true);
+    const { error } = await supabase.rpc("set_curated_decision", {
+      p_session_id: sessionId,
+      p_venue_id: venueId,
+    });
+    setDeciding(false);
+    if (error) {
+      console.error("set_curated_decision failed:", error);
+      showToast?.("Couldn't save — try again");
+      return;
+    }
+    setDecidedVenueId(venueId);
+    showToast?.("Locked it in");
+  }
 
   const otherIds = useMemo(
     () =>
@@ -5762,7 +5846,11 @@ function SessionResultsView({
               const isSelected = selectedIds.has(venue.id);
               return (
                 <li key={venue.id}>
-                  <div className="flex items-start gap-3 rounded-2xl border bg-white border-neutral-100 p-3">
+                  <div className={`flex items-start gap-3 rounded-2xl border bg-white p-3 ${
+                    decidedVenueId === venue.id
+                      ? "border-[#455d3b] ring-1 ring-[#455d3b]"
+                      : "border-neutral-100"
+                  }`}>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -5809,6 +5897,24 @@ function SessionResultsView({
                         {venue.rating ? ` · ⭐ ${venue.rating}` : ""}
                       </p>
                     </div>
+                    {canDecide ? (
+                      <button
+                        type="button"
+                        disabled={deciding || decidedVenueId === venue.id}
+                        onClick={() => decideVenue(venue.id)}
+                        className={`shrink-0 self-center rounded-xl px-3 py-2 text-xs font-medium transition ${
+                          decidedVenueId === venue.id
+                            ? "bg-[#455d3b] text-white"
+                            : "bg-[#edf2eb] text-[#455d3b] active:scale-[0.98]"
+                        } disabled:opacity-60`}
+                      >
+                        {decidedVenueId === venue.id ? "Going ✓" : "We're going here"}
+                      </button>
+                    ) : decidedVenueId === venue.id ? (
+                      <span className="shrink-0 self-center rounded-xl px-3 py-2 text-xs font-medium bg-[#455d3b] text-white">
+                        Going ✓
+                      </span>
+                    ) : null}
                   </div>
                 </li>
               );
@@ -6429,6 +6535,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               sessionId={selectedSession.id}
               venues={venues}
               hostUserId={selectedSession.host_user_id}
+              userId={userId}
               canDecide={userId === selectedSession.host_user_id}
               savedIds={savedIds}
               onSave={onSave}
@@ -6440,6 +6547,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
           ) : (
             <SessionResultsView
               participants={participants}
+              sessionId={selectedSession.id}
               sessionMatches={sessionMatches}
               myLikedIds={myLikedIds}
               venues={venues}
