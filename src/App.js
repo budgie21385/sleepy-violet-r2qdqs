@@ -1494,13 +1494,12 @@ loadAreas();
       return guestShortlistVenues;
     }
 
-    // Concurrent + My List: swipe the host's saved list (RPC rows).
-    if (guestSessionData.source_type === "list") {
-      return guestListVenues;
-    }
-
-    // Concurrent + filters: apply the host's captured filter set.
-    if (!venues.length) return [];
+    // Concurrent: candidate pool is the host's saved list (source='list') or
+    // all venues, then narrowed by the host's captured filters — the same set
+    // the host swiped, so both sides share one pool.
+    const pool =
+      guestSessionData.source_type === "list" ? guestListVenues : venues;
+    if (!pool.length) return [];
     const filters = guestSessionData.filters || {};
     const todayKey = getTodayDayKey();
     const sessionAreas = filters.selectedAreaIds && areas.length
@@ -1508,7 +1507,7 @@ loadAreas();
       : [];
     const sessionRadius = typeof filters.radiusKm === "number" ? filters.radiusKm : 5;
 
-    return venues.filter((venue) => {
+    return pool.filter((venue) => {
       if (!venueMatchesAreas(venue, sessionAreas, sessionRadius)) return false;
 
       if (filters.selectedCuisines && filters.selectedCuisines.length > 0) {
