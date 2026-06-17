@@ -1809,6 +1809,7 @@ if (authLoading || guestLoading) {
               <div className="min-w-0">
                 <p className="text-xs text-neutral-500 truncate">
                   {guestSessionData.name || "Session"}
+                  {guestQueue.length > 0 ? ` · ${guestQueue.length} places` : ""}
                 </p>
                 <h1 className="text-lg font-semibold tracking-tight truncate">
                   Welcome, {guestName.trim() || "friend"}
