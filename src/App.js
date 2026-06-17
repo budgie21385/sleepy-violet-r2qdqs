@@ -260,7 +260,7 @@ export default function RestaurantSwipeMVP() {
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
   const [tab, setTab] = useState("matches");
-  const [screen, setScreen] = useState("mode");
+  const [screen, setScreen] = useState("session_setup");
   const [matchMode, setMatchMode] = useState("solo");
   const [matchSource, setMatchSource] = useState("all");
   const [eventDate, setEventDate] = useState(null);
@@ -2148,7 +2148,7 @@ if (authLoading || guestLoading) {
                     <button
                       type="button"
                       onClick={() =>
-                        setScreen(matchMode === "solo" ? "mode" : "session_setup")
+                        setScreen("session_setup")
                       }
                       aria-label="Back to mode"
                       className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm border border-neutral-100 text-neutral-600 shrink-0"
@@ -2158,7 +2158,7 @@ if (authLoading || guestLoading) {
                   )}
                   <div className="min-w-0">
                     <h1 className="text-2xl font-semibold tracking-tight">
-                      Where should we go?
+                      Match with friends
                     </h1>
                   </div>
                 </div>
@@ -2174,21 +2174,9 @@ if (authLoading || guestLoading) {
                   )}
                 </div>
               </div>
-              {screen === "mode" && (
-          <ModeChooserScreen
-            onPickMode={(mode) => {
-              if (mode === "solo") {
-                setMatchMode("solo");
-                setScreen("filters");
-              } else {
-                setScreen("session_setup");
-              }
-            }}
-          />
-        )}
-        {screen === "session_setup" && (
+              {screen === "session_setup" && (
           <SessionSetupScreen
-            onBack={() => setScreen("mode")}
+            onBack={() => setTab("map")}
             onPickRightNow={() => {
               setMatchMode("concurrent");
               setEventDate(null);
@@ -2398,7 +2386,7 @@ if (authLoading || guestLoading) {
               onUnsave={unsaveVenue}
               onHide={hideVenue}
               onDone={() => {
-                setScreen("mode");
+                setScreen("session_setup");
                 setMatches([]);
                 setMarkLikes([]);
                 setMarkPasses([]);
@@ -2425,7 +2413,7 @@ if (authLoading || guestLoading) {
             : matches.length;
 
           function handleDoneSession() {
-            setScreen("mode");
+            setScreen("session_setup");
             setMatches([]);
             setMarkLikes([]);
             setPartnerLikes([]);
@@ -7079,68 +7067,12 @@ function FriendAvatar({ profile, small = false }) {
   );
 }
 
-function ModeChooserScreen({ onPickMode }) {
-  return (
-    <div className="flex items-start justify-center p-4 pb-24">
-      <div className="w-full max-w-sm">
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Who's playing?
-          </h1>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => onPickMode("solo")}
-          className="w-full text-left bg-white rounded-3xl border border-neutral-100 shadow-sm p-5 mb-3 active:scale-[0.99] transition hover:bg-neutral-50"
-        >
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#455d3b]/10 text-[#455d3b] mb-3">
-            <User size={22} />
-          </div>
-          <p className="text-lg font-medium">Just me</p>
-          <p className="text-sm text-neutral-500 mt-1">
-            Discover new places. Build your favourites list, or head somewhere nearby right now.
-          </p>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onPickMode("multi")}
-          className="w-full text-left bg-white rounded-3xl border border-neutral-100 shadow-sm p-5 active:scale-[0.99] transition hover:bg-neutral-50"
-        >
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#455d3b]/10 text-[#455d3b] mb-3">
-            <Users size={22} />
-          </div>
-          <p className="text-lg font-medium">With others</p>
-          <p className="text-sm text-neutral-500 mt-1">
-            Match with friends. Share a link, swipe together, pick a place to go.
-          </p>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
   const [expanded, setExpanded] = useState(null);
 
   return (
     <div className="flex items-start justify-center p-4 pb-24">
       <div className="w-full max-w-sm">
-        <div className="mb-5 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label="Back"
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-sm border border-neutral-100 text-neutral-600 shrink-0"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            When are you going?
-          </h1>
-        </div>
-
         <SessionSetupCard
           icon={<Zap size={18} />}
           title="Right now"
@@ -7163,7 +7095,7 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
 
         <SessionSetupCard
           icon={<Calendar size={18} />}
-          title="Later"
+          title="Send a shortlist"
           subtitle="Curate options, friends choose"
           expanded={expanded === "later"}
           onToggle={() =>
