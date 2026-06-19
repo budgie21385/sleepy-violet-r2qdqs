@@ -4509,7 +4509,7 @@ function ProfileTab({
           onHide={onHide}
           onBack={() => setShowSessions(false)}
           showToast={showToast}
-          onOpenProfile={(uid) => setLookupUserId(uid)}
+          onOpenProfile={onOpenProfile}
         />
       )}
       <div className="w-full max-w-sm">
