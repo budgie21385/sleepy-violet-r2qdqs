@@ -311,9 +311,8 @@ export default function RestaurantSwipeMVP() {
   // Profile lookup overlay — set to a user_id to open. Lifted from ProfileTab
   // so FindFriendsSheet search results can also open profiles.
   const [lookupUserId, setLookupUserId] = useState(null);
-  // Activity drawer (bell icon). Derived from existing tables for D.1 — no
-  // dedicated notifications table yet. unreadCount drives the bell's red dot.
-  const [showDrawer, setShowDrawer] = useState(false);
+  // Activity tab notifications. Derived from existing tables for D.1 — no
+  // dedicated notifications table yet. unreadCount drives the tab's red badge.
   const [unreadCount, setUnreadCount] = useState(0);
   // Session id to deep-link into from a tapped notification — opens that
   // session's Your Sessions detail / results board.
@@ -866,8 +865,8 @@ useEffect(() => {
   }, [friendInviteHandle, session?.user?.id]);
 
   // Refetch the unread (pending request) count on session change and whenever
-  // the drawer closes — closing means the user just acted on (or saw) the
-  // items, so the count should re-sync.
+  // the active tab changes — leaving the Activity tab stamps last-seen and
+  // means the user just saw the items, so the count should re-sync.
   useEffect(() => {
     if (!session?.user?.id) {
       setUnreadCount(0);
@@ -925,7 +924,7 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, showDrawer]);
+  }, [session?.user?.id, tab]);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -2670,6 +2669,15 @@ if (authLoading || guestLoading) {
           onFindFriends={() => setShowFindFriends(true)}
         />
       )}
+      {tab === "activity" && session?.user?.id && (
+        <ActivityDrawer
+          asTab
+          userId={session?.user?.id}
+          onOpenProfile={(uid) => setLookupUserId(uid)}
+          onOpenSession={(sid) => setNotifSessionId(sid)}
+          showToast={showToast}
+        />
+      )}
       {showImport && (
         <ImportGoogleMapsScreen
           userId={session?.user?.id}
@@ -2696,27 +2704,6 @@ if (authLoading || guestLoading) {
           showToast={showToast}
         />
       )}
-      {session?.user?.id && (
-        <BellButton
-          unreadCount={unreadCount}
-          onClick={() => setShowDrawer(true)}
-        />
-      )}
-      {showDrawer && (
-        <ActivityDrawer
-          userId={session?.user?.id}
-          onClose={() => setShowDrawer(false)}
-          onOpenProfile={(uid) => {
-            setShowDrawer(false);
-            setLookupUserId(uid);
-          }}
-          onOpenSession={(sid) => {
-            setShowDrawer(false);
-            setNotifSessionId(sid);
-          }}
-          showToast={showToast}
-        />
-      )}
       {notifSessionId && (
         <SessionsScreen
           venues={venues}
@@ -2740,6 +2727,7 @@ if (authLoading || guestLoading) {
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
       <BottomTabBar
         tab={tab}
+        unreadCount={unreadCount}
         setTab={(t) => {
           setNotifSessionId(null);
           setTab(t);
@@ -3656,7 +3644,8 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
         bottom: 80,
         width: "calc(100% - 1.5rem)",
         maxHeight: "calc(100% - 100px)",
-        zIndex: 2500,
+        // Above the bell (2950) and FAB (3060) so the open card is top-level.
+        zIndex: 3100,
       }}
     >
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100 rounded-t-3xl">
@@ -3823,30 +3812,6 @@ function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap }) {
   );
 }
 
-// Bell button anchored top-right. z-[2950] sits above tab content but below
-// full-screen sub-screens (z-[3500]+) and below BottomTabBar at z-[3000] —
-// since the bell is at the top of the viewport and the tab bar at the bottom
-// they don't overlap geometrically, so the order doesn't matter visually.
-function BellButton({ unreadCount, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={
-        unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"
-      }
-      className="fixed top-4 right-4 z-[2950] w-10 h-10 rounded-full bg-white border border-neutral-200 shadow-sm flex items-center justify-center text-neutral-700 hover:bg-neutral-50 active:scale-95 transition"
-    >
-      <Bell size={18} />
-      {unreadCount > 0 && (
-        <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-medium flex items-center justify-center border-2 border-white">
-          {unreadCount > 9 ? "9+" : unreadCount}
-        </span>
-      )}
-    </button>
-  );
-}
-
 // Activity drawer — slides in from the right (~78% width). Items are derived
 // on the fly from existing tables (no `notifications` table yet — that's D.5).
 // Two derivation sources for D.1:
@@ -3857,7 +3822,7 @@ function BellButton({ unreadCount, onClick }) {
 // NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes.
-function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToast }) {
+function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToast, asTab = false }) {
   const [items, setItems] = useState(null); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [lastSeen] = useState(() => {
@@ -4096,90 +4061,100 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
     (i) => new Date(i.timestamp) <= lastSeen
   );
 
+  const body = (
+    <>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
+        {!asTab && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
+
+      {items === null && (
+        <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
+      )}
+
+      {items !== null && items.length === 0 && (
+        <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+          <p className="text-sm text-neutral-600">Nothing here yet.</p>
+          <p className="text-xs text-neutral-500 mt-1">
+            Friend requests and people from your sessions show up here.
+          </p>
+        </div>
+      )}
+
+      {newItems.length > 0 && (
+        <>
+          <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+            New
+          </p>
+          <div className="space-y-2 mb-4">
+            {newItems.map((item) => (
+              <ActivityItem
+                key={item.id}
+                item={item}
+                isNew
+                acting={acting === item.friendshipId || acting === item.otherId}
+                onAccept={() => setStatus(item.friendshipId, "accepted")}
+                onDecline={() => setStatus(item.friendshipId, "declined")}
+                onAddFriend={() => sendRequest(item.otherId)}
+                onOpenProfile={onOpenProfile}
+                onOpenSession={onOpenSession}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {earlierItems.length > 0 && (
+        <>
+          <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+            Earlier
+          </p>
+          <div className="space-y-2">
+            {earlierItems.map((item) => (
+              <ActivityItem
+                key={item.id}
+                item={item}
+                acting={acting === item.friendshipId || acting === item.otherId}
+                onAccept={() => setStatus(item.friendshipId, "accepted")}
+                onDecline={() => setStatus(item.friendshipId, "declined")}
+                onAddFriend={() => sendRequest(item.otherId)}
+                onOpenProfile={onOpenProfile}
+                onOpenSession={onOpenSession}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  if (asTab) {
+    return (
+      <div className="min-h-screen bg-[#fdf6f0] pb-28">
+        <div className="p-4 max-w-md mx-auto">{body}</div>
+      </div>
+    );
+  }
+
   return (
     <>
-      {/* Scrim covers everything; click closes. */}
       <button
         type="button"
         aria-label="Close notifications"
         onClick={onClose}
         className="fixed inset-0 z-[3490] bg-black/25"
       />
-      {/* Drawer panel — ~78% width, full height, slides from the right. */}
       <div className="fixed top-0 right-0 bottom-0 z-[3500] w-[78%] max-w-sm bg-[#fdf6f0] overflow-y-auto shadow-xl">
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
-            >
-              <X size={18} />
-            </button>
-          </div>
-
-          {items === null && (
-            <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
-          )}
-
-          {items !== null && items.length === 0 && (
-            <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
-              <p className="text-sm text-neutral-600">
-                Nothing here yet.
-              </p>
-              <p className="text-xs text-neutral-500 mt-1">
-                Friend requests and accepted connections will show up here.
-              </p>
-            </div>
-          )}
-
-          {newItems.length > 0 && (
-            <>
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
-                New
-              </p>
-              <div className="space-y-2 mb-4">
-                {newItems.map((item) => (
-                  <ActivityItem
-                    key={item.id}
-                    item={item}
-                    isNew
-                    acting={acting === item.friendshipId || acting === item.otherId}
-                    onAccept={() => setStatus(item.friendshipId, "accepted")}
-                    onDecline={() => setStatus(item.friendshipId, "declined")}
-                    onAddFriend={() => sendRequest(item.otherId)}
-                    onOpenProfile={onOpenProfile}
-                    onOpenSession={onOpenSession}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-
-          {earlierItems.length > 0 && (
-            <>
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
-                Earlier
-              </p>
-              <div className="space-y-2">
-                {earlierItems.map((item) => (
-                  <ActivityItem
-                    key={item.id}
-                    item={item}
-                    acting={acting === item.friendshipId || acting === item.otherId}
-                    onAccept={() => setStatus(item.friendshipId, "accepted")}
-                    onDecline={() => setStatus(item.friendshipId, "declined")}
-                    onAddFriend={() => sendRequest(item.otherId)}
-                    onOpenProfile={onOpenProfile}
-                    onOpenSession={onOpenSession}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        <div className="p-4">{body}</div>
       </div>
     </>
   );
@@ -4369,7 +4344,7 @@ function Toast({ message, onDismiss }) {
   );
 }
 
-function BottomTabBar({ tab, setTab }) {
+function BottomTabBar({ tab, setTab, unreadCount = 0 }) {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-[3000] bg-white border-t border-neutral-100 shadow-lg">
       <div className="flex max-w-md mx-auto">
@@ -4398,6 +4373,23 @@ function BottomTabBar({ tab, setTab }) {
             fill={tab === "map" ? "#455d3b" : "none"}
           />
           <span className="text-xs font-medium">Map</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("activity")}
+          className={`flex-1 flex flex-col items-center gap-1 py-3 transition ${
+            tab === "activity" ? "text-[#455d3b]" : "text-neutral-400"
+          }`}
+        >
+          <span className="relative">
+            <Bell size={20} fill={tab === "activity" ? "#455d3b" : "none"} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[9px] font-medium flex items-center justify-center border-2 border-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </span>
+          <span className="text-xs font-medium">Activity</span>
         </button>
         <button
           type="button"
