@@ -3,6 +3,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Plus, Bell } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
@@ -3637,9 +3638,13 @@ function VenueVibes({ venue }) {
 
 function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
-  return (
+  // Portaled to document.body so it escapes MapScreen's `fixed inset-0
+  // z-[1500]` stacking context. Otherwise its zIndex only competes inside that
+  // layer and can never sit above the app-level FAB (z-[3060]). `fixed` keeps
+  // the same on-screen placement the old `absolute` had inside the fixed map.
+  return createPortal(
     <div
-      className="absolute left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col"
+      className="fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col"
       style={{
         bottom: 80,
         width: "calc(100% - 1.5rem)",
@@ -3721,7 +3726,8 @@ function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
