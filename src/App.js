@@ -5390,6 +5390,7 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
   const [friendshipByOtherId, setFriendshipByOtherId] = useState(() => new Map());
   const [profileExistsSet, setProfileExistsSet] = useState(() => new Set());
   const [chipActingOn, setChipActingOn] = useState(null);
+  const [signedUpIds, setSignedUpIds] = useState(() => new Set());
 
   const otherIds = useMemo(
     () => participants.map((p) => p.user_id).filter((id) => id && id !== userId),
@@ -5400,14 +5401,16 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
     if (!userId || otherIds.length === 0) {
       setFriendshipByOtherId(new Map());
       setProfileExistsSet(new Set());
+      setSignedUpIds(new Set());
       return;
     }
-    const [friendshipsRes, profilesRes] = await Promise.all([
+    const [friendshipsRes, profilesRes, accountsRes] = await Promise.all([
       supabase
         .from("friendships")
         .select("id, requester_id, addressee_id, status")
         .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
       supabase.from("profiles").select("id").in("id", otherIds),
+      supabase.rpc("get_account_user_ids", { p_user_ids: otherIds }),
     ]);
     const otherIdSet = new Set(otherIds);
     const map = new Map();
@@ -5418,6 +5421,7 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
     }
     setFriendshipByOtherId(map);
     setProfileExistsSet(new Set((profilesRes.data || []).map((r) => r.id)));
+    setSignedUpIds(new Set((accountsRes.data || []).map((r) => r.user_id)));
   }
 
   const otherIdsKey = otherIds.join("|");
@@ -5499,6 +5503,7 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
             p.display_name?.trim() || (p.user_id === userId ? "You" : "Guest");
           const initial = name.charAt(0).toUpperCase();
           const isMe = p.user_id === userId;
+          const isSignedUp = signedUpIds.has(p.user_id);
           const isHost = !!hostUserId && p.user_id === hostUserId;
           const state = getRowState(p);
           const acting = chipActingOn === p.user_id;
@@ -5511,16 +5516,19 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
                 type="button"
                 onClick={() => {
                   if (isMe) return;
-                  if (state === "invite") return;
                   onOpenProfile?.(p.user_id);
                 }}
                 aria-label={isMe ? "You" : `Open ${name}'s profile`}
-                disabled={isMe || state === "invite"}
+                disabled={isMe}
                 className="inline-flex items-center gap-1.5"
               >
                 <span
                   className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-                    isMe ? "bg-[#455d3b] text-white" : "bg-[#edf2eb] text-[#3f5a3a]"
+                    isMe
+                      ? "bg-[#455d3b] text-white"
+                      : isSignedUp
+                      ? "bg-[#edf2eb] text-[#3f5a3a]"
+                      : "bg-neutral-100 text-neutral-400"
                   }`}
                 >
                   {initial}
@@ -5534,13 +5542,13 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
                   Host
                 </span>
               )}
-              {!isMe && state === "friends" && (
+              {!isMe && isSignedUp && state === "friends" && (
                 <span className="inline-flex items-center gap-0.5 rounded-full bg-[#edf2eb] text-[#3f5a3a] text-[10px] font-medium px-1.5 py-0.5 border border-[#c5d4c2]">
                   <Check size={10} />
                   Friends
                 </span>
               )}
-              {!isMe && state === "incoming" && (
+              {!isMe && isSignedUp && state === "incoming" && (
                 <button
                   type="button"
                   onClick={() => acceptRequestFrom(p.user_id)}
@@ -5550,12 +5558,12 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
                   {acting ? "…" : "Accept"}
                 </button>
               )}
-              {!isMe && state === "outgoing" && (
+              {!isMe && isSignedUp && state === "outgoing" && (
                 <span className="rounded-full bg-white border border-neutral-200 text-neutral-500 text-[10px] font-medium px-2 py-0.5">
                   Requested
                 </span>
               )}
-              {!isMe && state === "none" && (
+              {!isMe && isSignedUp && state === "none" && (
                 <button
                   type="button"
                   onClick={() => sendRequestTo(p.user_id)}
@@ -5565,16 +5573,10 @@ function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfil
                   {acting ? "…" : "Add"}
                 </button>
               )}
-              {!isMe && state === "invite" && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    showToast?.("Invite flow coming soon — share your link from Find Friends")
-                  }
-                  className="rounded-full bg-white border border-neutral-200 text-neutral-600 text-[10px] font-medium px-2 py-0.5"
-                >
-                  Invite
-                </button>
+              {!isMe && !isSignedUp && (
+                <span className="text-[9px] uppercase tracking-wide font-semibold text-neutral-400 px-1">
+                  Guest
+                </span>
               )}
             </div>
           );
@@ -7116,10 +7118,13 @@ function ProfileLookupScreen({
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [avatarExpanded, setAvatarExpanded] = useState(false);
+  // Whether the looked-up user is an anonymous (not signed-up) guest. They
+  // can't be friended — the host invites them to come back to the app instead.
+  const [isAnon, setIsAnon] = useState(false);
 
   async function load() {
     setLoading(true);
-    const [profileRes, friendshipsRes] = await Promise.all([
+    const [profileRes, friendshipsRes, accountsRes] = await Promise.all([
       supabase
         .from("profiles")
         .select("id, display_name, username, tier")
@@ -7131,6 +7136,7 @@ function ProfileLookupScreen({
         .from("friendships")
         .select("id, requester_id, addressee_id, status")
         .or(`requester_id.eq.${viewerUserId},addressee_id.eq.${viewerUserId}`),
+      supabase.rpc("get_account_user_ids", { p_user_ids: [userId] }),
     ]);
     setProfile(profileRes.data || null);
     const rows = friendshipsRes.data || [];
@@ -7138,6 +7144,7 @@ function ProfileLookupScreen({
       (r) => r.requester_id === userId || r.addressee_id === userId
     );
     setFriendship(match || null);
+    setIsAnon(!(accountsRes.data || []).some((r) => r.user_id === userId));
     setLoading(false);
   }
 
@@ -7289,7 +7296,29 @@ function ProfileLookupScreen({
           <p className="text-sm text-neutral-500 text-center mb-6">Loading…</p>
         )}
 
-        {!loading && !isFriends && !pendingToMe && !pendingFromMe && (
+        {!loading && isAnon && (
+          <button
+            type="button"
+            onClick={async () => {
+              const url = "https://flanit.co";
+              try {
+                if (navigator.share) {
+                  await navigator.share({ title: "Join me on Flanit", url });
+                } else {
+                  await navigator.clipboard.writeText(url);
+                  showToast?.("Invite link copied — send it to your guest");
+                }
+              } catch {
+                /* user cancelled the share sheet */
+              }
+            }}
+            className="w-full rounded-full bg-[#455d3b] text-white font-medium py-3 mb-6 flex items-center justify-center gap-2"
+          >
+            <UserPlus size={16} /> Invite to Flanit
+          </button>
+        )}
+
+        {!loading && !isAnon && !isFriends && !pendingToMe && !pendingFromMe && (
           <button
             type="button"
             disabled={acting}
