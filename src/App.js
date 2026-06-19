@@ -7121,6 +7121,7 @@ function ProfileLookupScreen({
   // Whether the looked-up user is an anonymous (not signed-up) guest. They
   // can't be friended — the host invites them to come back to the app instead.
   const [isAnon, setIsAnon] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -7299,24 +7300,102 @@ function ProfileLookupScreen({
         {!loading && isAnon && (
           <button
             type="button"
-            onClick={async () => {
-              const url = "https://flanit.co";
-              try {
-                if (navigator.share) {
-                  await navigator.share({ title: "Join me on Flanit", url });
-                } else {
-                  await navigator.clipboard.writeText(url);
-                  showToast?.("Invite link copied — send it to your guest");
-                }
-              } catch {
-                /* user cancelled the share sheet */
-              }
-            }}
+            onClick={() => setShowInvite(true)}
             className="w-full rounded-full bg-[#455d3b] text-white font-medium py-3 mb-6 flex items-center justify-center gap-2"
           >
             <UserPlus size={16} /> Invite to Flanit
           </button>
         )}
+
+        {showInvite &&
+          (() => {
+            const inviteUrl = "https://flanit.co";
+            const inviteName = profile?.display_name?.trim() || "them";
+            const inviteMsg = `Come back to Flanit and claim your account — your picks and friends are saved: ${inviteUrl}`;
+            return (
+              <>
+                <div
+                  className="fixed inset-0 bg-black/30 z-[3400]"
+                  onClick={() => setShowInvite(false)}
+                />
+                <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl p-5 z-[3500] max-w-md mx-auto shadow-2xl">
+                  <div className="w-10 h-1 bg-neutral-200 rounded-full mx-auto mb-4" />
+                  <h2 className="text-lg font-semibold mb-1">
+                    Invite {inviteName} back
+                  </h2>
+                  <p className="text-sm text-neutral-500 mb-4">
+                    Send a link so they can claim their account — they'll keep the
+                    picks and friends from your sessions.
+                  </p>
+                  <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-700 mb-3 break-all border border-neutral-100">
+                    {inviteUrl}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(inviteUrl);
+                          showToast?.("Link copied");
+                        } catch {
+                          /* clipboard blocked */
+                        }
+                      }}
+                      className="rounded-2xl bg-white border border-neutral-200 py-3 font-medium text-neutral-700 active:scale-[0.98] transition"
+                    >
+                      Copy link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (navigator.share) {
+                            await navigator.share({
+                              title: "Join me on Flanit",
+                              text: inviteMsg,
+                              url: inviteUrl,
+                            });
+                          } else {
+                            await navigator.clipboard.writeText(inviteUrl);
+                            showToast?.("Link copied");
+                          }
+                        } catch {
+                          /* user cancelled */
+                        }
+                      }}
+                      className="rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition"
+                    >
+                      Share…
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <a
+                      href={`mailto:?subject=${encodeURIComponent(
+                        "Join me on Flanit"
+                      )}&body=${encodeURIComponent(inviteMsg)}`}
+                      className="rounded-2xl bg-white border border-neutral-200 py-2.5 text-center text-sm font-medium text-neutral-700"
+                    >
+                      Email
+                    </a>
+                    <a
+                      href={`sms:?&body=${encodeURIComponent(inviteMsg)}`}
+                      className="rounded-2xl bg-white border border-neutral-200 py-2.5 text-center text-sm font-medium text-neutral-700"
+                    >
+                      Message
+                    </a>
+                    <a
+                      href={`https://wa.me/?text=${encodeURIComponent(inviteMsg)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-2xl bg-white border border-neutral-200 py-2.5 text-center text-sm font-medium text-neutral-700"
+                    >
+                      WhatsApp
+                    </a>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
         {!loading && !isAnon && !isFriends && !pendingToMe && !pendingFromMe && (
           <button
