@@ -713,8 +713,16 @@ useEffect(() => {
     let shouldFlip = false;
 
     if (mode === "concurrent") {
-      // Concurrent: reconciliation polling tells us when target is reached.
-      shouldFlip = target > 0 && sessionMatches.length >= target;
+      // Flip when the match target is reached OR the guest finishes the queue —
+      // so a Right now guest always lands on the matches / sign-up screen and
+      // never dead-ends on a blank card at end of list.
+      const queueEmpty = guestQueue.length === 0 && guestCardIndex === 0;
+      const reachedEnd =
+        guestQueue.length > 0 && guestCardIndex >= guestQueue.length;
+      shouldFlip =
+        (target > 0 && sessionMatches.length >= target) ||
+        reachedEnd ||
+        queueEmpty;
     } else if (mode === "curated") {
       // "Send options": the guest votes the WHOLE shortlist — no target-based
       // early stop (that was the old mutual-match model). Flip only when they
