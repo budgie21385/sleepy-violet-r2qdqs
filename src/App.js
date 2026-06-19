@@ -3990,13 +3990,76 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
       );
     }
 
+    // ---- Connect: people from my sessions I'm not yet connected with ----
+    // Add (signed-up) or invite (anon) each one — actionable from the drawer.
+    let connectItems = [];
+    if (myPartRows.length > 0) {
+      const [coPartsRes, myFriendshipsRes] = await Promise.all([
+        supabase
+          .from("session_participants")
+          .select("user_id, display_name, joined_at")
+          .in("session_id", myPartRows.map((p) => p.session_id))
+          .neq("user_id", userId)
+          .order("joined_at", { ascending: false }),
+        supabase
+          .from("friendships")
+          .select("requester_id, addressee_id, status")
+          .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
+      ]);
+      // Skip anyone I already have any friendship history with (any status).
+      const hasFriendship = new Set();
+      (myFriendshipsRes.data || []).forEach((f) => {
+        hasFriendship.add(
+          f.requester_id === userId ? f.addressee_id : f.requester_id
+        );
+      });
+      const coById = new Map();
+      (coPartsRes.data || []).forEach((p) => {
+        if (!p.user_id || hasFriendship.has(p.user_id)) return;
+        if (!coById.has(p.user_id)) coById.set(p.user_id, p);
+      });
+      const coIds = Array.from(coById.keys());
+      if (coIds.length > 0) {
+        const { data: acctRows } = await supabase.rpc("get_account_user_ids", {
+          p_user_ids: coIds,
+        });
+        const signedUp = new Set((acctRows || []).map((r) => r.user_id));
+        connectItems = coIds.map((uid) => {
+          const p = coById.get(uid);
+          return {
+            kind: signedUp.has(uid) ? "connect_add" : "connect_invite",
+            id: `con_${uid}`,
+            otherId: uid,
+            name: p.display_name || "Someone",
+            timestamp: p.joined_at,
+          };
+        });
+      }
+    }
+
     const all = [
       ...incomingItems,
       ...acceptedItems,
       ...submittedItems,
       ...decidedItems,
+      ...connectItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setItems(all);
+  }
+
+  async function sendRequest(otherId) {
+    setActing(otherId);
+    const { error } = await supabase
+      .from("friendships")
+      .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    setActing(null);
+    if (error) {
+      console.error("Drawer add friend failed:", error);
+      showToast?.("Couldn't send request");
+      return;
+    }
+    showToast?.("Request sent");
+    await load();
   }
 
   useEffect(() => {
@@ -4083,9 +4146,10 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
                     key={item.id}
                     item={item}
                     isNew
-                    acting={acting === item.friendshipId}
+                    acting={acting === item.friendshipId || acting === item.otherId}
                     onAccept={() => setStatus(item.friendshipId, "accepted")}
                     onDecline={() => setStatus(item.friendshipId, "declined")}
+                    onAddFriend={() => sendRequest(item.otherId)}
                     onOpenProfile={onOpenProfile}
                     onOpenSession={onOpenSession}
                   />
@@ -4104,9 +4168,10 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
                   <ActivityItem
                     key={item.id}
                     item={item}
-                    acting={acting === item.friendshipId}
+                    acting={acting === item.friendshipId || acting === item.otherId}
                     onAccept={() => setStatus(item.friendshipId, "accepted")}
                     onDecline={() => setStatus(item.friendshipId, "declined")}
+                    onAddFriend={() => sendRequest(item.otherId)}
                     onOpenProfile={onOpenProfile}
                     onOpenSession={onOpenSession}
                   />
@@ -4123,7 +4188,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile, onOpenSession }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -4227,6 +4292,59 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onOpenProfile,
           <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "connect_add") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+        <button
+          type="button"
+          onClick={() => onOpenProfile?.(item.otherId)}
+          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+        >
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#3f5a3a] text-sm font-medium">
+            {(item.name || "?").charAt(0).toUpperCase()}
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{item.name}</strong> was in your session
+            </p>
+            <p className="text-[11px] text-neutral-500">Add them as a friend</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={onAddFriend}
+          disabled={acting}
+          className="shrink-0 rounded-full bg-[#455d3b] text-white text-xs font-medium px-3 py-1.5 disabled:opacity-50"
+        >
+          {acting ? "…" : "Add"}
+        </button>
+      </div>
+    );
+  }
+
+  if (item.kind === "connect_invite") {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.(item.otherId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-400 text-sm font-medium">
+          {(item.name || "?").charAt(0).toUpperCase()}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.name}</strong> joined as a guest
+          </p>
+          <p className="text-[11px] text-neutral-500">Invite them to join Flanit</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-white border border-neutral-200 text-neutral-700 text-xs font-medium px-3 py-1.5">
+          Invite
+        </span>
       </button>
     );
   }
