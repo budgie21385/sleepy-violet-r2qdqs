@@ -8026,8 +8026,11 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, area
 
   const MAP_AREA_RADIUS_KM = 3;
 
+  // Uses the cleaned cuisine_bucket (backfilled from the taxonomy), not the raw
+  // Google 'cuisine'. Venues with no real cuisine (formats/junk) have a null
+  // bucket and simply don't appear under any cuisine chip.
   const cuisineOptions = useMemo(
-    () => Array.from(new Set(venues.map((v) => v.cuisine).filter(Boolean))).sort(),
+    () => Array.from(new Set(venues.map((v) => v.cuisine_bucket).filter(Boolean))).sort(),
     [venues]
   );
 
@@ -8059,7 +8062,7 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, area
     if (fAreas.length > 0)
       list = list.filter((v) => venueMatchesAreas(v, fAreas, MAP_AREA_RADIUS_KM));
     if (fCuisines.length > 0)
-      list = list.filter((v) => fCuisines.includes(v.cuisine));
+      list = list.filter((v) => fCuisines.includes(v.cuisine_bucket));
     if (fVibes.length > 0)
       list = list.filter((v) =>
         fVibes.some((vibe) => venueMatchesVibe(v, vibe, todayKey))
