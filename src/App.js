@@ -4,7 +4,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Plus, Bell, SlidersHorizontal } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, ExternalLink, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Plus, Bell, SlidersHorizontal, ChevronDown, ChevronUp } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -8269,85 +8269,86 @@ function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, area
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+              <div className="flex-1 overflow-y-auto px-5 py-2">
                 {areas.length > 0 && (
-                  <MapFilterGroup title="Area">
-                    {areas.map((a) => (
-                      <MapFilterChip
-                        key={a.id ?? a.name}
-                        on={fAreas.some((x) => x.name === a.name)}
-                        label={a.name}
-                        onClick={() => toggleArea(a)}
-                      />
-                    ))}
-                  </MapFilterGroup>
+                  <MapFilterSection
+                    title="Area"
+                    summary={fAreas.length ? `${fAreas.length} selected` : "Any"}
+                    accent={fAreas.length > 0}
+                  >
+                    <MapAreaFilter areas={areas} selected={fAreas} onToggle={toggleArea} />
+                  </MapFilterSection>
                 )}
-
-                <MapFilterGroup title="Vibe">
-                  {VIBE_OPTIONS.map((v) => (
-                    <MapFilterChip
-                      key={v}
-                      on={fVibes.includes(v)}
-                      label={v}
-                      onClick={() => toggleVibe(v)}
-                    />
-                  ))}
-                </MapFilterGroup>
 
                 {cuisineOptions.length > 0 && (
-                  <MapFilterGroup title="Cuisine">
-                    {cuisineOptions.map((c) => (
+                  <MapFilterSection
+                    title="Cuisine"
+                    summary={fCuisines.length ? `${fCuisines.length} selected` : "Any"}
+                    accent={fCuisines.length > 0}
+                  >
+                    <SearchableChips
+                      options={cuisineOptions}
+                      selected={fCuisines}
+                      onToggle={toggleCuisine}
+                      placeholder="Search cuisine"
+                    />
+                  </MapFilterSection>
+                )}
+
+                <div className="space-y-5 pt-4">
+                  <MapFilterGroup title="Vibe">
+                    {VIBE_OPTIONS.map((v) => (
                       <MapFilterChip
-                        key={c}
-                        on={fCuisines.includes(c)}
-                        label={c}
-                        onClick={() => toggleCuisine(c)}
+                        key={v}
+                        on={fVibes.includes(v)}
+                        label={v}
+                        onClick={() => toggleVibe(v)}
                       />
                     ))}
                   </MapFilterGroup>
-                )}
 
-                <MapFilterGroup title="Minimum rating">
-                  {[0, 4, 4.5].map((r) => (
-                    <MapFilterChip
-                      key={r}
-                      on={fMinRating === r}
-                      label={r === 0 ? "Any" : `${r}★+`}
-                      onClick={() => setFMinRating(r)}
-                    />
-                  ))}
-                </MapFilterGroup>
+                  <MapFilterGroup title="Minimum rating">
+                    {[0, 4, 4.5].map((r) => (
+                      <MapFilterChip
+                        key={r}
+                        on={fMinRating === r}
+                        label={r === 0 ? "Any" : `${r}★+`}
+                        onClick={() => setFMinRating(r)}
+                      />
+                    ))}
+                  </MapFilterGroup>
 
-                <MapFilterGroup title="Price">
-                  {[1, 2, 3, 4].map((p) => (
-                    <MapFilterChip
-                      key={p}
-                      on={fPrices.includes(p)}
-                      label={"$".repeat(p)}
-                      onClick={() => togglePrice(p)}
-                    />
-                  ))}
-                </MapFilterGroup>
+                  <MapFilterGroup title="Price">
+                    {[1, 2, 3, 4].map((p) => (
+                      <MapFilterChip
+                        key={p}
+                        on={fPrices.includes(p)}
+                        label={"$".repeat(p)}
+                        onClick={() => togglePrice(p)}
+                      />
+                    ))}
+                  </MapFilterGroup>
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-sm font-medium text-neutral-800">
-                    Open now
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={fOpenNow}
-                    onClick={() => setFOpenNow((v) => !v)}
-                    className={`relative w-11 h-6 rounded-full transition ${
-                      fOpenNow ? "bg-[#455d3b]" : "bg-neutral-300"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${
-                        fOpenNow ? "right-0.5" : "left-0.5"
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-sm font-medium text-neutral-800">
+                      Open now
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={fOpenNow}
+                      onClick={() => setFOpenNow((v) => !v)}
+                      className={`relative w-11 h-6 rounded-full transition ${
+                        fOpenNow ? "bg-[#455d3b]" : "bg-neutral-300"
                       }`}
-                    />
-                  </button>
+                    >
+                      <span
+                        className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${
+                          fOpenNow ? "right-0.5" : "left-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -8393,6 +8394,183 @@ function MapFilterChip({ on, label, onClick }) {
     >
       {label}
     </button>
+  );
+}
+
+// Collapsible accordion row used for long filter lists (Area, Cuisine). Shows
+// title + a summary ("Any" / "N selected") and a chevron; body renders only
+// when expanded so the sheet stays one screen tall.
+function MapFilterSection({ title, summary, accent, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b border-neutral-100">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between py-3"
+      >
+        <span className="text-sm font-medium text-neutral-800">{title}</span>
+        <span className="flex items-center gap-2">
+          <span className={`text-xs ${accent ? "text-[#455d3b]" : "text-neutral-400"}`}>
+            {summary}
+          </span>
+          {open ? (
+            <ChevronUp size={16} className="text-neutral-400" />
+          ) : (
+            <ChevronDown size={16} className="text-neutral-400" />
+          )}
+        </span>
+      </button>
+      {open && <div className="pb-4">{children}</div>}
+    </div>
+  );
+}
+
+// A searchable chip list: type to narrow a long set of string options. Used by
+// Cuisine. Selected chips stay visible at the top whatever the search term.
+function SearchableChips({ options, selected, onToggle, placeholder }) {
+  const [q, setQ] = useState("");
+  const ql = q.trim().toLowerCase();
+  const matches = ql
+    ? options.filter((o) => o.toLowerCase().includes(ql))
+    : options;
+  return (
+    <div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {selected.map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => onToggle(o)}
+              className="inline-flex items-center gap-1 text-xs bg-[#edf2eb] text-[#455d3b] rounded-full pl-3 pr-2 py-1"
+            >
+              {o}
+              <X size={12} />
+            </button>
+          ))}
+        </div>
+      )}
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder={placeholder}
+        className="w-full mb-3 rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:border-[#455d3b]"
+      />
+      <div className="flex flex-wrap gap-2">
+        {matches.map((o) => (
+          <MapFilterChip
+            key={o}
+            on={selected.includes(o)}
+            label={o}
+            onClick={() => onToggle(o)}
+          />
+        ))}
+        {matches.length === 0 && (
+          <p className="text-sm text-neutral-400 py-1">No matches</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Area picker: selected chips on top, a suburb search, and — when not
+// searching — region accordions so the ~120 suburbs browse cleanly.
+function MapAreaFilter({ areas, selected, onToggle }) {
+  const [q, setQ] = useState("");
+  const [openRegion, setOpenRegion] = useState(null);
+  const regions = useMemo(() => {
+    const m = new Map();
+    areas.forEach((a) => {
+      const r = a.region || "Other";
+      if (!m.has(r)) m.set(r, []);
+      m.get(r).push(a);
+    });
+    return Array.from(m.entries());
+  }, [areas]);
+  const ql = q.trim().toLowerCase();
+  const searchMatches = ql
+    ? areas.filter((a) => a.name.toLowerCase().includes(ql))
+    : [];
+  const isOn = (a) => selected.some((x) => x.name === a.name);
+  return (
+    <div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {selected.map((a) => (
+            <button
+              key={a.name}
+              type="button"
+              onClick={() => onToggle(a)}
+              className="inline-flex items-center gap-1 text-xs bg-[#edf2eb] text-[#455d3b] rounded-full pl-3 pr-2 py-1"
+            >
+              {a.name}
+              <X size={12} />
+            </button>
+          ))}
+        </div>
+      )}
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search suburb"
+        className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:border-[#455d3b]"
+      />
+      {ql ? (
+        <div className="mt-2 flex flex-col">
+          {searchMatches.map((a) => (
+            <button
+              key={a.name}
+              type="button"
+              onClick={() => onToggle(a)}
+              className="flex items-center justify-between py-2 px-2 rounded-lg text-sm hover:bg-neutral-50"
+            >
+              {a.name}
+              {isOn(a) && <Check size={15} className="text-[#455d3b]" />}
+            </button>
+          ))}
+          {searchMatches.length === 0 && (
+            <p className="text-sm text-neutral-400 py-2 px-2">No matches</p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-neutral-500 mb-1">
+            Browse by region
+          </p>
+          {regions.map(([region, list]) => (
+            <div key={region} className="border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenRegion((o) => (o === region ? null : region))
+                }
+                className="w-full flex items-center justify-between py-2.5"
+              >
+                <span className="text-sm text-neutral-700">{region}</span>
+                {openRegion === region ? (
+                  <ChevronUp size={15} className="text-neutral-400" />
+                ) : (
+                  <ChevronDown size={15} className="text-neutral-400" />
+                )}
+              </button>
+              {openRegion === region && (
+                <div className="flex flex-wrap gap-2 pb-3">
+                  {list.map((a) => (
+                    <MapFilterChip
+                      key={a.name}
+                      on={isOn(a)}
+                      label={a.name}
+                      onClick={() => onToggle(a)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
