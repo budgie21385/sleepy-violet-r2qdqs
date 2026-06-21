@@ -11,7 +11,6 @@ import {
   MELBOURNE_ZOOM,
   getVenueEmoji,
   venueMatchesAreas,
-  getMapsUrl,
   getTodayDayKey,
   venueOpenInBand,
   isVenueOpenNow,
@@ -24,15 +23,9 @@ import {
   SearchableChips,
   MapAreaFilter,
 } from "./components/MapFilters";
-import {
-  VenueCard,
-  VenueHeroCarousel,
-  VenueRating,
-  VenueVibes,
-  OpeningHours,
-  OpenMapsButton,
-} from "./components/VenueBits";
+import { VenueCard } from "./components/VenueBits";
 import { EmptyState } from "./components/EmptyState";
+import { MapVenueSheet } from "./components/MapVenueSheet";
 import { MapPin, Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, User, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Plus, Bell, SlidersHorizontal } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
@@ -3257,100 +3250,7 @@ function TimeLimitField({ value, onChange, options }) {
 // VenueHeroCarousel, PhotoAttribution, VenueVibes, VenueCard moved to
 // ./components/VenueBits.js (imported at the top).
 
-function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
-  const [mapMenuOpen, setMapMenuOpen] = useState(false);
-  // Portaled to document.body so it escapes MapScreen's `fixed inset-0
-  // z-[1500]` stacking context. Otherwise its zIndex only competes inside that
-  // layer and can never sit above the app-level FAB (z-[3060]). `fixed` keeps
-  // the same on-screen placement the old `absolute` had inside the fixed map.
-  return createPortal(
-    <div
-      className="fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col"
-      style={{
-        bottom: 80,
-        width: "calc(100% - 1.5rem)",
-        maxHeight: "calc(100% - 100px)",
-        // Above the bell (2950) and FAB (3060) so the open card is top-level.
-        zIndex: 3100,
-      }}
-    >
-      <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100 rounded-t-3xl">
-        <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
-          {venue.name}
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100"
-        >
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        <VenueHeroCarousel venue={venue} />
-        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
-        <VenueRating venue={venue} />
-        <VenueVibes venue={venue} />
-        <OpeningHours venue={venue} />
-        <OpenMapsButton url={getMapsUrl(venue)} />
-      </div>
-
-      <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
-        <div className="flex gap-2 relative">
-          <button
-            type="button"
-            onClick={() => setMapMenuOpen(true)}
-            aria-label="More options"
-            className="rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-neutral-500 active:scale-[0.98] transition flex items-center justify-center"
-          >
-            <MoreVertical size={18} />
-          </button>
-          {savedIds && savedIds.has(venue.id) ? (
-            <button
-              type="button"
-              onClick={() => onUnsave(venue.id)}
-              className="flex-1 rounded-2xl bg-[#edf2eb] py-3 font-medium text-[#455d3b] border border-[#c5d4c2]"
-            >
-              Remove from list
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onSave(venue.id)}
-              className="flex-1 rounded-2xl bg-[#455d3b] py-3 font-medium text-white"
-            >
-              Add to list
-            </button>
-          )}
-          {mapMenuOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-[3400]"
-                onClick={() => setMapMenuOpen(false)}
-              />
-              <div className="absolute bottom-full left-0 mb-2 bg-white border border-neutral-200 rounded-xl shadow-lg z-[3500] overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onHide(venue.id);
-                    setMapMenuOpen(false);
-                    onClose();
-                  }}
-                  className="block px-5 py-3 text-red-700 font-medium hover:bg-neutral-50 whitespace-nowrap text-left"
-                >
-                  Don't show this again
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
+// MapVenueSheet moved to ./components/MapVenueSheet.js (imported at the top).
 
 // FAB rendered above the BottomTabBar on Profile and Map tabs. Tap to expand
 // a tap-to-pick menu of add actions; per-tab option list. Find Friends is
