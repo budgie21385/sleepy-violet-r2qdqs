@@ -264,6 +264,9 @@ export default function RestaurantSwipeMVP() {
   // Session id to deep-link into from a tapped notification — opens that
   // session's Your Sessions detail / results board.
   const [notifSessionId, setNotifSessionId] = useState(null);
+  // Venue to show in an app-level MapVenueSheet card — e.g. tapping a
+  // "You're going to X" decision notification opens that venue's card directly.
+  const [cardVenue, setCardVenue] = useState(null);
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
   // handle to a user_id once session + profile are loaded, then push it into
   // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up
@@ -2624,6 +2627,7 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           onOpenSession={(sid) => setNotifSessionId(sid)}
+          onOpenVenue={(v) => setCardVenue(v)}
           showToast={showToast}
         />
       )}
@@ -2667,6 +2671,16 @@ if (authLoading || guestLoading) {
           initialSessionId={notifSessionId}
         />
       )}
+      {cardVenue && (
+        <MapVenueSheet
+          venue={cardVenue}
+          onClose={() => setCardVenue(null)}
+          savedIds={savedVenueIds}
+          onSave={saveVenue}
+          onUnsave={unsaveVenue}
+          onHide={hideVenue}
+        />
+      )}
       <FloatingActionButton
         tab={tab}
         showToast={showToast}
@@ -2679,6 +2693,7 @@ if (authLoading || guestLoading) {
         unreadCount={unreadCount}
         setTab={(t) => {
           setNotifSessionId(null);
+          setCardVenue(null);
           setTab(t);
         }}
       />
@@ -3021,7 +3036,7 @@ function AreaFilter({
 // NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes.
-function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToast, asTab = false }) {
+function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, showToast, asTab = false }) {
   const [items, setItems] = useState(null); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [lastSeen] = useState(() => {
@@ -3147,6 +3162,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
             id: `dec_${s.id}`,
             sessionId: s.id,
             venueName,
+            venueObj: v || null, // full venue → tap opens its card
             sessionName: s.name || "your session",
             timestamp: s.updated_at,
           };
@@ -3306,6 +3322,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
                 onAddFriend={() => sendRequest(item.otherId)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
+                onOpenVenue={onOpenVenue}
               />
             ))}
           </div>
@@ -3328,6 +3345,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
                 onAddFriend={() => sendRequest(item.otherId)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
+                onOpenVenue={onOpenVenue}
               />
             ))}
           </div>
@@ -3362,7 +3380,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, showToa
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession, onOpenVenue }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -3453,7 +3471,11 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
     return (
       <button
         type="button"
-        onClick={() => onOpenSession?.(item.sessionId)}
+        onClick={() =>
+          item.venueObj
+            ? onOpenVenue?.(item.venueObj)
+            : onOpenSession?.(item.sessionId)
+        }
         className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
       >
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
