@@ -10,11 +10,19 @@ import {
 } from "../lib/venueLogic";
 
 export function VenueHeroCarousel({ venue }) {
-  const images = venue?.image_urls?.length
-    ? venue.image_urls
-    : venue?.primary_image
-      ? [venue.primary_image]
-      : [];
+  // Prefer CDN-cached photos (fast — served from Supabase Storage). Fall back to
+  // the live /api/place-photo Google proxy for venues not cached yet.
+  const cdn = venue?.image_cdn_urls;
+  const usingCdn = Array.isArray(cdn) && cdn.length > 0;
+  const images = usingCdn
+    ? cdn
+    : venue?.image_urls?.length
+      ? venue.image_urls
+      : venue?.primary_image
+        ? [venue.primary_image]
+        : [];
+  const photoSrc = (u) =>
+    usingCdn ? u : `/api/place-photo?url=${encodeURIComponent(u)}`;
   // image_attributions is a parallel array to image_urls. Each entry is
   // either null (no attribution) or an array of authorAttributions
   // objects ({displayName, uri, photoUri}) — same shape as Places API.
@@ -49,7 +57,7 @@ export function VenueHeroCarousel({ venue }) {
     if (images.length <= 1) return;
     images.forEach((u) => {
       const img = new Image();
-      img.src = `/api/place-photo?url=${encodeURIComponent(u)}`;
+      img.src = photoSrc(u);
     });
   }, [venue?.id]);
 
@@ -84,7 +92,7 @@ export function VenueHeroCarousel({ venue }) {
     >
       <img
         key={currentImage}
-        src={`/api/place-photo?url=${encodeURIComponent(currentImage)}`}
+        src={photoSrc(currentImage)}
         alt={venue.name}
         className={`h-full w-full object-cover transition-opacity duration-300 ease-in-out ${
           isFading ? "opacity-0" : "opacity-100"
