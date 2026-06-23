@@ -1,6 +1,6 @@
 // The venue card and its presentational pieces. Props-only components extracted
 // from App.js; used by the swipe card (VenueCard) and the map sheet.
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MapPin, ExternalLink } from "lucide-react";
 import {
   getTodayDayKey,
@@ -42,6 +42,18 @@ export function VenueHeroCarousel({ venue }) {
     setTouchStartX(null);
     setTouchEndX(null);
   }
+  // Warm the browser cache for every photo of this venue up front so flipping
+  // the carousel is instant (the proxy + CDN cache the bytes; this just kicks
+  // the fetches off ahead of the user tapping ›).
+  useEffect(() => {
+    if (images.length <= 1) return;
+    images.forEach((u) => {
+      const img = new Image();
+      img.src = `/api/place-photo?url=${encodeURIComponent(u)}`;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venue?.id]);
+
   if (!images.length) return null;
   const currentImage = images[imageIndex];
   function changeImage(direction, e) {
