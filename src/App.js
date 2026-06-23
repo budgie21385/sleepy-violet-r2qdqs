@@ -1307,7 +1307,7 @@ loadAreas();
     );
     return [
       ALL,
-      ...Array.from(new Set(availableVenues.map((venue) => venue.cuisine)))
+      ...Array.from(new Set(availableVenues.map((venue) => venue.cuisine_bucket)))
         .filter(Boolean)
         .sort(),
     ];
@@ -1319,7 +1319,7 @@ loadAreas();
       if (!venueMatchesAreas(venue, selectedAreas, radiusKm)) return false;
       if (
         selectedCuisines.length > 0 &&
-        !selectedCuisines.includes(venue.cuisine)
+        !selectedCuisines.includes(venue.cuisine_bucket)
       )
         return false;
       if (openNow && !isVenueOpenNow(venue)) return false;
@@ -1349,7 +1349,7 @@ loadAreas();
       if (!venueMatchesAreas(venue, selectedAreas, radiusKm)) return false;
       if (
         selectedCuisines.length > 0 &&
-        !selectedCuisines.includes(venue.cuisine)
+        !selectedCuisines.includes(venue.cuisine_bucket)
       )
         return false;
       if (openNow && !isVenueOpenNow(venue)) return false;
@@ -1391,7 +1391,7 @@ loadAreas();
  
       const matchesCuisine =
         selectedCuisines.length === 0 ||
-        selectedCuisines.includes(venue.cuisine);
+        selectedCuisines.includes(venue.cuisine_bucket);
       if (!matchesCuisine) return false;
  
       if (openNow && !isVenueOpenNow(venue)) return false;
@@ -1465,7 +1465,7 @@ loadAreas();
       if (!venueMatchesAreas(venue, sessionAreas, sessionRadius)) return false;
 
       if (filters.selectedCuisines && filters.selectedCuisines.length > 0) {
-        if (!filters.selectedCuisines.includes(venue.cuisine)) return false;
+        if (!filters.selectedCuisines.includes(venue.cuisine_bucket)) return false;
       }
 
       if (filters.openNow && !isVenueOpenNow(venue)) return false;
