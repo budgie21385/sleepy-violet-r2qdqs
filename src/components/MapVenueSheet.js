@@ -39,9 +39,11 @@ export function MapVenueSheet({
   const [copied, setCopied] = useState(false);
   const [enterDir, setEnterDir] = useState(null); // slide-in dir on venue change
   const [hint, setHint] = useState(null); // 'right' | 'left' | null (one-time)
+  const [dragX, setDragX] = useState(0); // live finger-follow offset
+  const [animateBack, setAnimateBack] = useState(false); // snap-back transition
   const saved = !!(savedIds && savedIds.has(venue.id));
   const navEnabled = !!(onNext || onPrev);
-  const touch = useRef({ x: 0, y: 0, active: false });
+  const touch = useRef({ x: 0, y: 0, active: false, axis: null });
 
   // One-time swipe tutorial: nudge right on the very first card the user opens.
   useEffect(() => {
@@ -96,16 +98,39 @@ export function MapVenueSheet({
 
   function handleSwipeStart(e) {
     const t = e.touches[0];
-    touch.current = { x: t.clientX, y: t.clientY, active: true };
+    touch.current = { x: t.clientX, y: t.clientY, active: true, axis: null };
+    setAnimateBack(false);
   }
-  function handleSwipeEnd(e) {
+  function handleSwipeMove(e) {
     if (!touch.current.active) return;
-    touch.current.active = false;
-    const t = e.changedTouches[0];
+    const t = e.touches[0];
     const dx = t.clientX - touch.current.x;
     const dy = t.clientY - touch.current.y;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+    // Lock to an axis after a little movement so vertical scrolling still works.
+    if (!touch.current.axis && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      touch.current.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+    }
+    if (touch.current.axis !== "x") return;
+    // Resist dragging past the ends of the list.
+    let offset = dx;
+    if ((dx > 0 && !hasNext) || (dx < 0 && !hasPrev)) offset = dx * 0.25;
+    setDragX(offset);
+  }
+  function handleSwipeEnd() {
+    if (!touch.current.active) return;
+    const wasX = touch.current.axis === "x";
+    const dx = dragX;
+    touch.current.active = false;
+    touch.current.axis = null;
+    if (wasX && Math.abs(dx) > 70) {
+      // Commit: swap venue and reset offset instantly (the new card slides in).
+      setAnimateBack(false);
+      setDragX(0);
       go(dx > 0 ? "next" : "prev"); // swipe right → next, left → back
+    } else {
+      // Snap back to centre.
+      setAnimateBack(true);
+      setDragX(0);
     }
   }
 
@@ -149,15 +174,20 @@ export function MapVenueSheet({
   // the same on-screen placement the old `absolute` had inside the fixed map.
   return createPortal(
     <div
-      className={`fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col ${nudgeClass}`}
+      className={`fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col ${dragX === 0 ? nudgeClass : ""}`}
       style={{
         bottom: 80,
         width: "calc(100% - 1.5rem)",
         maxHeight: "calc(100% - 100px)",
         // Above the bell (2950) and FAB (3060) so the open card is top-level.
         zIndex: 3100,
+        // Live finger-follow while dragging; left undefined at rest so the
+        // one-time nudge animation can drive the transform.
+        transform: dragX !== 0 ? `translateX(${dragX}px)` : undefined,
+        transition: animateBack ? "transform 0.2s ease-out" : "none",
       }}
       onTouchStart={navEnabled ? handleSwipeStart : undefined}
+      onTouchMove={navEnabled ? handleSwipeMove : undefined}
       onTouchEnd={navEnabled ? handleSwipeEnd : undefined}
     >
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100 rounded-t-3xl">
