@@ -25,7 +25,7 @@ export function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHi
     if (navigator.share) {
       try {
         await navigator.share({ title: venue.name, text: `${venue.name} — on Flanit`, url });
-      } catch (e) {
+      } catch {
         /* user cancelled — ignore */
       }
       return;
@@ -34,7 +34,7 @@ export function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHi
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch (e) {
+    } catch {
       /* clipboard blocked — ignore */
     }
   }

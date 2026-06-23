@@ -51,7 +51,6 @@ export function VenueHeroCarousel({ venue }) {
       const img = new Image();
       img.src = `/api/place-photo?url=${encodeURIComponent(u)}`;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [venue?.id]);
 
   if (!images.length) return null;
