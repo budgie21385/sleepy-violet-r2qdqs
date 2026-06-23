@@ -46,15 +46,20 @@ export function MapVenueSheet({
   const touch = useRef({ x: 0, y: 0, active: false, axis: null });
 
   // One-time swipe tutorial: nudge right on the very first card the user opens.
+  // Dev override: load any URL with `?swipehint` to always replay it (handy for
+  // tuning the animation on a phone where the console isn't available).
   useEffect(() => {
     if (!navEnabled || !hasNext) return;
+    const force =
+      typeof window !== "undefined" &&
+      window.location.search.includes("swipehint");
     let seen = false;
     try {
       seen = !!localStorage.getItem(HINT_KEY);
     } catch {
       /* storage blocked — just skip the hint */
     }
-    if (!seen) setHint("right");
+    if (force || !seen) setHint("right");
   }, [navEnabled, hasNext]);
 
   // After the "swipe back" (left) hint has shown once, retire the tutorial.
