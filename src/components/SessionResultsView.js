@@ -129,6 +129,9 @@ export function SessionResultsView({
     }
     setDecidedVenueId(venueId);
     showToast?.("Locked it in");
+    // Pop the venue card so the picker (and viewers) see the spot + can share it.
+    const v = venueById.get(venueId);
+    if (v) setDetailVenue(v);
   }
 
   // Clear per-row selections when switching tabs.

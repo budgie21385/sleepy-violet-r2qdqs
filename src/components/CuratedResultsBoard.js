@@ -87,6 +87,9 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
     }
     setDecidedVenueId(venueId);
     if (showToast) showToast("Locked it in");
+    // Pop the venue card so the picker (and viewers) see the spot + can share it.
+    const v = venueById[venueId];
+    if (v) setDetailVenue(v);
   }
 
   if (loading) {
