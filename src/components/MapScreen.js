@@ -171,6 +171,15 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
     };
   }, []);
 
+  // Position of the open card within the venues currently shown on the map, so
+  // swiping the card steps venue-to-venue through that (filtered) set.
+  const selectedIndex =
+    selectedVenue != null
+      ? displayedPlottable.findIndex((v) => v.id === selectedVenue.id)
+      : -1;
+  const hasNext = selectedIndex >= 0 && selectedIndex < displayedPlottable.length - 1;
+  const hasPrev = selectedIndex > 0;
+
   return (
     <div className="fixed inset-0 z-[1500] bg-white">
       <div className="absolute top-0 left-0 right-0 z-[2000] bg-white/95 backdrop-blur border-b border-neutral-100">
@@ -281,6 +290,14 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          hasNext={hasNext}
+          hasPrev={hasPrev}
+          onNext={() =>
+            hasNext && setSelectedVenue(displayedPlottable[selectedIndex + 1])
+          }
+          onPrev={() =>
+            hasPrev && setSelectedVenue(displayedPlottable[selectedIndex - 1])
+          }
         />
       )}
       {showFilters &&

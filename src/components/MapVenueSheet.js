@@ -1,7 +1,15 @@
 // Bottom-sheet venue card shown when a map marker (or a saved-place row) is
 // tapped. Portaled to document.body so it sits above the FAB/tab bar. Extracted
 // from App.js; used in several places (map tab, saved lists, results).
-import { useState } from "react";
+//
+// On the Map, the card doubles as a discovery surface: when onNext/onPrev are
+// provided, a horizontal swipe moves venue-to-venue through the set currently
+// shown on the map — swipe RIGHT for the next venue, LEFT to go back — without
+// closing the card. A one-time nudge tutorial teaches the gesture. The swipe is
+// navigation only; saving is still the bookmark button. While nav is enabled the
+// hero stops swiping photos (you tap the photo to advance) so the two gestures
+// don't collide.
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, MoreVertical, Send, Bookmark } from "lucide-react";
 import {
@@ -13,10 +21,93 @@ import {
 } from "./VenueBits";
 import { getMapsUrl } from "../lib/venueLogic";
 
-export function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHide }) {
+const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
+
+export function MapVenueSheet({
+  venue,
+  onClose,
+  savedIds,
+  onSave,
+  onUnsave,
+  onHide,
+  onNext,
+  onPrev,
+  hasNext = false,
+  hasPrev = false,
+}) {
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [enterDir, setEnterDir] = useState(null); // slide-in dir on venue change
+  const [hint, setHint] = useState(null); // 'right' | 'left' | null (one-time)
   const saved = !!(savedIds && savedIds.has(venue.id));
+  const navEnabled = !!(onNext || onPrev);
+  const touch = useRef({ x: 0, y: 0, active: false });
+
+  // One-time swipe tutorial: nudge right on the very first card the user opens.
+  useEffect(() => {
+    if (!navEnabled || !hasNext) return;
+    let seen = false;
+    try {
+      seen = !!localStorage.getItem(HINT_KEY);
+    } catch {
+      /* storage blocked — just skip the hint */
+    }
+    if (!seen) setHint("right");
+  }, [navEnabled, hasNext]);
+
+  // After the "swipe back" (left) hint has shown once, retire the tutorial.
+  useEffect(() => {
+    if (hint !== "left") return;
+    const t = setTimeout(() => {
+      setHint(null);
+      try {
+        localStorage.setItem(HINT_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+    }, 2400);
+    return () => clearTimeout(t);
+  }, [hint]);
+
+  function go(dir) {
+    if (dir === "next") {
+      if (!hasNext || !onNext) return;
+      setEnterDir("right");
+      onNext();
+    } else {
+      if (!hasPrev || !onPrev) return;
+      setEnterDir("left");
+      onPrev();
+    }
+    setMapMenuOpen(false);
+    // Advance the tutorial: first swipe → show the "swipe back" hint; a further
+    // swipe (or the timer) retires it.
+    if (hint === "right") {
+      setHint("left");
+    } else if (hint === "left") {
+      setHint(null);
+      try {
+        localStorage.setItem(HINT_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function handleSwipeStart(e) {
+    const t = e.touches[0];
+    touch.current = { x: t.clientX, y: t.clientY, active: true };
+  }
+  function handleSwipeEnd(e) {
+    if (!touch.current.active) return;
+    touch.current.active = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touch.current.x;
+    const dy = t.clientY - touch.current.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+      go(dx > 0 ? "next" : "prev"); // swipe right → next, left → back
+    }
+  }
 
   // Share the public card link (flanit.co/v/<id>) — opens this card with no
   // login. Native share sheet on mobile; copy-to-clipboard fallback elsewhere.
@@ -38,13 +129,27 @@ export function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHi
       /* clipboard blocked — ignore */
     }
   }
+
+  const nudgeClass =
+    hint === "right"
+      ? "flanit-nudge-right"
+      : hint === "left"
+        ? "flanit-nudge-left"
+        : "";
+  const slideClass =
+    enterDir === "right"
+      ? "flanit-slide-from-right"
+      : enterDir === "left"
+        ? "flanit-slide-from-left"
+        : "";
+
   // Portaled to document.body so it escapes MapScreen's `fixed inset-0
   // z-[1500]` stacking context. Otherwise its zIndex only competes inside that
   // layer and can never sit above the app-level FAB (z-[3060]). `fixed` keeps
   // the same on-screen placement the old `absolute` had inside the fixed map.
   return createPortal(
     <div
-      className="fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col"
+      className={`fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col ${nudgeClass}`}
       style={{
         bottom: 80,
         width: "calc(100% - 1.5rem)",
@@ -52,6 +157,8 @@ export function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHi
         // Above the bell (2950) and FAB (3060) so the open card is top-level.
         zIndex: 3100,
       }}
+      onTouchStart={navEnabled ? handleSwipeStart : undefined}
+      onTouchEnd={navEnabled ? handleSwipeEnd : undefined}
     >
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100 rounded-t-3xl">
         <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
@@ -67,8 +174,11 @@ export function MapVenueSheet({ venue, onClose, savedIds, onSave, onUnsave, onHi
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        <VenueHeroCarousel venue={venue} />
+      <div
+        key={venue.id}
+        className={`flex-1 overflow-y-auto p-4 space-y-3 ${slideClass}`}
+      >
+        <VenueHeroCarousel venue={venue} disableSwipe={navEnabled} />
         <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
         <VenueRating venue={venue} />
         <VenueVibes venue={venue} />

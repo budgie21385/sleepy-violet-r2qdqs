@@ -9,7 +9,7 @@ import {
   getMapsUrl,
 } from "../lib/venueLogic";
 
-export function VenueHeroCarousel({ venue }) {
+export function VenueHeroCarousel({ venue, disableSwipe = false }) {
   // Prefer CDN-cached photos (fast — served from Supabase Storage). Fall back to
   // the live /api/place-photo Google proxy for venues not cached yet.
   const cdn = venue?.image_cdn_urls;
@@ -83,12 +83,20 @@ export function VenueHeroCarousel({ venue }) {
   function previousImage(e) {
     changeImage("previous", e);
   }
+  // When swipe is reserved for venue navigation (the map card), photos advance
+  // by tapping the image instead of swiping it.
+  function handleHeroTap() {
+    if (disableSwipe && images.length > 1) {
+      nextImage({ stopPropagation: () => {} });
+    }
+  }
   return (
     <div
       className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onTouchStart={disableSwipe ? undefined : handleTouchStart}
+      onTouchMove={disableSwipe ? undefined : handleTouchMove}
+      onTouchEnd={disableSwipe ? undefined : handleTouchEnd}
+      onClick={disableSwipe ? handleHeroTap : undefined}
     >
       <img
         key={currentImage}
