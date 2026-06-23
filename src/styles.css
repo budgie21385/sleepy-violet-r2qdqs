@@ -25,6 +25,25 @@ body {
 .flanit-nudge-right { animation: flanit-nudge-right 1.1s ease-in-out 1; }
 .flanit-nudge-left { animation: flanit-nudge-left 1.1s ease-in-out 1; }
 
+/* Subtle arrow drift inside the "Swipe" hint pill — gentle, looping while shown. */
+@keyframes flanit-arrow-right {
+  0%, 100% { transform: translateX(0); opacity: 0.6; }
+  50% { transform: translateX(6px); opacity: 1; }
+}
+@keyframes flanit-arrow-left {
+  0%, 100% { transform: translateX(0); opacity: 0.6; }
+  50% { transform: translateX(-6px); opacity: 1; }
+}
+.flanit-arrow-right { animation: flanit-arrow-right 1.1s ease-in-out infinite; }
+.flanit-arrow-left { animation: flanit-arrow-left 1.1s ease-in-out infinite; }
+
+/* Hint pill fades in softly. */
+@keyframes flanit-hint-in {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.flanit-hint-in { animation: flanit-hint-in 0.25s ease-out; }
+
 /* Subtle slide-in when the map card changes venue. */
 @keyframes flanit-slide-from-right {
   from { transform: translateX(28px); opacity: 0.3; }

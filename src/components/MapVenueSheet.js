@@ -11,7 +11,7 @@
 // don't collide.
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, MoreVertical, Send, Bookmark } from "lucide-react";
+import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft } from "lucide-react";
 import {
   VenueHeroCarousel,
   VenueRating,
@@ -38,7 +38,7 @@ export function MapVenueSheet({
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [enterDir, setEnterDir] = useState(null); // slide-in dir on venue change
-  const [hint, setHint] = useState(null); // 'right' | 'left' | null (one-time)
+  const [hint, setHint] = useState(false); // show the one-time two-way swipe pill
   const [dragX, setDragX] = useState(0); // live finger-follow offset
   const [animateBack, setAnimateBack] = useState(false); // snap-back transition
   const saved = !!(savedIds && savedIds.has(venue.id));
@@ -59,20 +59,20 @@ export function MapVenueSheet({
     } catch {
       /* storage blocked — just skip the hint */
     }
-    if (force || !seen) setHint("right");
+    if (force || !seen) setHint(true);
   }, [navEnabled, hasNext]);
 
-  // After the "swipe back" (left) hint has shown once, retire the tutorial.
+  // Retire the tutorial after a few seconds even if they don't swipe.
   useEffect(() => {
-    if (hint !== "left") return;
+    if (!hint) return;
     const t = setTimeout(() => {
-      setHint(null);
+      setHint(false);
       try {
         localStorage.setItem(HINT_KEY, "1");
       } catch {
         /* ignore */
       }
-    }, 2400);
+    }, 5000);
     return () => clearTimeout(t);
   }, [hint]);
 
@@ -87,12 +87,9 @@ export function MapVenueSheet({
       onPrev();
     }
     setMapMenuOpen(false);
-    // Advance the tutorial: first swipe → show the "swipe back" hint; a further
-    // swipe (or the timer) retires it.
-    if (hint === "right") {
-      setHint("left");
-    } else if (hint === "left") {
-      setHint(null);
+    // First swipe retires the one-time tutorial.
+    if (hint) {
+      setHint(false);
       try {
         localStorage.setItem(HINT_KEY, "1");
       } catch {
@@ -160,12 +157,6 @@ export function MapVenueSheet({
     }
   }
 
-  const nudgeClass =
-    hint === "right"
-      ? "flanit-nudge-right"
-      : hint === "left"
-        ? "flanit-nudge-left"
-        : "";
   const slideClass =
     enterDir === "right"
       ? "flanit-slide-from-right"
@@ -179,7 +170,7 @@ export function MapVenueSheet({
   // the same on-screen placement the old `absolute` had inside the fixed map.
   return createPortal(
     <div
-      className={`fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col ${dragX === 0 ? nudgeClass : ""}`}
+      className="fixed left-0 right-0 mx-auto max-w-sm bg-white rounded-3xl border border-neutral-100 shadow-2xl flex flex-col"
       style={{
         bottom: 80,
         width: "calc(100% - 1.5rem)",
@@ -220,6 +211,16 @@ export function MapVenueSheet({
         <OpeningHours venue={venue} />
         <OpenMapsButton url={getMapsUrl(venue)} />
       </div>
+
+      {hint && dragX === 0 && (
+        <div className="flanit-hint-in pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-[13px] font-medium text-white shadow-lg backdrop-blur">
+            <ChevronLeft size={16} className="flanit-arrow-left" />
+            <span>Swipe</span>
+            <ChevronRight size={16} className="flanit-arrow-right" />
+          </div>
+        </div>
+      )}
 
       <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
         <div className="flex items-center justify-around relative">
