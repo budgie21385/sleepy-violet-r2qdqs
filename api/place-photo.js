@@ -11,6 +11,10 @@ export default async function handler(req, res) {
     const cleanUrl = new URL(decodedUrl);
     cleanUrl.searchParams.delete("key");
     cleanUrl.searchParams.set("key", process.env.GOOGLE_API_KEY);
+    // Cap the source size. Cards display ~360–400px wide; 1000px covers retina
+    // comfortably while cutting payload vs the stored 1200px. (No-op for legacy
+    // URLs that don't use maxWidthPx.)
+    cleanUrl.searchParams.set("maxWidthPx", "1000");
 
     const googleResponse = await fetch(cleanUrl.toString());
 
@@ -24,7 +28,13 @@ export default async function handler(req, res) {
     const imageBuffer = await googleResponse.arrayBuffer();
 
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    // Venue photos never change → cache hard. `s-maxage` lets Vercel's edge CDN
+    // serve repeats without re-invoking this function or re-hitting Google, so
+    // only the very first view of each image pays the round-trip.
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=31536000, s-maxage=31536000, immutable"
+    );
 
     return res.send(Buffer.from(imageBuffer));
   } catch (error) {
