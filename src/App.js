@@ -932,8 +932,10 @@ useEffect(() => {
     };
   }, [session?.user?.id]);
 
-  async function handleJoinSession() {
-    const name = guestName.trim();
+  async function handleJoinSession(overrideName) {
+    // The auto-join effect passes a name string for known signed-in users;
+    // the Join button's onClick passes a DOM event, so only accept strings.
+    const name = (typeof overrideName === "string" ? overrideName : guestName).trim();
     if (!name) return;
     if (!guestSessionId) return;
 
@@ -1059,6 +1061,33 @@ useEffect(() => {
       setJoining(false);
     }
   }
+
+  // Known returning users skip the guest "what should we call you?" screen.
+  // If a session link opens while the person is already signed in (non-anon and
+  // not the host) and we have a display name for them, auto-join under their
+  // real account and go straight to the picks. Anonymous/unknown users (incl.
+  // in-app browsers with no session) still see the manual name screen.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (!isGuest || autoJoinedRef.current) return;
+    if (guestStage !== "splash") return;
+    if (guestSessionData?.status !== "open") return;
+    const u = session?.user;
+    if (!u?.id || u.is_anonymous) return;
+    if (u.id === guestSessionData?.host_user_id) return; // host isn't a guest
+    const name = profile?.display_name?.trim();
+    if (!name) return; // no display name yet → fall back to the manual screen
+    autoJoinedRef.current = true;
+    handleJoinSession(name);
+  }, [
+    isGuest,
+    guestStage,
+    guestSessionData?.status,
+    guestSessionData?.host_user_id,
+    session?.user?.id,
+    session?.user?.is_anonymous,
+    profile?.display_name,
+  ]);
 
   function handleNotForMe() {
     // Send them to the root — they can sign in and start their own session
