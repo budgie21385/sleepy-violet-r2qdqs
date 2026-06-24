@@ -175,7 +175,7 @@ function SignInScreen({ inviteHandle }) {
                 onSuccess={setCaptchaToken}
                 onExpire={() => setCaptchaToken(null)}
                 onError={() => setCaptchaToken(null)}
-                options={{ theme: "light" }}
+                options={{ theme: "light", appearance: "interaction-only" }}
               />
             </div>
             <button
@@ -2092,7 +2092,7 @@ if (authLoading || guestLoading) {
                           onSuccess={setGuestSignupCaptchaToken}
                           onExpire={() => setGuestSignupCaptchaToken(null)}
                           onError={() => setGuestSignupCaptchaToken(null)}
-                          options={{ theme: "light" }}
+                          options={{ theme: "light", appearance: "interaction-only" }}
                         />
                       </div>
                       <button
@@ -2251,7 +2251,7 @@ if (authLoading || guestLoading) {
                     onSuccess={setGuestCaptchaToken}
                     onExpire={() => setGuestCaptchaToken(null)}
                     onError={() => setGuestCaptchaToken(null)}
-                    options={{ theme: "light" }}
+                    options={{ theme: "light", appearance: "interaction-only" }}
                   />
                 </div>
               )}
