@@ -1866,30 +1866,50 @@ if (authLoading || guestLoading) {
                 </div>
               )}
               <div className="text-center">
-                <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
                   <Check size={28} />
                 </div>
                 <h1 className="text-2xl font-semibold tracking-tight">
-                  Sent to {hostName}
+                  Your picks are in
                 </h1>
-                <p className="mt-3 text-sm text-neutral-600">
-                  Your picks are in. {hostName} will choose from everyone's
-                  options and let you know where you're going.
+                <p className="mt-2 text-sm text-neutral-600">
+                  {hostName} picks from everyone's options next — we'll show you
+                  where you land.
                 </p>
-                <p className="mt-4 text-xs text-neutral-500">
-                  You picked {guestLikes.length} place{guestLikes.length === 1 ? "" : "s"}.
-                </p>
+                {(() => {
+                  const pickedNames = guestLikes
+                    .map((id) => guestShortlistVenues.find((v) => v.id === id)?.name)
+                    .filter(Boolean);
+                  return pickedNames.length > 0 ? (
+                    <div className="mt-5 flex flex-wrap justify-center gap-2">
+                      {pickedNames.map((name) => (
+                        <span
+                          key={name}
+                          className="rounded-full border border-[#e7ddd1] bg-white px-3 py-1.5 text-xs text-neutral-700"
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-xs text-neutral-500">
+                      You picked {guestLikes.length} place
+                      {guestLikes.length === 1 ? "" : "s"}.
+                    </p>
+                  );
+                })()}
               </div>
 
               {stillAnon ? (
-                <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
-                  {!guestSignupSent ? (
-                    <>
-                      <h2 className="text-lg font-semibold tracking-tight">
-                        Want to know the plan?
+                !guestSignupSent ? (
+                  <div className="mt-6">
+                    <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+                      <h2 className="text-base font-semibold tracking-tight">
+                        See where you land
                       </h2>
-                      <p className="mt-2 text-sm text-neutral-600">
-                        Create an account and we'll let you know where {hostName} lands — your picks and saved places stay with you.
+                      <p className="mt-1.5 text-sm text-neutral-600">
+                        Add your email — your picks stay with you and we'll tell
+                        you the moment {hostName} decides.
                       </p>
                       <form onSubmit={handleGuestSignup} className="mt-4 space-y-3">
                         <input
@@ -1903,16 +1923,16 @@ if (authLoading || guestLoading) {
                           }}
                           className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-base focus:outline-none focus:border-[#455d3b]"
                         />
-                        <div className="flex justify-center">
-                          <Turnstile
-                            ref={guestSignupCaptchaRef}
-                            siteKey={TURNSTILE_SITE_KEY}
-                            onSuccess={setGuestSignupCaptchaToken}
-                            onExpire={() => setGuestSignupCaptchaToken(null)}
-                            onError={() => setGuestSignupCaptchaToken(null)}
-                            options={{ theme: "light" }}
-                          />
-                        </div>
+                        {/* Invisible/managed captcha — only shows a challenge if
+                            the request looks suspicious. */}
+                        <Turnstile
+                          ref={guestSignupCaptchaRef}
+                          siteKey={TURNSTILE_SITE_KEY}
+                          onSuccess={setGuestSignupCaptchaToken}
+                          onExpire={() => setGuestSignupCaptchaToken(null)}
+                          onError={() => setGuestSignupCaptchaToken(null)}
+                          options={{ theme: "light", appearance: "interaction-only" }}
+                        />
                         <button
                           type="submit"
                           disabled={
@@ -1922,34 +1942,50 @@ if (authLoading || guestLoading) {
                           }
                           className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {guestSigningUp ? "Sending..." : "Create account"}
+                          {guestSigningUp ? "Saving..." : "Save my picks"}
                         </button>
                         {guestSignupError && (
                           <p className="text-sm text-red-600">{guestSignupError}</p>
                         )}
                       </form>
-                    </>
-                  ) : (
-                    <>
-                      <h2 className="text-lg font-semibold tracking-tight">
-                        Check your email
-                      </h2>
-                      <p className="mt-2 text-sm text-neutral-600">
-                        We sent a link to <span className="font-medium">{guestSignupEmail}</span>. Click it to finish creating your account.
+                      <p className="mt-3 text-center text-[11px] text-neutral-400">
+                        No password — we email you a link
                       </p>
-                      <p className="mt-3 text-xs text-neutral-500">
-                        Keep this tab open — you'll be signed in automatically once you confirm.
-                      </p>
-                    </>
-                  )}
-                </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => goToMainApp("map")}
+                      className="mt-3 w-full text-center text-sm text-neutral-500"
+                    >
+                      Just looking?{" "}
+                      <span className="font-medium text-[#455d3b]">
+                        Explore Flanit ›
+                      </span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+                    <h2 className="text-base font-semibold tracking-tight">
+                      Check your email
+                    </h2>
+                    <p className="mt-1.5 text-sm text-neutral-600">
+                      We sent a link to{" "}
+                      <span className="font-medium">{guestSignupEmail}</span>.
+                      Open it to save your picks and see where you land.
+                    </p>
+                    <p className="mt-3 text-xs text-neutral-500">
+                      It opens in your main browser — that's expected. Your picks
+                      come with you.
+                    </p>
+                  </div>
+                )
               ) : (
                 <button
                   type="button"
                   onClick={() => goToMainApp("map")}
                   className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
                 >
-                  Explore the app
+                  See the plan
                 </button>
               )}
             </div>
