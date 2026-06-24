@@ -750,6 +750,32 @@ useEffect(() => {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Redeem a cross-browser claim token. The guest tapped "Save my picks" in an
+  // in-app browser; the magic link opened here in their real browser and signed
+  // them in. Once they're authenticated (non-anon), pull their anon picks for
+  // that session onto this account and drop them into the session.
+  const claimRedeemedRef = useRef(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("claim");
+    if (!token) return;
+    // Wait until a real (non-anonymous) session exists.
+    if (!session?.user?.id || session.user.is_anonymous) return;
+    if (claimRedeemedRef.current) return;
+    claimRedeemedRef.current = true;
+    (async () => {
+      const { data: sid, error } = await supabase.rpc("claim_session", {
+        p_token: token,
+      });
+      // Strip ?claim either way so a refresh can't retry a burnt token.
+      params.delete("claim");
+      const clean =
+        window.location.pathname + (params.toString() ? `?${params}` : "");
+      window.history.replaceState({}, "", clean);
+      if (!error && sid) setNotifSessionId(sid);
+    })();
+  }, [session?.user?.id, session?.user?.is_anonymous]);
+
   useEffect(() => {
     if (!session?.user?.id) {
       setProfile(null);
@@ -1114,13 +1140,32 @@ useEffect(() => {
     setGuestSigningUp(true);
     setGuestSignupError("");
     try {
-      const { error } = await supabase.auth.updateUser(
-        { email },
-        {
-          emailRedirectTo: window.location.href,
-          captchaToken: guestSignupCaptchaToken,
+      // Mint a one-time claim token tied to this anon guest's picks + session.
+      // It rides along in the magic-link redirect so that when the link opens
+      // in the user's REAL browser (escaping any in-app browser) and they
+      // authenticate, claim_session migrates their picks onto that account.
+      let redirectUrl = window.location.href;
+      if (guestSessionId) {
+        const { data: claimToken, error: claimErr } = await supabase.rpc(
+          "create_session_claim",
+          { p_session_id: guestSessionId }
+        );
+        if (!claimErr && claimToken) {
+          const u = new URL(window.location.origin + "/");
+          u.searchParams.set("claim", claimToken);
+          redirectUrl = u.toString();
         }
-      );
+      }
+      // signInWithOtp (not updateUser): sends a normal magic link that signs the
+      // user into their account (existing or new) in whatever browser opens it —
+      // browser-independent. The claim token reunites their anon picks.
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: redirectUrl,
+          captchaToken: guestSignupCaptchaToken,
+        },
+      });
       // Reset the widget regardless of outcome — tokens are single-use.
       guestSignupCaptchaRef.current?.reset();
       setGuestSignupCaptchaToken(null);
