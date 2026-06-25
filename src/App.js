@@ -37,10 +37,10 @@ import {
   MatchLimitField,
   ParticipantsField,
   TimeLimitField,
+  RadiusField,
 } from "./components/SessionFields";
 import {
   ALL,
-  RADIUS_OPTIONS,
   TIME_LIMIT_OPTIONS_CONCURRENT,
   TIME_LIMIT_OPTIONS_CURATED,
 } from "./lib/constants";
@@ -226,7 +226,7 @@ export default function RestaurantSwipeMVP() {
   const [expandedRegions, setExpandedRegions] = useState(() => new Set());
   const [areaSearch, setAreaSearch] = useState("");
   const [selectedAreas, setSelectedAreas] = useState([]);
-  const [radiusKm, setRadiusKm] = useState(5);
+  const [radiusKm, setRadiusKm] = useState(1);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [openNow, setOpenNow] = useState(false);
   const [selectedTimes, setSelectedTimes] = useState([]);
@@ -1536,7 +1536,7 @@ loadAreas();
     const sessionAreas = filters.selectedAreaIds && areas.length
       ? areas.filter((a) => filters.selectedAreaIds.includes(a.id))
       : [];
-    const sessionRadius = typeof filters.radiusKm === "number" ? filters.radiusKm : 5;
+    const sessionRadius = typeof filters.radiusKm === "number" ? filters.radiusKm : 1;
 
     return pool.filter((venue) => {
       if (!venueMatchesAreas(venue, sessionAreas, sessionRadius)) return false;
@@ -3098,25 +3098,7 @@ function AreaFilter({
       )}
  
       <div className="mt-5">
-        <span className="mb-2 block text-sm font-medium text-neutral-700">
-          Radius
-        </span>
-        <div className="grid grid-cols-4 gap-2">
-          {RADIUS_OPTIONS.map((radius) => (
-            <button
-              key={radius}
-              type="button"
-              onClick={() => setRadiusKm(radius)}
-              className={`rounded-2xl py-3 font-medium transition ${
-                radiusKm === radius
-                  ? "bg-[#455d3b] text-white"
-                  : "bg-neutral-50 text-neutral-700 border border-neutral-100"
-              }`}
-            >
-              {radius}km
-            </button>
-          ))}
-        </div>
+        <RadiusField value={radiusKm} onChange={setRadiusKm} />
       </div>
     </div>
   );

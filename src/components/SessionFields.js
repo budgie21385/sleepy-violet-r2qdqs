@@ -2,7 +2,7 @@
 // the When toggle, area checkbox, multi-select chips, and the match-count,
 // participants, and time-limit pickers. Props-only. Extracted from App.js.
 import { useState } from "react";
-import { ALL, MATCH_OPTIONS, PARTICIPANT_OPTIONS } from "../lib/constants";
+import { ALL, MATCH_OPTIONS, PARTICIPANT_OPTIONS, RADIUS_OPTIONS } from "../lib/constants";
 
 export function OpenNowToggle({ openNow, setOpenNow }) {
   return (
@@ -209,6 +209,22 @@ export function TimeLimitField({ value, onChange, options }) {
           onClick={() => onChange(option.minutes)}
         >
           {option.label}
+        </SegmentButton>
+      ))}
+    </SegmentedField>
+  );
+}
+
+export function RadiusField({ value, onChange }) {
+  return (
+    <SegmentedField label="Radius">
+      {RADIUS_OPTIONS.map((radius) => (
+        <SegmentButton
+          key={radius}
+          on={value === radius}
+          onClick={() => onChange(radius)}
+        >
+          {radius}km
         </SegmentButton>
       ))}
     </SegmentedField>
