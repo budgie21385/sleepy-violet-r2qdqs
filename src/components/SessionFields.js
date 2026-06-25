@@ -130,27 +130,17 @@ export function MultiSelectChips({ label, options, selected, setSelected }) {
 
 export function MatchLimitField({ value, onChange }) {
   return (
-    <div>
-      <span className="mb-2 block text-sm font-medium text-neutral-700">
-        How many matches?
-      </span>
-      <div className="grid grid-cols-4 gap-2">
-        {MATCH_OPTIONS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onChange(option)}
-            className={`rounded-2xl py-3 font-medium transition ${
-              value === option
-                ? "bg-[#455d3b] text-white"
-                : "bg-neutral-50 text-neutral-700 border border-neutral-100"
-            }`}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-    </div>
+    <SegmentedField label="How many matches?">
+      {MATCH_OPTIONS.map((option) => (
+        <SegmentButton
+          key={option}
+          on={value === option}
+          onClick={() => onChange(option)}
+        >
+          {option}
+        </SegmentButton>
+      ))}
+    </SegmentedField>
   );
 }
 
