@@ -214,6 +214,63 @@ export function VenueVibes({ venue }) {
   );
 }
 
+// "08:45" → minutes since midnight (525). Returns null if unparseable.
+function hhmmToMin(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((s || "").trim());
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+// minutes → "8:45am" / "10pm" (drops ":00"). 1440 (24:00) → "12am".
+function minTo12h(min) {
+  if (min == null) return "";
+  const h = Math.floor(min / 60) % 24;
+  const mm = min % 60;
+  const ampm = h < 12 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return mm === 0 ? `${h12}${ampm}` : `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
+}
+// "08:45-15:30 · 18:00-22:00" → "8:45am–3:30pm · 6pm–10pm".
+function formatDayValue(value) {
+  if (!value) return null;
+  return value
+    .split("·")
+    .map((r) => {
+      const [a, b] = r.split("-").map((x) => x.trim());
+      const o = hhmmToMin(a);
+      const c = hhmmToMin(b);
+      if (o == null || c == null) return r.trim();
+      return `${minTo12h(o)}–${minTo12h(c)}`;
+    })
+    .join(" · ");
+}
+function parseRanges(value) {
+  if (!value) return [];
+  return value
+    .split("·")
+    .map((r) => {
+      const [a, b] = r.split("-").map((x) => x.trim());
+      const o = hhmmToMin(a);
+      const c = hhmmToMin(b);
+      return o == null || c == null ? null : [o, c];
+    })
+    .filter(Boolean);
+}
+// Open/closed status for today's value relative to `nowMin`. Handles ranges
+// that wrap past midnight (close <= open).
+function computeStatus(value, nowMin) {
+  const ranges = parseRanges(value);
+  if (!ranges.length) return { closedToday: true };
+  for (const [o, c] of ranges) {
+    const within = c > o ? nowMin >= o && nowMin < c : nowMin >= o || nowMin < c;
+    if (within) return { open: true, until: c };
+  }
+  const upcoming = ranges
+    .map(([o]) => o)
+    .filter((o) => o > nowMin)
+    .sort((a, b) => a - b);
+  return { open: false, next: upcoming.length ? upcoming[0] : null };
+}
+
 export function OpeningHours({ venue }) {
   const [isOpen, setIsOpen] = useState(false);
   const days = [
@@ -225,8 +282,31 @@ export function OpeningHours({ venue }) {
     { label: "Sat", value: venue.saturday_hours },
     { label: "Sun", value: venue.sunday_hours },
   ];
+  // Hide the whole section when we have no hours at all for any day.
+  if (!days.some((d) => d.value)) return null;
+
   const todayIndex = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
   const today = days[todayIndex];
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const status = computeStatus(today.value, nowMin);
+
+  let statusLabel;
+  let statusClass;
+  if (status.open) {
+    statusLabel = `Open · Closes ${minTo12h(status.until)}`;
+    statusClass = "text-[#2f6f3b]";
+  } else if (status.closedToday) {
+    statusLabel = "Closed today";
+    statusClass = "text-neutral-500";
+  } else if (status.next != null) {
+    statusLabel = `Closed · Opens ${minTo12h(status.next)}`;
+    statusClass = "text-neutral-500";
+  } else {
+    statusLabel = "Closed";
+    statusClass = "text-neutral-500";
+  }
+
   return (
     <div className="mt-3 text-sm text-neutral-600">
       <button
@@ -234,17 +314,25 @@ export function OpeningHours({ venue }) {
         onClick={() => setIsOpen(!isOpen)}
         className="flex w-full items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3 text-left"
       >
-        <span>
-          <strong>Today:</strong> {today.value || "Hours unavailable"}
+        <span className="flex flex-col">
+          <span className={`font-medium ${statusClass}`}>{statusLabel}</span>
+          {today.value && (
+            <span className="text-neutral-500">{formatDayValue(today.value)}</span>
+          )}
         </span>
         <span>{isOpen ? "⌃" : "⌄"}</span>
       </button>
       {isOpen && (
         <div className="mt-2 rounded-2xl bg-neutral-50 px-4 py-3">
-          {days.map((day) => (
-            <div key={day.label} className="flex justify-between py-1">
-              <span className="font-medium">{day.label}</span>
-              <span>{day.value || "Hours unavailable"}</span>
+          {days.map((day, i) => (
+            <div
+              key={day.label}
+              className={`flex justify-between py-1 ${
+                i === todayIndex ? "font-medium text-neutral-800" : ""
+              }`}
+            >
+              <span>{day.label}</span>
+              <span>{formatDayValue(day.value) || "Closed"}</span>
             </div>
           ))}
         </div>
