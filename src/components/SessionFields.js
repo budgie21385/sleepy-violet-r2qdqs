@@ -154,56 +154,63 @@ export function MatchLimitField({ value, onChange }) {
   );
 }
 
-export function ParticipantsField({ value, onChange }) {
+// Segmented-pill control (matches the map's All / My List toggle): a rounded
+// track with the selected option lifted to a white pill.
+function SegmentedField({ label, children }) {
   return (
     <div>
       <span className="mb-2 block text-sm font-medium text-neutral-700">
-        How many of us?
+        {label}
       </span>
-      <div className="grid gap-2 grid-cols-3">
-        {PARTICIPANT_OPTIONS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onChange(option)}
-            className={`rounded-2xl py-3 font-medium transition ${
-              value === option
-                ? "bg-[#455d3b] text-white"
-                : "bg-neutral-50 text-neutral-700 border border-neutral-100"
-            }`}
-          >
-            {option}
-          </button>
-        ))}
+      <div className="flex gap-0.5 rounded-full bg-neutral-100 p-0.5">
+        {children}
       </div>
     </div>
   );
 }
 
-export function TimeLimitField({ value, onChange, options }) {
-  // Both option sets are length 4 — keep them that length, or update the
-  // grid class here if the design ever needs a different count.
+function SegmentButton({ on, onClick, children }) {
   return (
-    <div>
-      <span className="mb-2 block text-sm font-medium text-neutral-700">
-        Time limit
-      </span>
-      <div className="grid gap-2 grid-cols-4">
-        {options.map((option) => (
-          <button
-            key={option.minutes}
-            type="button"
-            onClick={() => onChange(option.minutes)}
-            className={`rounded-2xl py-3 text-sm font-medium transition ${
-              value === option.minutes
-                ? "bg-[#455d3b] text-white"
-                : "bg-neutral-50 text-neutral-700 border border-neutral-100"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
+        on ? "bg-white text-[#455d3b] shadow-sm" : "text-neutral-500"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function ParticipantsField({ value, onChange }) {
+  return (
+    <SegmentedField label="How many of us?">
+      {PARTICIPANT_OPTIONS.map((option) => (
+        <SegmentButton
+          key={option}
+          on={value === option}
+          onClick={() => onChange(option)}
+        >
+          {option}
+        </SegmentButton>
+      ))}
+    </SegmentedField>
+  );
+}
+
+export function TimeLimitField({ value, onChange, options }) {
+  return (
+    <SegmentedField label="Time limit">
+      {options.map((option) => (
+        <SegmentButton
+          key={option.minutes}
+          on={value === option.minutes}
+          onClick={() => onChange(option.minutes)}
+        >
+          {option.label}
+        </SegmentButton>
+      ))}
+    </SegmentedField>
   );
 }
