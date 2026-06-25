@@ -45,21 +45,17 @@ export function MapVenueSheet({
   const navEnabled = !!(onNext || onPrev);
   const touch = useRef({ x: 0, y: 0, active: false, axis: null });
 
-  // One-time swipe tutorial: nudge right on the very first card the user opens.
-  // Dev override: load any URL with `?swipehint` to always replay it (handy for
-  // tuning the animation on a phone where the console isn't available).
+  // One-time swipe tutorial: show the hint on the very first card the user opens
+  // (persisted via localStorage so it only ever shows once).
   useEffect(() => {
     if (!navEnabled || !hasNext) return;
-    const force =
-      typeof window !== "undefined" &&
-      window.location.search.includes("swipehint");
     let seen = false;
     try {
       seen = !!localStorage.getItem(HINT_KEY);
     } catch {
       /* storage blocked — just skip the hint */
     }
-    if (force || !seen) setHint(true);
+    if (!seen) setHint(true);
   }, [navEnabled, hasNext]);
 
   // Retire the tutorial after a few seconds even if they don't swipe.
