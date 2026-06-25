@@ -182,10 +182,7 @@ export function MapVenueSheet({
       onTouchMove={navEnabled ? handleSwipeMove : undefined}
       onTouchEnd={navEnabled ? handleSwipeEnd : undefined}
     >
-      <div className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 border-b border-neutral-100 rounded-t-3xl">
-        <span className="text-sm font-semibold text-neutral-800 truncate pr-2">
-          {venue.name}
-        </span>
+      <div className="sticky top-0 z-10 flex items-center justify-end bg-white px-4 py-3 rounded-t-3xl">
         <button
           type="button"
           onClick={onClose}
@@ -211,7 +208,7 @@ export function MapVenueSheet({
       {hint && dragX === 0 && (
         <div className="flanit-hint-in pointer-events-none absolute bottom-24 left-1/2 z-20 -translate-x-1/2">
           <div className="flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-[13px] font-medium text-white shadow-lg backdrop-blur">
-            <ChevronLeft size={16} className="flanit-arrow-left" />
+            {hasPrev && <ChevronLeft size={16} className="flanit-arrow-left" />}
             <span>Swipe</span>
             <ChevronRight size={16} className="flanit-arrow-right" />
           </div>

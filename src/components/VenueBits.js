@@ -83,10 +83,12 @@ export function VenueHeroCarousel({ venue, disableSwipe = false }) {
   function previousImage(e) {
     changeImage("previous", e);
   }
-  // When swipe is reserved for venue navigation (the map card), photos advance
-  // by tapping the image instead of swiping it.
+  // Tapping the photo advances to the next one — works on every venue card
+  // (map, session, results, share page). On the map card swipe is reserved for
+  // venue navigation, so tap is the only way to change photos there; elsewhere
+  // it works alongside the arrows + swipe.
   function handleHeroTap() {
-    if (disableSwipe && images.length > 1) {
+    if (images.length > 1) {
       nextImage({ stopPropagation: () => {} });
     }
   }
@@ -96,7 +98,7 @@ export function VenueHeroCarousel({ venue, disableSwipe = false }) {
       onTouchStart={disableSwipe ? undefined : handleTouchStart}
       onTouchMove={disableSwipe ? undefined : handleTouchMove}
       onTouchEnd={disableSwipe ? undefined : handleTouchEnd}
-      onClick={disableSwipe ? handleHeroTap : undefined}
+      onClick={handleHeroTap}
     >
       <img
         key={currentImage}
