@@ -2230,7 +2230,11 @@ if (authLoading || guestLoading) {
               ) : (
                 <button
                   type="button"
-                  onClick={() => goToMainApp("map")}
+                  onClick={() => {
+                    const sid = guestSessionId;
+                    goToMainApp("matches");
+                    setNotifSessionId(sid); // open this session's results, not the map
+                  }}
                   className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
                 >
                   See the plan
