@@ -354,6 +354,9 @@ export default function RestaurantSwipeMVP() {
   const [joining, setJoining] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [guestStage, setGuestStage] = useState("splash");
+  // Whether this guest has already submitted (read from the DB on load) — lets a
+  // refresh restore the results view instead of bouncing back to the splash.
+  const [guestSubmittedAt, setGuestSubmittedAt] = useState(undefined);
   const [guestShortlistIds, setGuestShortlistIds] = useState([]);
   // Full venue rows for the curated shortlist, fetched via SECURITY DEFINER
   // RPC so guests can see host-imported (unverified) venues that the general
@@ -1156,6 +1159,7 @@ useEffect(() => {
     const u = session?.user;
     if (!u?.id || u.is_anonymous) return;
     if (u.id === guestSessionData?.host_user_id) return; // host isn't a guest
+    if (guestSubmittedAt) return; // already submitted → the restore effect handles it
     const name = profile?.display_name?.trim();
     if (!name) return; // no display name yet → fall back to the manual screen
     // Wait until the venue pool the guest will swipe is actually loaded.
@@ -1186,7 +1190,33 @@ useEffect(() => {
     venues.length,
     guestListVenues.length,
     guestShortlistVenues.length,
+    guestSubmittedAt,
   ]);
+
+  // On (re)load, check whether this guest already submitted in this session. If
+  // so, restore the results/submitted view instead of bouncing them back to the
+  // splash on a refresh. Keyed off the current uid (the persisted anon one, or
+  // their real account after sign-in/claim).
+  useEffect(() => {
+    if (!isGuest || !session?.user?.id || !guestSessionId) return;
+    let cancelled = false;
+    supabase
+      .from("session_participants")
+      .select("submitted_at")
+      .eq("session_id", guestSessionId)
+      .eq("user_id", session.user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setGuestSubmittedAt(data?.submitted_at ?? null);
+        if (data?.submitted_at) {
+          setGuestStage((s) => (s === "splash" ? "submitted" : s));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, session?.user?.id, guestSessionId]);
 
   function handleNotForMe() {
     // Send them to the root — they can sign in and start their own session
@@ -2275,10 +2305,11 @@ if (authLoading || guestLoading) {
                 {!guestSignupSent ? (
                   <>
                     <h2 className="text-lg font-semibold tracking-tight">
-                      Sign up to see them
+                      Your matches are ready
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
-                      We'll send a link to your email. Click it and your matches will appear here.
+                      Enter your email and we'll send a 6-digit code to reveal
+                      them — works whether you're new or already have an account.
                     </p>
                     <form onSubmit={handleGuestSignup} className="mt-4 space-y-3">
                       <input
@@ -2311,7 +2342,7 @@ if (authLoading || guestLoading) {
                         }
                         className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {guestSigningUp ? "Sending..." : "Sign up to see matches"}
+                        {guestSigningUp ? "Sending..." : "See your matches"}
                       </button>
                       {guestSignupError && (
                         <p className="text-sm text-red-600">{guestSignupError}</p>
