@@ -77,6 +77,9 @@ function SignInScreen({ inviteHandle }) {
   const [message, setMessage] = useState("");
   const [captchaToken, setCaptchaToken] = useState(null);
   const turnstileRef = useRef(null);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
 
   async function sendMagicLink(e) {
     e.preventDefault();
@@ -100,10 +103,31 @@ function SignInScreen({ inviteHandle }) {
     setCaptchaToken(null);
     setSending(false);
     if (error) {
-      setMessage("Couldn't send the link. " + error.message);
+      setMessage("Couldn't send the code. " + error.message);
     } else {
-      setMessage("Check your email for the sign-in link.");
+      setCodeSent(true);
     }
+  }
+
+  // Verify the emailed 6-digit code in this browser (no link bounce). Existing
+  // users use type 'email'; brand-new signups may need 'signup' — try both.
+  async function verifyCode(e) {
+    e.preventDefault();
+    const c = code.trim();
+    if (!c) return;
+    setVerifying(true);
+    setMessage("");
+    const addr = email.trim();
+    let { error } = await supabase.auth.verifyOtp({ email: addr, token: c, type: "email" });
+    if (error) {
+      const retry = await supabase.auth.verifyOtp({ email: addr, token: c, type: "signup" });
+      error = retry.error;
+    }
+    setVerifying(false);
+    if (error) {
+      setMessage("That code didn't work — check it and try again.");
+    }
+    // On success, onAuthStateChange signs them in and the app re-renders.
   }
 
   if (view === "landing") {
@@ -146,49 +170,100 @@ function SignInScreen({ inviteHandle }) {
           onClick={() => {
             setView("landing");
             setMessage("");
+            setCodeSent(false);
+            setCode("");
           }}
           className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600 hover:text-neutral-900"
         >
           <ArrowLeft size={16} /> Back
         </button>
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
-          <h2 className="text-xl font-semibold tracking-tight mb-2">
-            Sign in
-          </h2>
-          <p className="text-sm text-neutral-600 mb-4">
-            Pop in your email and we'll send you a sign-in link.
-          </p>
-          <form onSubmit={sendMagicLink} className="space-y-3">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              disabled={sending}
-              required
-              className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
-            />
-            <div className="flex justify-center">
-              <Turnstile
-                ref={turnstileRef}
-                siteKey={TURNSTILE_SITE_KEY}
-                onSuccess={setCaptchaToken}
-                onExpire={() => setCaptchaToken(null)}
-                onError={() => setCaptchaToken(null)}
-                options={{ theme: "light", appearance: "interaction-only" }}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={sending || !email.trim() || !captchaToken}
-              className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
-            >
-              {sending ? "Sending..." : "Send sign-in link"}
-            </button>
-            {message && (
-              <p className="text-sm text-neutral-700 text-center">{message}</p>
-            )}
-          </form>
+          {!codeSent ? (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight mb-2">
+                Sign in
+              </h2>
+              <p className="text-sm text-neutral-600 mb-4">
+                Pop in your email and we'll send you a 6-digit code.
+              </p>
+              <form onSubmit={sendMagicLink} className="space-y-3">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  disabled={sending}
+                  required
+                  className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
+                />
+                <div className="flex justify-center">
+                  <Turnstile
+                    ref={turnstileRef}
+                    siteKey={TURNSTILE_SITE_KEY}
+                    onSuccess={setCaptchaToken}
+                    onExpire={() => setCaptchaToken(null)}
+                    onError={() => setCaptchaToken(null)}
+                    options={{ theme: "light", appearance: "interaction-only" }}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={sending || !email.trim() || !captchaToken}
+                  className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
+                >
+                  {sending ? "Sending..." : "Email me a code"}
+                </button>
+                {message && (
+                  <p className="text-sm text-neutral-700 text-center">{message}</p>
+                )}
+              </form>
+            </>
+          ) : (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight mb-2">
+                Enter your code
+              </h2>
+              <p className="text-sm text-neutral-600 mb-4">
+                We emailed a 6-digit code to{" "}
+                <span className="font-medium">{email.trim()}</span>.
+              </p>
+              <form onSubmit={verifyCode} className="space-y-3">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    if (message) setMessage("");
+                  }}
+                  className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-center text-lg tracking-[0.3em] outline-none border border-neutral-100 focus:border-[#455d3b]"
+                />
+                <button
+                  type="submit"
+                  disabled={verifying || code.length < 6}
+                  className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
+                >
+                  {verifying ? "Checking…" : "Confirm"}
+                </button>
+                {message && (
+                  <p className="text-sm text-red-600 text-center">{message}</p>
+                )}
+              </form>
+              <button
+                type="button"
+                onClick={() => {
+                  setCodeSent(false);
+                  setCode("");
+                  setMessage("");
+                }}
+                className="mt-3 w-full text-center text-xs text-neutral-500"
+              >
+                Wrong email or no code? <span className="font-medium text-[#455d3b]">Start over</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
