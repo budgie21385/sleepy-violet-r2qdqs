@@ -303,6 +303,12 @@ export default function RestaurantSwipeMVP() {
   const [guestSignupSent, setGuestSignupSent] = useState(false);
   const [guestSignupError, setGuestSignupError] = useState("");
   const [guestSigningUp, setGuestSigningUp] = useState(false);
+  // Email OTP code flow: the 6-digit code the user types back in (works in any
+  // browser, incl. an in-app browser), the claim token we hold to migrate their
+  // anon picks after they verify, and the verify-in-progress flag.
+  const [guestSignupCode, setGuestSignupCode] = useState("");
+  const [guestClaimToken, setGuestClaimToken] = useState(null);
+  const [guestVerifying, setGuestVerifying] = useState(false);
   // Dev-only override so we can visually verify the matches-reveal UI on
   // localhost without going through the real magic-link confirmation flow
   // (Resend's dev sender can only deliver to verified addresses).
@@ -1198,6 +1204,7 @@ useEffect(() => {
           { p_session_id: guestSessionId }
         );
         if (!claimErr && claimToken) {
+          setGuestClaimToken(claimToken); // held for the code-verify path
           const u = new URL(window.location.origin + "/");
           u.searchParams.set("claim", claimToken);
           redirectUrl = u.toString();
@@ -1223,9 +1230,47 @@ useEffect(() => {
       setGuestSignupSent(true);
     } catch (err) {
       console.error("Guest signup error:", err);
-      setGuestSignupError("Couldn't send the link. Try again.");
+      setGuestSignupError("Couldn't send the code. Try again.");
     } finally {
       setGuestSigningUp(false);
+    }
+  }
+
+  // Verify the 6-digit email code in THIS browser (so an in-app browser can sign
+  // in without bouncing out to Chrome), then migrate the anon picks onto the
+  // now-authenticated account via the claim token we already hold.
+  async function handleVerifyCode(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const code = guestSignupCode.trim();
+    if (!code) return;
+    setGuestVerifying(true);
+    setGuestSignupError("");
+    try {
+      const email = guestSignupEmail.trim();
+      // Existing users verify with type 'email'; brand-new signups may need
+      // 'signup'. Try 'email' first, fall back to 'signup' so both work.
+      let { error } = await supabase.auth.verifyOtp({ email, token: code, type: "email" });
+      if (error) {
+        const retry = await supabase.auth.verifyOtp({ email, token: code, type: "signup" });
+        error = retry.error;
+      }
+      if (error) {
+        setGuestSignupError("That code didn't work — check it and try again.");
+        return;
+      }
+      // Signed in as their real account in this browser. Reunite their picks.
+      if (guestClaimToken) {
+        const { error: claimErr } = await supabase.rpc("claim_session", {
+          p_token: guestClaimToken,
+        });
+        if (claimErr) console.error("claim_session after code:", claimErr);
+      }
+      // The auth state change re-renders the (now non-anon) submitted view.
+    } catch (err) {
+      console.error("Verify code error:", err);
+      setGuestSignupError("Couldn't verify the code. Try again.");
+    } finally {
+      setGuestVerifying(false);
     }
   }
 
@@ -2058,16 +2103,52 @@ if (authLoading || guestLoading) {
                 ) : (
                   <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
                     <h2 className="text-base font-semibold tracking-tight">
-                      Check your email
+                      Enter your code
                     </h2>
                     <p className="mt-1.5 text-sm text-neutral-600">
-                      We sent a link to{" "}
+                      We emailed a 6-digit code to{" "}
                       <span className="font-medium">{guestSignupEmail}</span>.
-                      Open it to save your picks and see where you land.
+                      Pop it in here to save your picks and see where you land.
                     </p>
+                    <form onSubmit={handleVerifyCode} className="mt-4 space-y-3">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="123456"
+                        value={guestSignupCode}
+                        onChange={(e) => {
+                          setGuestSignupCode(
+                            e.target.value.replace(/\D/g, "").slice(0, 6)
+                          );
+                          if (guestSignupError) setGuestSignupError("");
+                        }}
+                        className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-center text-lg tracking-[0.3em] focus:outline-none focus:border-[#455d3b]"
+                      />
+                      <button
+                        type="submit"
+                        disabled={guestVerifying || guestSignupCode.length < 6}
+                        className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {guestVerifying ? "Checking…" : "Confirm"}
+                      </button>
+                      {guestSignupError && (
+                        <p className="text-sm text-red-600">{guestSignupError}</p>
+                      )}
+                    </form>
                     <p className="mt-3 text-xs text-neutral-500">
-                      It opens in your main browser — that's expected. Your picks
-                      come with you.
+                      No code? Check spam, or{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGuestSignupSent(false);
+                          setGuestSignupCode("");
+                        }}
+                        className="font-medium text-[#455d3b]"
+                      >
+                        try again
+                      </button>
+                      .
                     </p>
                   </div>
                 )
@@ -2161,13 +2242,52 @@ if (authLoading || guestLoading) {
                 ) : (
                   <>
                     <h2 className="text-lg font-semibold tracking-tight">
-                      Check your email
+                      Enter your code
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
-                      We sent a link to <span className="font-medium">{guestSignupEmail}</span>. Click it and your matches will show up here.
+                      We emailed a 6-digit code to{" "}
+                      <span className="font-medium">{guestSignupEmail}</span>.
+                      Pop it in to reveal your matches.
                     </p>
+                    <form onSubmit={handleVerifyCode} className="mt-4 space-y-3">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="123456"
+                        value={guestSignupCode}
+                        onChange={(e) => {
+                          setGuestSignupCode(
+                            e.target.value.replace(/\D/g, "").slice(0, 6)
+                          );
+                          if (guestSignupError) setGuestSignupError("");
+                        }}
+                        className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-center text-lg tracking-[0.3em] focus:outline-none focus:border-[#455d3b]"
+                      />
+                      <button
+                        type="submit"
+                        disabled={guestVerifying || guestSignupCode.length < 6}
+                        className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {guestVerifying ? "Checking…" : "Confirm"}
+                      </button>
+                      {guestSignupError && (
+                        <p className="text-sm text-red-600">{guestSignupError}</p>
+                      )}
+                    </form>
                     <p className="mt-3 text-xs text-neutral-500">
-                      Keep this tab open — your matches will reveal automatically once you confirm.
+                      No code? Check spam, or{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGuestSignupSent(false);
+                          setGuestSignupCode("");
+                        }}
+                        className="font-medium text-[#455d3b]"
+                      >
+                        try again
+                      </button>
+                      .
                     </p>
                   </>
                 )}
