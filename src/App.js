@@ -1077,6 +1077,19 @@ useEffect(() => {
     if (u.id === guestSessionData?.host_user_id) return; // host isn't a guest
     const name = profile?.display_name?.trim();
     if (!name) return; // no display name yet → fall back to the manual screen
+    // Wait until the venue pool the guest will swipe is actually loaded.
+    // Otherwise auto-join races ahead of the data, lands on an empty queue, and
+    // the concurrent end-game effect instantly flips to "submitted" → an empty
+    // results table. (A manual join doesn't hit this — the human delay lets the
+    // pool load first.)
+    const mode = guestSessionData?.mode;
+    const poolReady =
+      mode === "curated"
+        ? guestShortlistVenues.length > 0
+        : guestSessionData?.source_type === "list"
+          ? guestListVenues.length > 0
+          : venues.length > 0;
+    if (!poolReady) return;
     autoJoinedRef.current = true;
     handleJoinSession(name);
   }, [
@@ -1084,9 +1097,14 @@ useEffect(() => {
     guestStage,
     guestSessionData?.status,
     guestSessionData?.host_user_id,
+    guestSessionData?.mode,
+    guestSessionData?.source_type,
     session?.user?.id,
     session?.user?.is_anonymous,
     profile?.display_name,
+    venues.length,
+    guestListVenues.length,
+    guestShortlistVenues.length,
   ]);
 
   function handleNotForMe() {
