@@ -235,7 +235,7 @@ function SignInScreen({ inviteHandle }) {
                   placeholder="123456"
                   value={code}
                   onChange={(e) => {
-                    setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    setCode(e.target.value.replace(/\D/g, "").slice(0, 8));
                     if (message) setMessage("");
                   }}
                   className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-center text-lg tracking-[0.3em] outline-none border border-neutral-100 focus:border-[#455d3b]"
@@ -2194,7 +2194,7 @@ if (authLoading || guestLoading) {
                         value={guestSignupCode}
                         onChange={(e) => {
                           setGuestSignupCode(
-                            e.target.value.replace(/\D/g, "").slice(0, 6)
+                            e.target.value.replace(/\D/g, "").slice(0, 8)
                           );
                           if (guestSignupError) setGuestSignupError("");
                         }}
@@ -2333,7 +2333,7 @@ if (authLoading || guestLoading) {
                         value={guestSignupCode}
                         onChange={(e) => {
                           setGuestSignupCode(
-                            e.target.value.replace(/\D/g, "").slice(0, 6)
+                            e.target.value.replace(/\D/g, "").slice(0, 8)
                           );
                           if (guestSignupError) setGuestSignupError("");
                         }}
