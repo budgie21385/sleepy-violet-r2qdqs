@@ -11,6 +11,7 @@ export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpe
   const [profileExistsSet, setProfileExistsSet] = useState(() => new Set());
   const [chipActingOn, setChipActingOn] = useState(null);
   const [signedUpIds, setSignedUpIds] = useState(() => new Set());
+  const [avatarById, setAvatarById] = useState(() => new Map());
 
   const otherIds = useMemo(
     () => participants.map((p) => p.user_id).filter((id) => id && id !== userId),
@@ -22,6 +23,7 @@ export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpe
       setFriendshipByOtherId(new Map());
       setProfileExistsSet(new Set());
       setSignedUpIds(new Set());
+      setAvatarById(new Map());
       return;
     }
     const [friendshipsRes, profilesRes, accountsRes] = await Promise.all([
@@ -29,7 +31,7 @@ export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpe
         .from("friendships")
         .select("id, requester_id, addressee_id, status")
         .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
-      supabase.from("profiles").select("id").in("id", otherIds),
+      supabase.from("profiles").select("id, avatar_url").in("id", otherIds),
       supabase.rpc("get_account_user_ids", { p_user_ids: otherIds }),
     ]);
     const otherIdSet = new Set(otherIds);
@@ -41,6 +43,13 @@ export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpe
     }
     setFriendshipByOtherId(map);
     setProfileExistsSet(new Set((profilesRes.data || []).map((r) => r.id)));
+    setAvatarById(
+      new Map(
+        (profilesRes.data || [])
+          .filter((r) => r.avatar_url)
+          .map((r) => [r.id, r.avatar_url])
+      )
+    );
     setSignedUpIds(new Set((accountsRes.data || []).map((r) => r.user_id)));
   }
 
@@ -142,17 +151,25 @@ export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpe
                 disabled={isMe}
                 className="inline-flex items-center gap-1.5"
               >
-                <span
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
-                    isMe
-                      ? "bg-[#455d3b] text-white"
-                      : isSignedUp
-                      ? "bg-[#edf2eb] text-[#3f5a3a]"
-                      : "bg-neutral-100 text-neutral-400"
-                  }`}
-                >
-                  {initial}
-                </span>
+                {avatarById.get(p.user_id) ? (
+                  <img
+                    src={avatarById.get(p.user_id)}
+                    alt={name}
+                    className="h-6 w-6 rounded-full object-cover"
+                  />
+                ) : (
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+                      isMe
+                        ? "bg-[#455d3b] text-white"
+                        : isSignedUp
+                        ? "bg-[#edf2eb] text-[#3f5a3a]"
+                        : "bg-neutral-100 text-neutral-400"
+                    }`}
+                  >
+                    {initial}
+                  </span>
+                )}
                 <span className="text-xs font-medium text-neutral-700">
                   {isMe ? "You" : name}
                 </span>

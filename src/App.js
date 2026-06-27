@@ -45,7 +45,7 @@ import {
   TIME_LIMIT_OPTIONS_CONCURRENT,
   TIME_LIMIT_OPTIONS_CURATED,
 } from "./lib/constants";
-import { MapPin, Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus } from "lucide-react";
+import { MapPin, Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { QRCodeSVG } from "qrcode.react";
 import { Turnstile } from "@marsidev/react-turnstile";
@@ -3470,7 +3470,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
     if (otherIds.size > 0) {
       const { data: profileRows } = await supabase
         .from("profiles")
-        .select("id, display_name, username")
+        .select("id, display_name, username, avatar_url")
         .in("id", Array.from(otherIds));
       profilesById = Object.fromEntries(
         (profileRows || []).map((p) => [p.id, p])
@@ -4107,6 +4107,42 @@ function ProfileTab({
     }
   }
 
+  const avatarFileRef = useRef(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  async function handleAvatarUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarUploading(true);
+    setSaveError("");
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (upErr) {
+        setSaveError("Couldn't upload that photo. Try another.");
+        return;
+      }
+      const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({ avatar_url: pub.publicUrl })
+        .eq("id", session.user.id)
+        .select()
+        .single();
+      if (error) {
+        setSaveError("Couldn't save the photo. Try again.");
+        return;
+      }
+      setProfile(data);
+    } catch {
+      setSaveError("Couldn't upload that photo. Try another.");
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
   const email = session?.user?.email || "";
   const initial = (trimmedDisplay || email || "?").charAt(0).toUpperCase();
   const tierLabel = {
@@ -4158,9 +4194,35 @@ function ProfileTab({
         </div>
 
         <div className="text-center mb-5">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-[#455d3b] text-white text-3xl font-medium">
-            {initial}
-          </div>
+          <button
+            type="button"
+            onClick={() => avatarFileRef.current?.click()}
+            aria-label="Change photo"
+            className="relative inline-flex items-center justify-center w-20 h-20 rounded-full overflow-hidden bg-[#455d3b] text-white text-3xl font-medium active:scale-95 transition"
+          >
+            {profile?.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt="Your avatar"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initial
+            )}
+            <span className="absolute -right-0.5 -bottom-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-[#455d3b] text-white border-4 border-white">
+              <Camera size={13} />
+            </span>
+          </button>
+          <input
+            ref={avatarFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarUpload}
+          />
+          {avatarUploading && (
+            <p className="text-xs text-neutral-400 mt-1">Uploading…</p>
+          )}
           {email && (
             <p className="text-sm text-neutral-500 mt-2">{email}</p>
           )}
@@ -5013,7 +5075,7 @@ function FriendsScreen({ userId, onBack, showToast, onOpenProfile, onAddFriend }
     if (otherIds.size > 0) {
       const { data: profileRows } = await supabase
         .from("profiles")
-        .select("id, display_name, username")
+        .select("id, display_name, username, avatar_url")
         .in("id", Array.from(otherIds));
       profilesById = Object.fromEntries(
         (profileRows || []).map((p) => [p.id, p])
@@ -5357,7 +5419,7 @@ function FindFriendsSheet({
     const t = setTimeout(async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, display_name, username, tier")
+        .select("id, display_name, username, tier, avatar_url")
         .ilike("username", `%${trimmed}%`)
         .neq("id", viewerUserId) // never list myself
         .limit(20);
@@ -5556,7 +5618,7 @@ function ProfileLookupScreen({
     const [profileRes, friendshipsRes, accountsRes] = await Promise.all([
       supabase
         .from("profiles")
-        .select("id, display_name, username, tier")
+        .select("id, display_name, username, tier, avatar_url")
         .eq("id", userId)
         .maybeSingle(),
       // RLS limits this to rows where the viewer is a party. Find the one
@@ -5701,11 +5763,19 @@ function ProfileLookupScreen({
             type="button"
             onClick={() => setAvatarExpanded((v) => !v)}
             aria-label="Expand avatar"
-            className={`rounded-full bg-[#455d3b] text-white font-medium flex items-center justify-center transition-all ${
+            className={`rounded-full bg-[#455d3b] text-white font-medium flex items-center justify-center overflow-hidden transition-all ${
               avatarExpanded ? "w-40 h-40 text-6xl" : "w-20 h-20 text-3xl"
             }`}
           >
-            {initial}
+            {profile?.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt={displayName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initial
+            )}
           </button>
           <h1 className="text-2xl font-semibold tracking-tight mt-3">
             {displayName}
@@ -5943,6 +6013,15 @@ function FriendAvatar({ profile, small = false }) {
     (profile?.display_name || profile?.username || "?").trim() || "?";
   const initial = seed[0].toUpperCase();
   const size = small ? "w-8 h-8 text-xs" : "w-10 h-10 text-sm";
+  if (profile?.avatar_url) {
+    return (
+      <img
+        src={profile.avatar_url}
+        alt={seed}
+        className={`flex-shrink-0 ${size} rounded-full object-cover`}
+      />
+    );
+  }
   return (
     <div
       className={`flex-shrink-0 ${size} rounded-full bg-[#455d3b]/10 text-[#455d3b] flex items-center justify-center font-medium`}
