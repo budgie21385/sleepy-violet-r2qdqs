@@ -4825,34 +4825,32 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
         console.error("Failed to fetch participants:", apErr);
       }
       const participantRows = allParticipants || [];
-      const missingIds = Array.from(
+      const otherIds = Array.from(
         new Set(
           participantRows
-            .filter((p) => p.user_id !== userId && !p.display_name?.trim())
+            .filter((p) => p.user_id !== userId)
             .map((p) => p.user_id)
         )
       );
-      let profileNameById = new Map();
-      if (missingIds.length > 0) {
+      let profileById = new Map();
+      if (otherIds.length > 0) {
         const { data: profileRows } = await supabase
           .from("profiles")
-          .select("id, display_name")
-          .in("id", missingIds);
-        profileNameById = new Map(
-          (profileRows || []).map((r) => [r.id, r.display_name])
-        );
+          .select("id, display_name, avatar_url")
+          .in("id", otherIds);
+        profileById = new Map((profileRows || []).map((r) => [r.id, r]));
       }
-      const otherNamesBySession = new Map();
+      const otherPeopleBySession = new Map();
       for (const p of participantRows) {
         if (p.user_id === userId) continue;
-        const name =
-          p.display_name?.trim() ||
-          profileNameById.get(p.user_id) ||
-          "Guest";
-        if (!otherNamesBySession.has(p.session_id)) {
-          otherNamesBySession.set(p.session_id, []);
+        const prof = profileById.get(p.user_id);
+        const name = p.display_name?.trim() || prof?.display_name || "Guest";
+        if (!otherPeopleBySession.has(p.session_id)) {
+          otherPeopleBySession.set(p.session_id, []);
         }
-        otherNamesBySession.get(p.session_id).push(name);
+        otherPeopleBySession
+          .get(p.session_id)
+          .push({ name, avatar: prof?.avatar_url || null });
       }
 
       // Join everything, preserving the participations sort order.
@@ -4866,7 +4864,10 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
             isHost: s.host_user_id === userId,
             joined_at: p.joined_at,
             submitted_at: p.submitted_at,
-            otherNames: otherNamesBySession.get(p.session_id) || [],
+            otherPeople: otherPeopleBySession.get(p.session_id) || [],
+            otherNames: (otherPeopleBySession.get(p.session_id) || []).map(
+              (x) => x.name
+            ),
           };
         })
         .filter(Boolean);
@@ -5067,10 +5068,31 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                       <p className="text-xs text-neutral-500 truncate">
                         {s.mode === "concurrent" ? "Right now" : "Later"}
                       </p>
-                      {formatOtherNames(s.otherNames) && (
-                        <p className="text-xs text-neutral-600 truncate mt-0.5">
-                          {formatOtherNames(s.otherNames)}
-                        </p>
+                      {s.otherPeople?.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <div className="flex -space-x-2 shrink-0">
+                            {s.otherPeople.slice(0, 4).map((person, i) =>
+                              person.avatar ? (
+                                <img
+                                  key={i}
+                                  src={person.avatar}
+                                  alt={person.name}
+                                  className="h-6 w-6 rounded-full object-cover border-2 border-white"
+                                />
+                              ) : (
+                                <span
+                                  key={i}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#edf2eb] text-[#3f5a3a] text-[10px] font-medium border-2 border-white"
+                                >
+                                  {(person.name || "?").charAt(0).toUpperCase()}
+                                </span>
+                              )
+                            )}
+                          </div>
+                          <span className="text-xs text-neutral-600 truncate">
+                            {formatOtherNames(s.otherNames)}
+                          </span>
+                        </div>
                       )}
                     </div>
                     <span className="text-neutral-400 text-lg leading-none">›</span>

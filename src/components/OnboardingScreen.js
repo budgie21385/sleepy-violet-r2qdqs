@@ -7,6 +7,7 @@ import { supabase } from "../supabaseClient";
 import { Camera, Check } from "lucide-react";
 
 export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
+  const [displayName, setDisplayName] = useState(profile?.display_name || "");
   const [username, setUsername] = useState(profile?.username || "");
   const [status, setStatus] = useState({ state: "idle" });
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || "");
@@ -85,6 +86,9 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
   async function handleDone() {
     setError("");
     const updates = {};
+    const trimmedDisplay = displayName.trim();
+    if (trimmedDisplay && trimmedDisplay !== (profile?.display_name || ""))
+      updates.display_name = trimmedDisplay;
     if (trimmedUsername && usernameValid) updates.username = trimmedUsername;
     if (avatarUrl) updates.avatar_url = avatarUrl;
     if (Object.keys(updates).length === 0) {
@@ -170,6 +174,17 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
           </div>
 
           <div className="mt-5">
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Your name"
+              maxLength={40}
+              className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-base outline-none focus:border-[#455d3b]"
+            />
+          </div>
+
+          <div className="mt-3">
             <div className="flex items-center rounded-2xl border border-neutral-200 bg-white px-4 py-3 focus-within:border-[#455d3b]">
               <span className="text-neutral-400">@</span>
               <input
