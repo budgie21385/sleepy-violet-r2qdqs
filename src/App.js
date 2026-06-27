@@ -29,6 +29,7 @@ import { ImportGoogleMapsScreen } from "./components/ImportGoogleMapsScreen";
 import { ParticipantsStrip } from "./components/ParticipantsStrip";
 import { CuratedResultsBoard } from "./components/CuratedResultsBoard";
 import { SessionResultsView } from "./components/SessionResultsView";
+import { OnboardingScreen } from "./components/OnboardingScreen";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import {
   OpenNowToggle,
@@ -342,6 +343,26 @@ export default function RestaurantSwipeMVP() {
   // Venue to show in an app-level MapVenueSheet card — e.g. tapping a
   // "You're going to X" decision notification opens that venue's card directly.
   const [cardVenue, setCardVenue] = useState(null);
+  // Post-signup onboarding (pattern B). cameFromGuestRef = they arrived via a
+  // guest/session flow (claim / venue-share) → defer to the Profile nudge
+  // instead of popping the screen. onboardingDismissed persists once-ever so we
+  // don't re-pop it every session for someone who skipped.
+  const cameFromGuestRef = useRef(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try {
+      return !!localStorage.getItem("flanit_onboarding_seen");
+    } catch {
+      return false;
+    }
+  });
+  function dismissOnboarding() {
+    setOnboardingDismissed(true);
+    try {
+      localStorage.setItem("flanit_onboarding_seen", "1");
+    } catch {
+      /* ignore */
+    }
+  }
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
   // handle to a user_id once session + profile are loaded, then push it into
   // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up
@@ -860,6 +881,12 @@ useEffect(() => {
     })();
   }, [session?.user?.id, session?.user?.is_anonymous]);
 
+  // Remember if this load ever entered a guest/session flow — those paths
+  // (claim / venue-share) defer onboarding to the Profile nudge.
+  useEffect(() => {
+    if (isGuest) cameFromGuestRef.current = true;
+  }, [isGuest]);
+
   useEffect(() => {
     if (!session?.user?.id) {
       setProfile(null);
@@ -868,7 +895,7 @@ useEffect(() => {
     let cancelled = false;
     supabase
       .from("profiles")
-      .select("id, display_name, username, tier")
+      .select("id, display_name, username, tier, avatar_url")
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
@@ -3039,6 +3066,22 @@ if (authLoading || guestLoading) {
           onHide={hideVenue}
         />
       )}
+      {/* Post-signup onboarding (B): real account, no username yet, not arrived
+          via a guest/session flow, not already dismissed. */}
+      {!isGuest &&
+        !cameFromGuestRef.current &&
+        !onboardingDismissed &&
+        session?.user?.id &&
+        session.user.is_anonymous === false &&
+        profile &&
+        !profile.username && (
+          <OnboardingScreen
+            userId={session.user.id}
+            profile={profile}
+            setProfile={setProfile}
+            onDone={dismissOnboarding}
+          />
+        )}
       <FloatingActionButton
         tab={tab}
         showToast={showToast}
