@@ -363,6 +363,14 @@ export default function RestaurantSwipeMVP() {
       /* ignore */
     }
   }
+  // Drives the skip-nudges (Profile-tab dot, Activity item, Profile card): a
+  // real signed-in user who's still missing a username or photo.
+  const profileIncomplete = !!(
+    session?.user?.id &&
+    session.user.is_anonymous === false &&
+    profile &&
+    (!profile.username || !profile.avatar_url)
+  );
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
   // handle to a user_id once session + profile are loaded, then push it into
   // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up
@@ -3013,6 +3021,8 @@ if (authLoading || guestLoading) {
           onOpenProfile={(uid) => setLookupUserId(uid)}
           onOpenSession={(sid) => setNotifSessionId(sid)}
           onOpenVenue={(v) => setCardVenue(v)}
+          profileIncomplete={profileIncomplete}
+          onFinishProfile={() => setTab("profile")}
           showToast={showToast}
         />
       )}
@@ -3092,6 +3102,7 @@ if (authLoading || guestLoading) {
       <BottomTabBar
         tab={tab}
         unreadCount={unreadCount}
+        profileDot={profileIncomplete}
         setTab={(t) => {
           setNotifSessionId(null);
           setCardVenue(null);
@@ -3419,7 +3430,7 @@ function AreaFilter({
 // NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes.
-function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, showToast, asTab = false }) {
+function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
   const [items, setItems] = useState(null); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [lastSeen] = useState(() => {
@@ -3587,6 +3598,13 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
           p_user_ids: coIds,
         });
         const signedUp = new Set((acctRows || []).map((r) => r.user_id));
+        const { data: avRows } = await supabase
+          .from("profiles")
+          .select("id, avatar_url")
+          .in("id", coIds);
+        const avatarByUid = new Map(
+          (avRows || []).filter((r) => r.avatar_url).map((r) => [r.id, r.avatar_url])
+        );
         connectItems = coIds.map((uid) => {
           const p = coById.get(uid);
           return {
@@ -3594,6 +3612,7 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
             id: `con_${uid}`,
             otherId: uid,
             name: p.display_name || "Someone",
+            avatar: avatarByUid.get(uid) || null,
             timestamp: p.joined_at,
           };
         });
@@ -3675,11 +3694,30 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
         )}
       </div>
 
+      {profileIncomplete && (
+        <button
+          type="button"
+          onClick={onFinishProfile}
+          className="w-full text-left rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-3 flex items-center gap-3 mb-3 active:scale-[0.99] transition"
+        >
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white">
+            <UserPlus size={16} />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-[#2f3f29]">Finish your profile</p>
+            <p className="text-[11px] text-[#455d3b]">
+              Add a username and photo so friends recognise you
+            </p>
+          </div>
+          <span className="text-[#455d3b] text-lg leading-none shrink-0">›</span>
+        </button>
+      )}
+
       {items === null && (
         <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
       )}
 
-      {items !== null && items.length === 0 && (
+      {items !== null && items.length === 0 && !profileIncomplete && (
         <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
           <p className="text-sm text-neutral-600">Nothing here yet.</p>
           <p className="text-xs text-neutral-500 mt-1">
@@ -3883,9 +3921,17 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           onClick={() => onOpenProfile?.(item.otherId)}
           className="flex items-center gap-3 flex-1 min-w-0 text-left"
         >
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#3f5a3a] text-sm font-medium">
-            {(item.name || "?").charAt(0).toUpperCase()}
-          </span>
+          {item.avatar ? (
+            <img
+              src={item.avatar}
+              alt={item.name}
+              className="h-9 w-9 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#3f5a3a] text-sm font-medium">
+              {(item.name || "?").charAt(0).toUpperCase()}
+            </span>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-sm text-neutral-900">
               <strong className="font-medium">{item.name}</strong> was in your session
@@ -4108,6 +4154,7 @@ function ProfileTab({
   }
 
   const avatarFileRef = useRef(null);
+  const usernameInputRef = useRef(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   async function handleAvatarUpload(e) {
     const file = e.target.files?.[0];
@@ -4192,6 +4239,65 @@ function ProfileTab({
           <p className="text-sm text-neutral-500">Account</p>
           <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
         </div>
+
+        {(!profile?.username || !profile?.avatar_url) && (
+          <div className="mb-5 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-semibold text-[#2f3f29]">
+                Complete your profile
+              </p>
+              <span className="text-xs text-[#455d3b]">
+                {[profile?.username, profile?.avatar_url].filter(Boolean).length} of 2
+              </span>
+            </div>
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => avatarFileRef.current?.click()}
+                disabled={!!profile?.avatar_url}
+                className="flex w-full items-center gap-2 py-1 text-sm text-[#2f3f29]"
+              >
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                    profile?.avatar_url
+                      ? "bg-[#455d3b] text-white"
+                      : "border border-[#455d3b]"
+                  }`}
+                >
+                  {profile?.avatar_url && <Check size={12} />}
+                </span>
+                <span className={profile?.avatar_url ? "text-neutral-400 line-through" : ""}>
+                  Add a profile photo
+                </span>
+                {!profile?.avatar_url && (
+                  <span className="ml-auto text-xs font-medium text-[#455d3b]">Add</span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => usernameInputRef.current?.focus()}
+                disabled={!!profile?.username}
+                className="flex w-full items-center gap-2 py-1 text-sm text-[#2f3f29]"
+              >
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                    profile?.username
+                      ? "bg-[#455d3b] text-white"
+                      : "border border-[#455d3b]"
+                  }`}
+                >
+                  {profile?.username && <Check size={12} />}
+                </span>
+                <span className={profile?.username ? "text-neutral-400 line-through" : ""}>
+                  Pick a username
+                </span>
+                {!profile?.username && (
+                  <span className="ml-auto text-xs font-medium text-[#455d3b]">Add</span>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="text-center mb-5">
           <button
@@ -4335,6 +4441,7 @@ function ProfileTab({
                 @
               </span>
               <input
+                ref={usernameInputRef}
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value.toLowerCase())}

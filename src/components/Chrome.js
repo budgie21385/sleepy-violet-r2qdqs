@@ -101,7 +101,7 @@ export function Toast({ message, onDismiss }) {
   );
 }
 
-export function BottomTabBar({ tab, setTab, unreadCount = 0 }) {
+export function BottomTabBar({ tab, setTab, unreadCount = 0, profileDot = false }) {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-[3000] bg-white border-t border-neutral-100 shadow-lg">
       <div className="flex max-w-md mx-auto">
@@ -155,7 +155,12 @@ export function BottomTabBar({ tab, setTab, unreadCount = 0 }) {
             tab === "profile" ? "text-[#455d3b]" : "text-neutral-400"
           }`}
         >
-          <User size={20} />
+          <span className="relative">
+            <User size={20} />
+            {profileDot && (
+              <span className="absolute -top-1 -right-1.5 h-[10px] w-[10px] rounded-full bg-red-600 border-2 border-white" />
+            )}
+          </span>
           <span className="text-xs font-medium">Profile</span>
         </button>
       </div>
