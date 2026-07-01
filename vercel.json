@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/v/:id", "destination": "/api/share?type=venue&id=:id" },
+    { "source": "/s/:id", "destination": "/api/share?type=session&id=:id" },
+    { "source": "/u/:handle", "destination": "/api/share?type=profile&handle=:handle" }
+  ]
+}
