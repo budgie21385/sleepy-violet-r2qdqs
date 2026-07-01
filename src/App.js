@@ -1013,8 +1013,20 @@ useEffect(() => {
         decidedCount = count ?? 0;
       }
 
+      let inviteCount = 0;
+      {
+        const { count } = await supabase
+          .from("session_invites")
+          .select("session_id", { count: "exact", head: true })
+          .eq("invitee_id", uid)
+          .gt("created_at", lastSeen);
+        inviteCount = count ?? 0;
+      }
+
       if (cancelled) return;
-      setUnreadCount((reqRes.count ?? 0) + submittedCount + decidedCount);
+      setUnreadCount(
+        (reqRes.count ?? 0) + submittedCount + decidedCount + inviteCount
+      );
     })();
     return () => {
       cancelled = true;
@@ -2783,6 +2795,8 @@ if (authLoading || guestLoading) {
             mode={matchMode}
             matchCount={sessionMatches.length}
             target={matchLimit}
+            userId={session?.user?.id}
+            showToast={showToast}
             onBack={() => setScreen("filters")}
             onContinue={() => setScreen(matchMode === "curated" ? "curated_results" : "swipe")}
           />
@@ -3440,7 +3454,8 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
 
   async function load() {
     if (!userId) return;
-    const [incomingRes, acceptedRes, hostedRes, myPartsRes] = await Promise.all([
+    const [incomingRes, acceptedRes, hostedRes, myPartsRes, invitesRes] =
+      await Promise.all([
       // Pending requests where I'm addressee — actionable items.
       supabase
         .from("friendships")
@@ -3467,6 +3482,12 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
         .from("session_participants")
         .select("session_id")
         .eq("user_id", userId),
+      // Sessions a friend invited me to (that I haven't joined yet).
+      supabase
+        .from("session_invites")
+        .select("session_id, inviter_id, created_at")
+        .eq("invitee_id", userId)
+        .order("created_at", { ascending: false }),
     ]);
 
     const incomingRows = incomingRes.data || [];
@@ -3619,12 +3640,52 @@ function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenV
       }
     }
 
+    // ---- Session invites a friend sent me (not ones I've already joined) ----
+    const myPartSessionIds = new Set(myPartRows.map((p) => p.session_id));
+    const inviteRows = (invitesRes.data || []).filter(
+      (r) => !myPartSessionIds.has(r.session_id)
+    );
+    let inviteItems = [];
+    if (inviteRows.length > 0) {
+      const inviterIds = Array.from(new Set(inviteRows.map((r) => r.inviter_id)));
+      const invSessionIds = Array.from(new Set(inviteRows.map((r) => r.session_id)));
+      const [inviterProfsRes, invSessRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", inviterIds),
+        supabase.from("match_sessions").select("id, name").in("id", invSessionIds),
+      ]);
+      const inviterById = Object.fromEntries(
+        (inviterProfsRes.data || []).map((p) => [p.id, p])
+      );
+      const sessNameById = Object.fromEntries(
+        (invSessRes.data || []).map((s) => [s.id, s.name])
+      );
+      inviteItems = inviteRows.map((r) => {
+        const inviter = inviterById[r.inviter_id];
+        const inviterName =
+          inviter?.display_name?.trim() ||
+          (inviter?.username ? `@${inviter.username}` : "A friend");
+        return {
+          kind: "session_invite",
+          id: `inv_${r.session_id}_${r.inviter_id}`,
+          sessionId: r.session_id,
+          inviterName,
+          avatar: inviter?.avatar_url || null,
+          sessionName: sessNameById[r.session_id] || "a session",
+          timestamp: r.created_at,
+        };
+      });
+    }
+
     const all = [
       ...incomingItems,
       ...acceptedItems,
       ...submittedItems,
       ...decidedItems,
       ...connectItems,
+      ...inviteItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setItems(all);
   }
@@ -3863,6 +3924,37 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           )}
         </div>
         <Check size={16} className="text-[#455d3b]" />
+      </button>
+    );
+  }
+
+  if (item.kind === "session_invite") {
+    return (
+      <button
+        type="button"
+        onClick={() => window.location.assign(`/s/${item.sessionId}`)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        {item.avatar ? (
+          <img
+            src={item.avatar}
+            alt={item.inviterName}
+            className="h-9 w-9 shrink-0 rounded-full object-cover"
+          />
+        ) : (
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white">
+            <UserPlus size={16} />
+          </span>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.inviterName}</strong> invited you to a session
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">
+            {item.sessionName} · tap to join
+          </p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
       </button>
     );
   }
@@ -6288,14 +6380,71 @@ function InviteShareScreen({
   mode = "concurrent",
   matchCount = 0,
   target = 0,
+  userId,
+  showToast,
   onBack,
   onContinue,
 }) {
   const [copied, setCopied] = useState(false);
+  const [friends, setFriends] = useState([]);
+  const [invitedIds, setInvitedIds] = useState(() => new Set());
+  const [invitingId, setInvitingId] = useState(null);
   const shareUrl = sessionId
     ? `${window.location.origin}/s/${sessionId}`
     : "";
   const isCurated = mode === "curated";
+
+  // The host's accepted friends + who's already been invited to this session.
+  useEffect(() => {
+    if (!userId || !sessionId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: fr } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id, status")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+        .eq("status", "accepted");
+      const otherIds = (fr || []).map((f) =>
+        f.requester_id === userId ? f.addressee_id : f.requester_id
+      );
+      if (otherIds.length === 0) {
+        if (!cancelled) setFriends([]);
+        return;
+      }
+      const [profsRes, invRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", otherIds),
+        supabase
+          .from("session_invites")
+          .select("invitee_id")
+          .eq("session_id", sessionId),
+      ]);
+      if (cancelled) return;
+      setFriends(profsRes.data || []);
+      setInvitedIds(new Set((invRes.data || []).map((r) => r.invitee_id)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, sessionId]);
+
+  async function inviteFriend(friendId) {
+    setInvitingId(friendId);
+    const { error } = await supabase.rpc("invite_to_session", {
+      p_session_id: sessionId,
+      p_invitee_id: friendId,
+    });
+    setInvitingId(null);
+    if (error) {
+      console.error("invite_to_session failed:", error);
+      showToast?.("Couldn't send invite");
+      return;
+    }
+    setInvitedIds((prev) => new Set([...prev, friendId]));
+    showToast?.("Invite sent");
+  }
 
   async function copyLink() {
     try {
@@ -6372,6 +6521,52 @@ function InviteShareScreen({
             </button>
           </div>
         </div>
+
+        {friends.length > 0 && (
+          <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-4">
+            <p className="text-sm font-semibold text-neutral-800 mb-3">
+              Send to friends
+            </p>
+            <div className="space-y-2">
+              {friends.map((f) => {
+                const name =
+                  f.display_name?.trim() ||
+                  (f.username ? `@${f.username}` : "Friend");
+                const invited = invitedIds.has(f.id);
+                return (
+                  <div key={f.id} className="flex items-center gap-3">
+                    {f.avatar_url ? (
+                      <img
+                        src={f.avatar_url}
+                        alt={name}
+                        className="h-9 w-9 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b] text-sm font-medium">
+                        {name.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                      {name}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={invited || invitingId === f.id}
+                      onClick={() => inviteFriend(f.id)}
+                      className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-medium disabled:opacity-70 ${
+                        invited
+                          ? "bg-neutral-100 text-neutral-400"
+                          : "bg-[#455d3b] text-white active:scale-95"
+                      }`}
+                    >
+                      {invited ? "Invited" : invitingId === f.id ? "…" : "Invite"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Live match indicator — curated only, since the host's already
             done swiping and is now waiting for guests. Concurrent host
