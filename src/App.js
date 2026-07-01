@@ -4754,6 +4754,10 @@ function MyListScreen({
 function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId }) {
   const [sessions, setSessions] = useState(null); // null = loading
   const [selectedSession, setSelectedSession] = useState(null);
+  // True when the detail was opened via a deep-link (a tapped notification /
+  // "See the plan"), so backing out exits to where they came from instead of
+  // dropping them on the sessions list they never navigated through.
+  const [deepLinked, setDeepLinked] = useState(false);
   const [sessionMatches, setSessionMatches] = useState(null); // null = loading
   const [matchesError, setMatchesError] = useState("");
   // My personal likes in this session (everything I swiped right on, whether
@@ -4775,6 +4779,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
     const s = sessions.find((x) => x.id === initialSessionId);
     if (s) {
       setSelectedSession(s);
+      setDeepLinked(true);
       autoSelectedId.current = initialSessionId;
     }
   }, [initialSessionId, sessions]);
@@ -5020,7 +5025,13 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
       <div className="bg-white border-b border-neutral-100 px-4 py-3 flex items-center gap-3">
         <button
           type="button"
-          onClick={selectedSession ? () => setSelectedSession(null) : onBack}
+          onClick={
+            selectedSession
+              ? deepLinked
+                ? onBack
+                : () => setSelectedSession(null)
+              : onBack
+          }
           aria-label="Back"
           className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100"
         >
@@ -5048,7 +5059,10 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                 <li key={s.id}>
                   <button
                     type="button"
-                    onClick={() => setSelectedSession(s)}
+                    onClick={() => {
+                      setSelectedSession(s);
+                      setDeepLinked(false);
+                    }}
                     className="w-full flex items-center gap-3 rounded-2xl bg-white border border-neutral-100 p-4 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
                   >
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b] shrink-0">
@@ -5122,7 +5136,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               onSave={onSave}
               onUnsave={onUnsave}
               onHide={onHide}
-              onDone={() => setSelectedSession(null)}
+              onDone={() => (deepLinked ? onBack() : setSelectedSession(null))}
               showToast={showToast}
             />
           ) : (
