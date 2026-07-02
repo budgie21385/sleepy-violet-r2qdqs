@@ -90,9 +90,11 @@ export default async function handler(req, res) {
         if (s.mode === "curated") {
           title = `${hostName} sent you a shortlist`;
           description = "Vote on the shortlist and help decide where you're going.";
+          image = `${origin}/og-shortlist.png`;
         } else {
           title = `Join ${hostName}'s session on Flanit`;
           description = "Right now — swipe together and see what you match on.";
+          image = `${origin}/og-rightnow.png`;
         }
         url = `${origin}/s/${id}`;
       }
@@ -107,6 +109,7 @@ export default async function handler(req, res) {
         : `@${clean}`;
       title = `${name} invited you to Flanit`;
       description = "Swipe, match and decide where to go — together.";
+      image = `${origin}/og-invite.png`;
       url = `${origin}/u/@${clean}`;
     }
   } catch (e) {
