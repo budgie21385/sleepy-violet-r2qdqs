@@ -10,7 +10,10 @@ import { MapPin } from "lucide-react";
 import {
   VenueHeroCarousel,
   VenueRating,
+  VenueEditorial,
   VenueVibes,
+  VenueAmenities,
+  VenueReview,
   OpeningHours,
   OpenMapsButton,
 } from "./VenueBits";
@@ -83,12 +86,15 @@ export function PublicVenuePage({ venueId }) {
                   </p>
                 </div>
               )}
+              <VenueRating venue={venue} />
+              <OpeningHours venue={venue} />
+              <VenueEditorial venue={venue} />
               <p className="text-sm leading-6 text-neutral-500">
                 {venue.address}
               </p>
-              <VenueRating venue={venue} />
               <VenueVibes venue={venue} />
-              <OpeningHours venue={venue} />
+              <VenueAmenities venue={venue} />
+              <VenueReview venue={venue} />
               <OpenMapsButton url={getMapsUrl(venue)} />
             </div>
 

@@ -7,11 +7,14 @@ import { createPortal } from "react-dom";
 import {
   TIME_BANDS,
   VIBE_OPTIONS,
+  AMENITY_FILTERS,
   venueMatchesAreas,
   getTodayDayKey,
   venueOpenInBand,
   isVenueOpenNow,
   venueMatchesVibe,
+  venueMatchesPrice,
+  venueMatchesAmenities,
 } from "./lib/venueLogic";
 import {
   MapFilterGroup,
@@ -307,6 +310,8 @@ export default function RestaurantSwipeMVP() {
   const [openNow, setOpenNow] = useState(false);
   const [selectedTimes, setSelectedTimes] = useState([]);
   const [selectedVibes, setSelectedVibes] = useState([]);
+  const [selectedPrices, setSelectedPrices] = useState([]); // price levels 1..4
+  const [selectedAmenities, setSelectedAmenities] = useState([]); // amenity keys
   const [matchLimit, setMatchLimit] = useState(3);
   // Multi-mode session config. Defaults: 2 participants; 10 min for
   // concurrent ("Right now"), 24h for curated ("Later").
@@ -1715,7 +1720,10 @@ loadAreas();
         );
         if (!anyVibeMatches) return false;
       }
- 
+
+      if (!venueMatchesPrice(venue, selectedPrices)) return false;
+      if (!venueMatchesAmenities(venue, selectedAmenities)) return false;
+
       return true;
     });
   }, [
@@ -1726,6 +1734,8 @@ loadAreas();
     openNow,
     selectedTimes,
     selectedVibes,
+    selectedPrices,
+    selectedAmenities,
     hiddenVenueIds,
   ]);
  
@@ -1790,6 +1800,9 @@ loadAreas();
         if (!anyVibe) return false;
       }
 
+      if (!venueMatchesPrice(venue, filters.selectedPrices)) return false;
+      if (!venueMatchesAmenities(venue, filters.selectedAmenities)) return false;
+
       return true;
     });
   }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues, guestListVenues]);
@@ -1844,6 +1857,8 @@ loadAreas();
         selectedTimes,
         selectedVibes,
         selectedCuisines,
+        selectedPrices,
+        selectedAmenities,
       };
 
       const sessionName = eventDate
@@ -2768,6 +2783,38 @@ if (authLoading || guestLoading) {
                 selected={selectedCuisines}
                 setSelected={setSelectedCuisines}
               />
+              <MapFilterGroup title="Price">
+                {[1, 2, 3, 4].map((p) => (
+                  <MapFilterChip
+                    key={p}
+                    on={selectedPrices.includes(p)}
+                    label={"$".repeat(p)}
+                    onClick={() =>
+                      setSelectedPrices((prev) =>
+                        prev.includes(p)
+                          ? prev.filter((x) => x !== p)
+                          : [...prev, p]
+                      )
+                    }
+                  />
+                ))}
+              </MapFilterGroup>
+              <MapFilterGroup title="Amenities">
+                {AMENITY_FILTERS.map((a) => (
+                  <MapFilterChip
+                    key={a.key}
+                    on={selectedAmenities.includes(a.key)}
+                    label={a.label}
+                    onClick={() =>
+                      setSelectedAmenities((prev) =>
+                        prev.includes(a.key)
+                          ? prev.filter((x) => x !== a.key)
+                          : [...prev, a.key]
+                      )
+                    }
+                  />
+                ))}
+              </MapFilterGroup>
               {/* "How many matches?" is a stop-after-N target — only
                   meaningful for Right Now (concurrent). Send options
                   (curated) curates the whole shortlist, so no target. */}

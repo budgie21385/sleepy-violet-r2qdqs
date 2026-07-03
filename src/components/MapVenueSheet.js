@@ -15,7 +15,10 @@ import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft } from "luci
 import {
   VenueHeroCarousel,
   VenueRating,
+  VenueEditorial,
   VenueVibes,
+  VenueAmenities,
+  VenueReview,
   OpeningHours,
   OpenMapsButton,
 } from "./VenueBits";
@@ -198,10 +201,13 @@ export function MapVenueSheet({
         className={`flex-1 overflow-y-auto p-4 space-y-3 ${slideClass}`}
       >
         <VenueHeroCarousel venue={venue} disableSwipe={navEnabled} />
-        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
         <VenueRating venue={venue} />
-        <VenueVibes venue={venue} />
         <OpeningHours venue={venue} />
+        <VenueEditorial venue={venue} />
+        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
+        <VenueVibes venue={venue} />
+        <VenueAmenities venue={venue} />
+        <VenueReview venue={venue} />
         <OpenMapsButton url={getMapsUrl(venue)} />
       </div>
 

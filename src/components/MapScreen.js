@@ -11,9 +11,12 @@ import {
   MELBOURNE_CENTER,
   MELBOURNE_ZOOM,
   VIBE_OPTIONS,
+  AMENITY_FILTERS,
   getVenueEmoji,
   venueMatchesAreas,
   venueMatchesVibe,
+  venueMatchesPrice,
+  venueMatchesAmenities,
   isVenueOpenNow,
   getTodayDayKey,
 } from "../lib/venueLogic";
@@ -60,6 +63,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
   const [fOpenNow, setFOpenNow] = useState(false);
   const [fMinRating, setFMinRating] = useState(0);
   const [fPrices, setFPrices] = useState([]); // price_level numbers 1..4
+  const [fAmenities, setFAmenities] = useState([]); // amenity column keys
 
   const MAP_AREA_RADIUS_KM = 3;
 
@@ -76,6 +80,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
     fCuisines.length +
     fAreas.length +
     fPrices.length +
+    fAmenities.length +
     (fOpenNow ? 1 : 0) +
     (fMinRating > 0 ? 1 : 0);
 
@@ -106,10 +111,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
       );
     if (fOpenNow) list = list.filter((v) => isVenueOpenNow(v));
     if (fMinRating > 0) list = list.filter((v) => Number(v.rating) >= fMinRating);
-    if (fPrices.length > 0)
-      list = list.filter((v) => fPrices.includes(Number(v.price_level)));
+    if (fPrices.length > 0) list = list.filter((v) => venueMatchesPrice(v, fPrices));
+    if (fAmenities.length > 0)
+      list = list.filter((v) => venueMatchesAmenities(v, fAmenities));
     return list;
-  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fVibes, fOpenNow, fMinRating, fPrices]);
+  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fVibes, fOpenNow, fMinRating, fPrices, fAmenities]);
 
   const toggleVibe = (v) =>
     setFVibes((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
@@ -117,6 +123,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
     setFCuisines((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
   const togglePrice = (p) =>
     setFPrices((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  const toggleAmenity = (k) =>
+    setFAmenities((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
   const toggleArea = (a) =>
     setFAreas((p) =>
       p.some((x) => x.name === a.name)
@@ -130,6 +138,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
     setFOpenNow(false);
     setFMinRating(0);
     setFPrices([]);
+    setFAmenities([]);
   };
 
   const chips = [
@@ -161,6 +170,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
         label: "$".repeat(p),
         onRemove: () => setFPrices((prev) => prev.filter((x) => x !== p)),
       })),
+    ...fAmenities.map((k) => ({
+      key: "amenity:" + k,
+      label: (AMENITY_FILTERS.find((a) => a.key === k) || {}).label || k,
+      onRemove: () => setFAmenities((prev) => prev.filter((x) => x !== k)),
+    })),
   ];
 
   useEffect(() => {
@@ -382,6 +396,17 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
                         on={fPrices.includes(p)}
                         label={"$".repeat(p)}
                         onClick={() => togglePrice(p)}
+                      />
+                    ))}
+                  </MapFilterGroup>
+
+                  <MapFilterGroup title="Amenities">
+                    {AMENITY_FILTERS.map((a) => (
+                      <MapFilterChip
+                        key={a.key}
+                        on={fAmenities.includes(a.key)}
+                        label={a.label}
+                        onClick={() => toggleAmenity(a.key)}
                       />
                     ))}
                   </MapFilterGroup>

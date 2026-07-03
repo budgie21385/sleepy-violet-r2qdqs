@@ -255,3 +255,58 @@ export function venueMatchesVibe(venue, vibe, dayKey) {
       return false;
   }
 }
+
+// --- Price level -------------------------------------------------------------
+// price_level is stored inconsistently: mostly Google's Places-API-New enum
+// strings (PRICE_LEVEL_MODERATE, …), plus a handful of legacy 1-4 numbers.
+// Normalise both to a 1..4 number (or null). This is what the price filter and
+// the card $-symbols read — using Number() directly (as the old map filter did)
+// silently NaN'd on every enum-string row, i.e. almost all of them.
+const PRICE_LEVEL_MAP = {
+  PRICE_LEVEL_INEXPENSIVE: 1,
+  PRICE_LEVEL_MODERATE: 2,
+  PRICE_LEVEL_EXPENSIVE: 3,
+  PRICE_LEVEL_VERY_EXPENSIVE: 4,
+};
+
+export function priceLevelNumber(venue) {
+  const raw = venue?.price_level;
+  if (raw == null || raw === "") return null;
+  if (PRICE_LEVEL_MAP[raw]) return PRICE_LEVEL_MAP[raw];
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 1 && n <= 4 ? n : null;
+}
+
+// "$" / "$$" / "$$$" / "$$$$" — empty string when unknown (caller hides it).
+export function formatPriceSymbols(venue) {
+  const lvl = priceLevelNumber(venue);
+  return lvl ? "$".repeat(lvl) : "";
+}
+
+export function venueMatchesPrice(venue, selectedPrices) {
+  if (!selectedPrices || selectedPrices.length === 0) return true;
+  const lvl = priceLevelNumber(venue);
+  return lvl != null && selectedPrices.includes(lvl);
+}
+
+// --- Amenities (Google attribute booleans) -----------------------------------
+// Filterable amenity set — `key` is the venues column. Shared by the map filter
+// panel, the matches/session setup, and the amenity-matching helper. AND
+// semantics: a venue must have every selected amenity true.
+export const AMENITY_FILTERS = [
+  { key: "outdoor_seating", label: "Outdoor seating" },
+  { key: "serves_cocktails", label: "Cocktails" },
+  { key: "serves_wine", label: "Wine" },
+  { key: "live_music", label: "Live music" },
+  { key: "allows_dogs", label: "Dog-friendly" },
+  { key: "good_for_groups", label: "Good for groups" },
+  { key: "reservable", label: "Reservable" },
+  { key: "takeout", label: "Takeaway" },
+  { key: "delivery", label: "Delivery" },
+  { key: "serves_vegetarian_food", label: "Vegetarian" },
+];
+
+export function venueMatchesAmenities(venue, selectedAmenities) {
+  if (!selectedAmenities || selectedAmenities.length === 0) return true;
+  return selectedAmenities.every((key) => venue?.[key] === true);
+}

@@ -1,12 +1,23 @@
 // The venue card and its presentational pieces. Props-only components extracted
 // from App.js; used by the swipe card (VenueCard) and the map sheet.
 import { useState, useEffect } from "react";
-import { MapPin, ExternalLink } from "lucide-react";
+import {
+  MapPin,
+  ExternalLink,
+  Trees,
+  Martini,
+  Wine,
+  Music,
+  Dog,
+  Users,
+  CalendarCheck,
+} from "lucide-react";
 import {
   getTodayDayKey,
   VIBE_OPTIONS,
   venueMatchesVibe,
   getMapsUrl,
+  formatPriceSymbols,
 } from "../lib/venueLogic";
 
 export function VenueHeroCarousel({ venue, disableSwipe = false }) {
@@ -185,7 +196,8 @@ function PhotoAttribution({ attribution }) {
 }
 
 export function VenueRating({ venue }) {
-  if (!venue.rating && !venue.review_count) return null;
+  const price = formatPriceSymbols(venue);
+  if (!venue.rating && !venue.review_count && !price) return null;
   return (
     <p className="mt-4 text-sm font-medium text-neutral-700">
       ⭐ {venue.rating || "No rating"}
@@ -194,7 +206,84 @@ export function VenueRating({ venue }) {
             Number(venue.review_count) === 1 ? "review" : "reviews"
           }`
         : ""}
+      {price ? <span className="text-[#2f6f3b]">{` · ${price}`}</span> : ""}
     </p>
+  );
+}
+
+// Google's one-line editorial description, shown under the rating. Hidden when
+// the venue has no summary (~70% of venues).
+export function VenueEditorial({ venue }) {
+  const text = (venue.editorial_summary || "").trim();
+  if (!text) return null;
+  return <p className="text-sm italic leading-6 text-neutral-600">{text}</p>;
+}
+
+// Outlined amenity badges — the experiential attributes only (the mundane ones
+// like restroom/takeaway live in the filters, not here). Shows only the ones
+// that are true; capped so the row never sprawls.
+const AMENITY_BADGES = [
+  { key: "outdoor_seating", label: "Outdoor seating", Icon: Trees },
+  { key: "serves_cocktails", label: "Cocktails", Icon: Martini },
+  { key: "serves_wine", label: "Wine", Icon: Wine },
+  { key: "live_music", label: "Live music", Icon: Music },
+  { key: "allows_dogs", label: "Dog-friendly", Icon: Dog },
+  { key: "good_for_groups", label: "Good for groups", Icon: Users },
+  { key: "reservable", label: "Reservable", Icon: CalendarCheck },
+];
+
+export function VenueAmenities({ venue, max = 6 }) {
+  const active = AMENITY_BADGES.filter((a) => venue[a.key] === true).slice(0, max);
+  if (active.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {active.map(({ key, label, Icon }) => (
+        <span
+          key={key}
+          className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
+        >
+          <Icon size={13} className="shrink-0 text-[#5a7a4c]" />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Snippet of the top Google review. reviews is a jsonb array of
+// {rating, text, author, published, relative}; supabase-js returns it parsed,
+// but guard for a stringified value just in case.
+export function VenueReview({ venue }) {
+  let reviews = venue.reviews;
+  if (typeof reviews === "string") {
+    try {
+      reviews = JSON.parse(reviews);
+    } catch {
+      reviews = [];
+    }
+  }
+  if (!Array.isArray(reviews)) return null;
+  const r = reviews.find((x) => x && String(x.text || "").trim());
+  if (!r) return null;
+  const text = String(r.text).trim();
+  const snippet = text.length > 180 ? `${text.slice(0, 180).trimEnd()}…` : text;
+  const stars = Number(r.rating);
+  return (
+    <div className="rounded-2xl bg-neutral-50 px-4 py-3">
+      {Number.isFinite(stars) && stars > 0 ? (
+        <p className="mb-1 text-xs text-amber-500">
+          {"★".repeat(Math.round(stars))}
+        </p>
+      ) : null}
+      <p className="text-sm leading-6 text-neutral-600">“{snippet}”</p>
+      {r.author || r.relative ? (
+        <p className="mt-1 text-xs text-neutral-400">
+          {r.author}
+          {r.author && r.relative ? " · " : ""}
+          {r.relative}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -361,10 +450,13 @@ export function VenueCard({ venue }) {
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
       <div className="mb-8 space-y-3">
-        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
         <VenueRating venue={venue} />
-        <VenueVibes venue={venue} />
         <OpeningHours venue={venue} />
+        <VenueEditorial venue={venue} />
+        <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
+        <VenueVibes venue={venue} />
+        <VenueAmenities venue={venue} />
+        <VenueReview venue={venue} />
       </div>
       <OpenMapsButton url={getMapsUrl(venue)} />
     </div>
