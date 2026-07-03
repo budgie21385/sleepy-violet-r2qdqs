@@ -1265,6 +1265,19 @@ useEffect(() => {
     };
   }, [isGuest, session?.user?.id, guestSessionId]);
 
+  // A known signed-in user (non-anon, not the host, with a display name) will be
+  // auto-joined once the venue pool loads — so we show a "Joining…" state
+  // instead of flashing the "what should we call you?" screen at them.
+  const guestWillAutoJoin =
+    isGuest &&
+    guestStage === "splash" &&
+    guestSessionData?.status === "open" &&
+    !!session?.user?.id &&
+    session.user.is_anonymous === false &&
+    session.user.id !== guestSessionData?.host_user_id &&
+    !!profile?.display_name?.trim() &&
+    !guestSubmittedAt;
+
   function handleNotForMe() {
     // Send them to the root — they can sign in and start their own session
     // if they want, or just close the tab.
@@ -2552,7 +2565,13 @@ if (authLoading || guestLoading) {
             )}
           </div>
 
-          {isOpen && (
+          {isOpen && guestWillAutoJoin && (
+            <div className="mt-6 flex items-center justify-center gap-2 text-sm text-neutral-500">
+              <span className="h-4 w-4 rounded-full border-2 border-neutral-300 border-t-[#455d3b] animate-spin" />
+              Joining…
+            </div>
+          )}
+          {isOpen && !guestWillAutoJoin && (
             <>
               <label className="mt-5 block text-xs font-medium uppercase tracking-wide text-neutral-500">
                 What should we call you?
