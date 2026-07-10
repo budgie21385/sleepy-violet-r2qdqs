@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User } from "lucide-react";
 
-export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap }) {
+export function FloatingActionButton({ tab, showToast, onAddFriend, onAddVenue, onImportMap }) {
   const [open, setOpen] = useState(false);
 
   // Don't render outside Profile + Map tabs.
@@ -25,7 +25,7 @@ export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap 
       label: "Add a venue",
       action: () => {
         setOpen(false);
-        showToast("Add a venue — coming soon");
+        onAddVenue();
       },
     },
     {

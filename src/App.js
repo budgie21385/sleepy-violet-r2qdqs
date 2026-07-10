@@ -38,6 +38,7 @@ import { OnboardingScreen } from "./components/OnboardingScreen";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { FriendAvatar } from "./components/FriendAvatar";
+import { AddVenueSheet } from "./components/AddVenueSheet";
 import {
   AreaCheckbox,
   DropdownField,
@@ -327,6 +328,7 @@ export default function RestaurantSwipeMVP() {
   // the same Import from Google Maps overlay. The overlay itself renders at
   // App level (below) and is full-screen, so it covers whatever tab is active.
   const [showImport, setShowImport] = useState(false);
+  const [showAddVenue, setShowAddVenue] = useState(false);
   // Find Friends sheet — opened by the FAB's Add friend option AND by the
   // FriendsScreen header + icon. Lifted to App level for that shared access.
   const [showFindFriends, setShowFindFriends] = useState(false);
@@ -3120,8 +3122,23 @@ if (authLoading || guestLoading) {
         tab={tab}
         showToast={showToast}
         onAddFriend={() => setShowFindFriends(true)}
+        onAddVenue={() => setShowAddVenue(true)}
         onImportMap={() => setShowImport(true)}
       />
+      {showAddVenue && (
+        <AddVenueSheet
+          onClose={() => setShowAddVenue(false)}
+          showToast={showToast}
+          onAdded={(venue) => {
+            // New venue → into the pool state so it pins immediately; either
+            // way mark it saved so My List / bookmark state is instant.
+            setVenues((prev) =>
+              prev.some((v) => v.id === venue.id) ? prev : [...prev, venue]
+            );
+            setSavedVenueIds((prev) => new Set([...prev, venue.id]));
+          }}
+        />
+      )}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
       <BottomTabBar
         tab={tab}
