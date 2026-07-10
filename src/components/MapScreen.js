@@ -3,18 +3,18 @@
 // venue sheet. Extracted from App.js; App.js is the only consumer.
 import { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import { SlidersHorizontal, X } from "lucide-react";
 import {
   MELBOURNE_CENTER,
   MELBOURNE_ZOOM,
-  VIBE_OPTIONS,
+  OCCASION_OPTIONS,
   AMENITY_FILTERS,
   getVenueEmoji,
   venueMatchesAreas,
-  venueMatchesVibe,
+  venueMatchesOccasions,
   venueMatchesPrice,
   venueMatchesAmenities,
   isVenueOpenNow,
@@ -50,14 +50,29 @@ function MapResizer() {
   return null;
 }
 
+// Lifts the map's current viewport bounds into React state so the place count
+// and the card's venue-to-venue swipe only cover what's actually on screen
+// (zoom acts as an implicit filter — a CBD zoom shouldn't swipe to Preston).
+function BoundsWatcher({ onBounds }) {
+  const map = useMapEvents({
+    moveend: () => onBounds(map.getBounds()),
+    zoomend: () => onBounds(map.getBounds()),
+  });
+  useEffect(() => {
+    onBounds(map.getBounds());
+  }, [map, onBounds]);
+  return null;
+}
+
 export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, areas = [] }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
+  const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
   const [showFilters, setShowFilters] = useState(false);
   // Map-only filter state. Deliberately LOCAL to MapScreen and independent of
   // the App-level swipe/match filters — toggling these never touches the match
   // setup, and vice versa.
-  const [fVibes, setFVibes] = useState([]);
+  const [fOccasions, setFOccasions] = useState([]); // "What are you after?" chips
   const [fCuisines, setFCuisines] = useState([]);
   const [fAreas, setFAreas] = useState([]); // [{ name, lat, lng }]
   const [fOpenNow, setFOpenNow] = useState(false);
@@ -76,7 +91,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
   );
 
   const activeCount =
-    fVibes.length +
+    fOccasions.length +
     fCuisines.length +
     fAreas.length +
     fPrices.length +
@@ -105,20 +120,18 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
       list = list.filter((v) => venueMatchesAreas(v, fAreas, MAP_AREA_RADIUS_KM));
     if (fCuisines.length > 0)
       list = list.filter((v) => fCuisines.includes(v.cuisine_bucket));
-    if (fVibes.length > 0)
-      list = list.filter((v) =>
-        fVibes.some((vibe) => venueMatchesVibe(v, vibe, todayKey))
-      );
+    if (fOccasions.length > 0)
+      list = list.filter((v) => venueMatchesOccasions(v, fOccasions, todayKey));
     if (fOpenNow) list = list.filter((v) => isVenueOpenNow(v));
     if (fMinRating > 0) list = list.filter((v) => Number(v.rating) >= fMinRating);
     if (fPrices.length > 0) list = list.filter((v) => venueMatchesPrice(v, fPrices));
     if (fAmenities.length > 0)
       list = list.filter((v) => venueMatchesAmenities(v, fAmenities));
     return list;
-  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fVibes, fOpenNow, fMinRating, fPrices, fAmenities]);
+  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities]);
 
-  const toggleVibe = (v) =>
-    setFVibes((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
+  const toggleOccasion = (v) =>
+    setFOccasions((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
   const toggleCuisine = (c) =>
     setFCuisines((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
   const togglePrice = (p) =>
@@ -132,7 +145,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
         : [...p, { name: a.name, lat: a.lat, lng: a.lng }]
     );
   const clearAll = () => {
-    setFVibes([]);
+    setFOccasions([]);
     setFCuisines([]);
     setFAreas([]);
     setFOpenNow(false);
@@ -147,10 +160,10 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
       label: a.name,
       onRemove: () => setFAreas((p) => p.filter((x) => x.name !== a.name)),
     })),
-    ...fVibes.map((v) => ({
-      key: "vibe:" + v,
+    ...fOccasions.map((v) => ({
+      key: "occ:" + v,
       label: v,
-      onRemove: () => setFVibes((p) => p.filter((x) => x !== v)),
+      onRemove: () => setFOccasions((p) => p.filter((x) => x !== v)),
     })),
     ...fCuisines.map((c) => ({
       key: "cui:" + c,
@@ -185,13 +198,24 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
     };
   }, []);
 
-  // Position of the open card within the venues currently shown on the map, so
-  // swiping the card steps venue-to-venue through that (filtered) set.
+  // Venues inside the current viewport — the set the header count and the
+  // card's venue-to-venue swipe cover. Markers still render the full filtered
+  // set (clustering handles off-screen pins as you pan).
+  const inViewPlottable = useMemo(() => {
+    if (!mapBounds) return displayedPlottable;
+    return displayedPlottable.filter((v) =>
+      mapBounds.contains([Number(v.latitude), Number(v.longitude)])
+    );
+  }, [displayedPlottable, mapBounds]);
+
+  // Position of the open card within the venues currently in view, so swiping
+  // the card steps venue-to-venue through what's on screen. If the user pans
+  // away while a card is open the card stays but next/prev simply disable.
   const selectedIndex =
     selectedVenue != null
-      ? displayedPlottable.findIndex((v) => v.id === selectedVenue.id)
+      ? inViewPlottable.findIndex((v) => v.id === selectedVenue.id)
       : -1;
-  const hasNext = selectedIndex >= 0 && selectedIndex < displayedPlottable.length - 1;
+  const hasNext = selectedIndex >= 0 && selectedIndex < inViewPlottable.length - 1;
   const hasPrev = selectedIndex > 0;
 
   return (
@@ -241,8 +265,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
               )}
             </button>
             <span className="text-sm font-medium text-neutral-700 whitespace-nowrap">
-              {displayedPlottable.length}{" "}
-              {displayedPlottable.length === 1 ? "place" : "places"}
+              {inViewPlottable.length}{" "}
+              {inViewPlottable.length === 1 ? "place" : "places"}
             </span>
           </div>
         </div>
@@ -272,6 +296,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
           style={{ height: "100%", width: "100%" }}
         >
           <MapResizer />
+          <BoundsWatcher onBounds={setMapBounds} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -307,10 +332,10 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
           hasNext={hasNext}
           hasPrev={hasPrev}
           onNext={() =>
-            hasNext && setSelectedVenue(displayedPlottable[selectedIndex + 1])
+            hasNext && setSelectedVenue(inViewPlottable[selectedIndex + 1])
           }
           onPrev={() =>
-            hasPrev && setSelectedVenue(displayedPlottable[selectedIndex - 1])
+            hasPrev && setSelectedVenue(inViewPlottable[selectedIndex - 1])
           }
         />
       )}
@@ -367,13 +392,13 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
                 )}
 
                 <div className="space-y-5 pt-4">
-                  <MapFilterGroup title="Vibe">
-                    {VIBE_OPTIONS.map((v) => (
+                  <MapFilterGroup title="What are you after?">
+                    {OCCASION_OPTIONS.map((v) => (
                       <MapFilterChip
                         key={v}
-                        on={fVibes.includes(v)}
+                        on={fOccasions.includes(v)}
                         label={v}
-                        onClick={() => toggleVibe(v)}
+                        onClick={() => toggleOccasion(v)}
                       />
                     ))}
                   </MapFilterGroup>
@@ -400,7 +425,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
                     ))}
                   </MapFilterGroup>
 
-                  <MapFilterGroup title="Amenities">
+                  <MapFilterGroup title="Must-haves">
                     {AMENITY_FILTERS.map((a) => (
                       <MapFilterChip
                         key={a.key}
