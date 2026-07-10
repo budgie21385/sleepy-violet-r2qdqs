@@ -209,14 +209,18 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
   }, [displayedPlottable, mapBounds]);
 
   // Position of the open card within the venues currently in view, so swiping
-  // the card steps venue-to-venue through what's on screen. If the user pans
-  // away while a card is open the card stays but next/prev simply disable.
+  // the card steps venue-to-venue through what's on screen. The order WRAPS:
+  // opening the 3rd venue and swiping right goes 4, 5, …, end, then loops to
+  // 1 and 2 — every in-view venue is reachable in one direction regardless of
+  // which pin was tapped first. If the user pans away while a card is open the
+  // card stays but next/prev simply disable (selectedIndex -1).
   const selectedIndex =
     selectedVenue != null
       ? inViewPlottable.findIndex((v) => v.id === selectedVenue.id)
       : -1;
-  const hasNext = selectedIndex >= 0 && selectedIndex < inViewPlottable.length - 1;
-  const hasPrev = selectedIndex > 0;
+  const canCycle = selectedIndex >= 0 && inViewPlottable.length > 1;
+  const hasNext = canCycle;
+  const hasPrev = canCycle;
 
   return (
     <div className="fixed inset-0 z-[1500] bg-white">
@@ -332,10 +336,19 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
           hasNext={hasNext}
           hasPrev={hasPrev}
           onNext={() =>
-            hasNext && setSelectedVenue(inViewPlottable[selectedIndex + 1])
+            hasNext &&
+            setSelectedVenue(
+              inViewPlottable[(selectedIndex + 1) % inViewPlottable.length]
+            )
           }
           onPrev={() =>
-            hasPrev && setSelectedVenue(inViewPlottable[selectedIndex - 1])
+            hasPrev &&
+            setSelectedVenue(
+              inViewPlottable[
+                (selectedIndex - 1 + inViewPlottable.length) %
+                  inViewPlottable.length
+              ]
+            )
           }
         />
       )}
