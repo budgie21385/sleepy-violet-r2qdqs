@@ -1,0 +1,637 @@
+// Activity surface — renders as the Activity bottom tab (asTab) or the legacy
+// right-side slide-in drawer. Items are derived on the fly from existing
+// tables (no `notifications` table yet — that's D.5): friend requests (inline
+// Accept/Decline), accepted-back, session invites, "sent their picks" (host),
+// "you're going to X" (guest), and connect-with-session-people rows.
+// NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
+// Items with their relevant timestamp after last_seen are NEW. Updated when
+// the drawer closes. Extracted verbatim from App.js (July 10, 2026).
+import { useState, useEffect } from "react";
+import { X, UserPlus, Check, MapPin } from "lucide-react";
+import { supabase } from "../supabaseClient";
+import { FriendAvatar } from "./FriendAvatar";
+
+export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
+  const [items, setItems] = useState(null); // null = loading
+  const [acting, setActing] = useState(null); // friendship.id mid-update
+  const [lastSeen] = useState(() => {
+    const stored = localStorage.getItem("flanit_drawer_last_seen");
+    return stored ? new Date(stored) : new Date(0);
+  });
+
+  async function load() {
+    if (!userId) return;
+    const [incomingRes, acceptedRes, hostedRes, myPartsRes, invitesRes] =
+      await Promise.all([
+      // Pending requests where I'm addressee — actionable items.
+      supabase
+        .from("friendships")
+        .select("id, requester_id, created_at, status")
+        .eq("addressee_id", userId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false }),
+      // Accepted requests where I'm requester, recently — they accepted me.
+      supabase
+        .from("friendships")
+        .select("id, addressee_id, responded_at, status")
+        .eq("requester_id", userId)
+        .eq("status", "accepted")
+        .not("responded_at", "is", null)
+        .order("responded_at", { ascending: false })
+        .limit(20),
+      // Sessions I host — to surface guests who've submitted their picks.
+      supabase
+        .from("match_sessions")
+        .select("id, name")
+        .eq("host_user_id", userId),
+      // Sessions I'm in — to surface a host's final decision.
+      supabase
+        .from("session_participants")
+        .select("session_id")
+        .eq("user_id", userId),
+      // Sessions a friend invited me to (that I haven't joined yet).
+      supabase
+        .from("session_invites")
+        .select("session_id, inviter_id, created_at")
+        .eq("invitee_id", userId)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    const incomingRows = incomingRes.data || [];
+    const acceptedRows = acceptedRes.data || [];
+
+    // Hydrate profiles for every referenced other-party user_id.
+    const otherIds = new Set();
+    incomingRows.forEach((r) => otherIds.add(r.requester_id));
+    acceptedRows.forEach((r) => otherIds.add(r.addressee_id));
+
+    let profilesById = {};
+    if (otherIds.size > 0) {
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", Array.from(otherIds));
+      profilesById = Object.fromEntries(
+        (profileRows || []).map((p) => [p.id, p])
+      );
+    }
+
+    // Shape into a flat sortable list of activity items.
+    const incomingItems = incomingRows.map((r) => ({
+      kind: "request_received",
+      id: `req_${r.id}`,
+      friendshipId: r.id,
+      otherId: r.requester_id,
+      profile: profilesById[r.requester_id] || null,
+      timestamp: r.created_at,
+    }));
+    const acceptedItems = acceptedRows.map((r) => ({
+      kind: "request_accepted",
+      id: `acc_${r.id}`,
+      otherId: r.addressee_id,
+      profile: profilesById[r.addressee_id] || null,
+      timestamp: r.responded_at,
+    }));
+
+    // ---- Host: guests who submitted their picks on sessions I host ----
+    const hostedRows = hostedRes.data || [];
+    const hostedNameById = Object.fromEntries(
+      hostedRows.map((s) => [s.id, s.name])
+    );
+    let submittedItems = [];
+    if (hostedRows.length > 0) {
+      const { data: subRows } = await supabase
+        .from("session_participants")
+        .select("session_id, user_id, display_name, submitted_at")
+        .in("session_id", hostedRows.map((s) => s.id))
+        .neq("user_id", userId)
+        .not("submitted_at", "is", null)
+        .order("submitted_at", { ascending: false })
+        .limit(30);
+      submittedItems = (subRows || []).map((r) => ({
+        kind: "session_submitted",
+        id: `sub_${r.session_id}_${r.user_id}`,
+        sessionId: r.session_id,
+        guestName: r.display_name || "A guest",
+        sessionName: hostedNameById[r.session_id] || "your session",
+        timestamp: r.submitted_at,
+      }));
+    }
+
+    // ---- Guest: a host's final pick on a session I'm in (not hosting) ----
+    const myPartRows = myPartsRes.data || [];
+    let decidedItems = [];
+    if (myPartRows.length > 0) {
+      const { data: decidedRows } = await supabase
+        .from("match_sessions")
+        .select("id, name, host_user_id, decided_venue_id, updated_at")
+        .in("id", myPartRows.map((p) => p.session_id))
+        .not("decided_venue_id", "is", null)
+        .neq("host_user_id", userId);
+      // Resolve venue names via the shortlist RPC (bypasses venues RLS so
+      // host-imported decided venues still show their name).
+      decidedItems = await Promise.all(
+        (decidedRows || []).map(async (s) => {
+          let venueName = "a spot";
+          const { data: vts } = await supabase.rpc(
+            "get_session_shortlist_venues",
+            { p_session_id: s.id }
+          );
+          const v = (vts || []).find((x) => x.id === s.decided_venue_id);
+          if (v?.name) venueName = v.name;
+          return {
+            kind: "session_decided",
+            id: `dec_${s.id}`,
+            sessionId: s.id,
+            venueName,
+            venueObj: v || null, // full venue → tap opens its card
+            sessionName: s.name || "your session",
+            timestamp: s.updated_at,
+          };
+        })
+      );
+    }
+
+    // ---- Connect: people from my sessions I'm not yet connected with ----
+    // Add (signed-up) or invite (anon) each one — actionable from the drawer.
+    let connectItems = [];
+    if (myPartRows.length > 0) {
+      const [coPartsRes, myFriendshipsRes] = await Promise.all([
+        supabase
+          .from("session_participants")
+          .select("user_id, display_name, joined_at")
+          .in("session_id", myPartRows.map((p) => p.session_id))
+          .neq("user_id", userId)
+          .order("joined_at", { ascending: false }),
+        supabase
+          .from("friendships")
+          .select("requester_id, addressee_id, status")
+          .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
+      ]);
+      // Skip anyone I already have any friendship history with (any status).
+      const hasFriendship = new Set();
+      (myFriendshipsRes.data || []).forEach((f) => {
+        hasFriendship.add(
+          f.requester_id === userId ? f.addressee_id : f.requester_id
+        );
+      });
+      const coById = new Map();
+      (coPartsRes.data || []).forEach((p) => {
+        if (!p.user_id || hasFriendship.has(p.user_id)) return;
+        if (!coById.has(p.user_id)) coById.set(p.user_id, p);
+      });
+      const coIds = Array.from(coById.keys());
+      if (coIds.length > 0) {
+        const { data: acctRows } = await supabase.rpc("get_account_user_ids", {
+          p_user_ids: coIds,
+        });
+        const signedUp = new Set((acctRows || []).map((r) => r.user_id));
+        const { data: avRows } = await supabase
+          .from("profiles")
+          .select("id, avatar_url")
+          .in("id", coIds);
+        const avatarByUid = new Map(
+          (avRows || []).filter((r) => r.avatar_url).map((r) => [r.id, r.avatar_url])
+        );
+        connectItems = coIds.map((uid) => {
+          const p = coById.get(uid);
+          return {
+            kind: signedUp.has(uid) ? "connect_add" : "connect_invite",
+            id: `con_${uid}`,
+            otherId: uid,
+            name: p.display_name || "Someone",
+            avatar: avatarByUid.get(uid) || null,
+            timestamp: p.joined_at,
+          };
+        });
+      }
+    }
+
+    // ---- Session invites a friend sent me (not ones I've already joined) ----
+    const myPartSessionIds = new Set(myPartRows.map((p) => p.session_id));
+    const inviteRows = (invitesRes.data || []).filter(
+      (r) => !myPartSessionIds.has(r.session_id)
+    );
+    let inviteItems = [];
+    if (inviteRows.length > 0) {
+      const inviterIds = Array.from(new Set(inviteRows.map((r) => r.inviter_id)));
+      const invSessionIds = Array.from(new Set(inviteRows.map((r) => r.session_id)));
+      const [inviterProfsRes, invSessRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", inviterIds),
+        supabase.from("match_sessions").select("id, name").in("id", invSessionIds),
+      ]);
+      const inviterById = Object.fromEntries(
+        (inviterProfsRes.data || []).map((p) => [p.id, p])
+      );
+      const sessNameById = Object.fromEntries(
+        (invSessRes.data || []).map((s) => [s.id, s.name])
+      );
+      inviteItems = inviteRows.map((r) => {
+        const inviter = inviterById[r.inviter_id];
+        const inviterName =
+          inviter?.display_name?.trim() ||
+          (inviter?.username ? `@${inviter.username}` : "A friend");
+        return {
+          kind: "session_invite",
+          id: `inv_${r.session_id}_${r.inviter_id}`,
+          sessionId: r.session_id,
+          inviterName,
+          avatar: inviter?.avatar_url || null,
+          sessionName: sessNameById[r.session_id] || "a session",
+          timestamp: r.created_at,
+        };
+      });
+    }
+
+    const all = [
+      ...incomingItems,
+      ...acceptedItems,
+      ...submittedItems,
+      ...decidedItems,
+      ...connectItems,
+      ...inviteItems,
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    setItems(all);
+  }
+
+  async function sendRequest(otherId) {
+    setActing(otherId);
+    const { error } = await supabase
+      .from("friendships")
+      .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    setActing(null);
+    if (error) {
+      console.error("Drawer add friend failed:", error);
+      showToast?.("Couldn't send request");
+      return;
+    }
+    showToast?.("Request sent");
+    await load();
+  }
+
+  useEffect(() => {
+    load();
+    // Stamp the timestamp on close, not open — closing means "you've seen it."
+    return () => {
+      localStorage.setItem(
+        "flanit_drawer_last_seen",
+        new Date().toISOString()
+      );
+    };
+    // load only depends on userId.
+  }, [userId]);
+
+  async function setStatus(friendshipId, newStatus) {
+    setActing(friendshipId);
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: newStatus })
+      .eq("id", friendshipId);
+    setActing(null);
+    if (error) {
+      console.error("Drawer action failed:", error);
+      showToast?.("Couldn't update");
+      return;
+    }
+    await load();
+  }
+
+  const newItems = (items || []).filter(
+    (i) => new Date(i.timestamp) > lastSeen
+  );
+  const earlierItems = (items || []).filter(
+    (i) => new Date(i.timestamp) <= lastSeen
+  );
+
+  const body = (
+    <>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
+        {!asTab && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
+          >
+            <X size={18} />
+          </button>
+        )}
+      </div>
+
+      {profileIncomplete && (
+        <button
+          type="button"
+          onClick={onFinishProfile}
+          className="w-full text-left rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-3 flex items-center gap-3 mb-3 active:scale-[0.99] transition"
+        >
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white">
+            <UserPlus size={16} />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-[#2f3f29]">Finish your profile</p>
+            <p className="text-[11px] text-[#455d3b]">
+              Add a username and photo so friends recognise you
+            </p>
+          </div>
+          <span className="text-[#455d3b] text-lg leading-none shrink-0">›</span>
+        </button>
+      )}
+
+      {items === null && (
+        <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
+      )}
+
+      {items !== null && items.length === 0 && !profileIncomplete && (
+        <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+          <p className="text-sm text-neutral-600">Nothing here yet.</p>
+          <p className="text-xs text-neutral-500 mt-1">
+            Friend requests and people from your sessions show up here.
+          </p>
+        </div>
+      )}
+
+      {newItems.length > 0 && (
+        <>
+          <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+            New
+          </p>
+          <div className="space-y-2 mb-4">
+            {newItems.map((item) => (
+              <ActivityItem
+                key={item.id}
+                item={item}
+                isNew
+                acting={acting === item.friendshipId || acting === item.otherId}
+                onAccept={() => setStatus(item.friendshipId, "accepted")}
+                onDecline={() => setStatus(item.friendshipId, "declined")}
+                onAddFriend={() => sendRequest(item.otherId)}
+                onOpenProfile={onOpenProfile}
+                onOpenSession={onOpenSession}
+                onOpenVenue={onOpenVenue}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {earlierItems.length > 0 && (
+        <>
+          <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2 px-1">
+            Earlier
+          </p>
+          <div className="space-y-2">
+            {earlierItems.map((item) => (
+              <ActivityItem
+                key={item.id}
+                item={item}
+                acting={acting === item.friendshipId || acting === item.otherId}
+                onAccept={() => setStatus(item.friendshipId, "accepted")}
+                onDecline={() => setStatus(item.friendshipId, "declined")}
+                onAddFriend={() => sendRequest(item.otherId)}
+                onOpenProfile={onOpenProfile}
+                onOpenSession={onOpenSession}
+                onOpenVenue={onOpenVenue}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  if (asTab) {
+    return (
+      <div className="min-h-screen bg-[#fdf6f0] pb-28">
+        <div className="p-4 max-w-md mx-auto">{body}</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close notifications"
+        onClick={onClose}
+        className="fixed inset-0 z-[3490] bg-black/25"
+      />
+      <div className="fixed top-0 right-0 bottom-0 z-[3500] w-[78%] max-w-sm bg-[#fdf6f0] overflow-y-auto shadow-xl">
+        <div className="p-4">{body}</div>
+      </div>
+    </>
+  );
+}
+
+// Single drawer item row. Visually distinguishes NEW with a soft green tinted
+// background. Friend-request items get inline Accept/Decline; accepted-back
+// items are informational.
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession, onOpenVenue }) {
+  const name = item.profile?.display_name || "Someone";
+  const handle = item.profile?.username ? `@${item.profile.username}` : "";
+  const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
+
+  if (item.kind === "request_received") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <button
+          type="button"
+          onClick={() => onOpenProfile?.(item.otherId)}
+          className="w-full flex items-center gap-3 text-left mb-3"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong> sent you a friend request
+            </p>
+            {handle && (
+              <p className="text-[11px] text-neutral-500 truncate">{handle}</p>
+            )}
+          </div>
+        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onAccept}
+            className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onDecline}
+            className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Decline
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "request_accepted") {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.(item.otherId)}
+        className={`w-full rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <FriendAvatar profile={item.profile} small />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{name}</strong> accepted your friend request
+          </p>
+          {handle && (
+            <p className="text-[11px] text-neutral-500 truncate">{handle}</p>
+          )}
+        </div>
+        <Check size={16} className="text-[#455d3b]" />
+      </button>
+    );
+  }
+
+  if (item.kind === "session_invite") {
+    return (
+      <button
+        type="button"
+        onClick={() => window.location.assign(`/s/${item.sessionId}`)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        {item.avatar ? (
+          <img
+            src={item.avatar}
+            alt={item.inviterName}
+            className="h-9 w-9 shrink-0 rounded-full object-cover"
+          />
+        ) : (
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white">
+            <UserPlus size={16} />
+          </span>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.inviterName}</strong> invited you to a session
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">
+            {item.sessionName} · tap to join
+          </p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "session_submitted") {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenSession?.(item.sessionId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+          <Check size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.guestName}</strong> sent their picks
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "session_decided") {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          item.venueObj
+            ? onOpenVenue?.(item.venueObj)
+            : onOpenSession?.(item.sessionId)
+        }
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+          <MapPin size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            You're going to <strong className="font-medium">{item.venueName}</strong>
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "connect_add") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+        <button
+          type="button"
+          onClick={() => onOpenProfile?.(item.otherId)}
+          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+        >
+          {item.avatar ? (
+            <img
+              src={item.avatar}
+              alt={item.name}
+              className="h-9 w-9 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#3f5a3a] text-sm font-medium">
+              {(item.name || "?").charAt(0).toUpperCase()}
+            </span>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{item.name}</strong> was in your session
+            </p>
+            <p className="text-[11px] text-neutral-500">Add them as a friend</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={onAddFriend}
+          disabled={acting}
+          className="shrink-0 rounded-full bg-[#455d3b] text-white text-xs font-medium px-3 py-1.5 disabled:opacity-50"
+        >
+          {acting ? "…" : "Add"}
+        </button>
+      </div>
+    );
+  }
+
+  if (item.kind === "connect_invite") {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.(item.otherId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-400 text-sm font-medium">
+          {(item.name || "?").charAt(0).toUpperCase()}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.name}</strong> joined as a guest
+          </p>
+          <p className="text-[11px] text-neutral-500">Invite them to join Flanit</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-white border border-neutral-200 text-neutral-700 text-xs font-medium px-3 py-1.5">
+          Invite
+        </span>
+      </button>
+    );
+  }
+
+  return null;
+}
