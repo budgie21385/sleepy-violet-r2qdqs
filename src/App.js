@@ -6,13 +6,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   TIME_BANDS,
-  VIBE_OPTIONS,
+  TIME_BAND_LABELS,
+  OCCASION_OPTIONS,
   AMENITY_FILTERS,
   venueMatchesAreas,
   getTodayDayKey,
   venueOpenInBand,
   isVenueOpenNow,
   venueMatchesVibe,
+  venueMatchesOccasions,
   venueMatchesPrice,
   venueMatchesAmenities,
 } from "./lib/venueLogic";
@@ -35,19 +37,10 @@ import { SessionResultsView } from "./components/SessionResultsView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import {
-  OpenNowToggle,
   AreaCheckbox,
-  MultiSelectChips,
-  MatchLimitField,
-  ParticipantsField,
-  TimeLimitField,
-  RadiusField,
+  DropdownField,
 } from "./components/SessionFields";
-import {
-  ALL,
-  TIME_LIMIT_OPTIONS_CONCURRENT,
-  TIME_LIMIT_OPTIONS_CURATED,
-} from "./lib/constants";
+import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
 import { MapPin, Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { QRCodeSVG } from "qrcode.react";
@@ -309,14 +302,13 @@ export default function RestaurantSwipeMVP() {
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [openNow, setOpenNow] = useState(false);
   const [selectedTimes, setSelectedTimes] = useState([]);
-  const [selectedVibes, setSelectedVibes] = useState([]);
+  // "What are you after?" — the merged Vibe + drink-amenity facet (July 9,
+  // 2026 setup redesign). Old sessions' filters jsonb may still carry
+  // selectedVibes; the guest queue keeps a legacy read path for those.
+  const [selectedOccasions, setSelectedOccasions] = useState([]);
   const [selectedPrices, setSelectedPrices] = useState([]); // price levels 1..4
   const [selectedAmenities, setSelectedAmenities] = useState([]); // amenity keys
   const [matchLimit, setMatchLimit] = useState(3);
-  // Multi-mode session config. Defaults: 2 participants; 10 min for
-  // concurrent ("Right now"), 24h for curated ("Later").
-  const [participants, setParticipants] = useState(2);
-  const [timeLimitMinutes, setTimeLimitMinutes] = useState(10);
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
@@ -835,20 +827,14 @@ useEffect(() => {
     if (openNow) setSelectedTimes([]);
   }, [openNow]);
 
-  // When match mode changes:
-  //  - Snap timeLimitMinutes to a sensible default for the new mode
-  //    ("Right now" is short, "Later" is generous; user can override).
-  //  - Reset openNow to false. The When? toggle is hidden in multi modes
-  //    (Right Now = going now so "open now" is implicit; Later = going at
-  //    a future time so "open now" is irrelevant). Hidden state could
-  //    still leak through if it was true from a prior solo session, so
-  //    force-reset on mode change.
+  // When match mode changes, reset openNow to false. The When? toggle is
+  // hidden in multi modes (Right Now = going now so "open now" is implicit;
+  // Later = going at a future time so "open now" is irrelevant). Hidden state
+  // could still leak through, so force-reset on mode change. (The old
+  // timeLimitMinutes snap went July 9, 2026 with the TimeLimitField —
+  // expires_at is now always the 24h default at create.)
   useEffect(() => {
-    if (matchMode === "concurrent") {
-      setTimeLimitMinutes(10);
-      setOpenNow(false);
-    } else if (matchMode === "curated") {
-      setTimeLimitMinutes(60 * 24);
+    if (matchMode === "concurrent" || matchMode === "curated") {
       setOpenNow(false);
     }
   }, [matchMode]);
@@ -1623,68 +1609,9 @@ loadAreas();
     ];
   }, [venues, selectedAreas, radiusKm]);
 
-  const availableTimes = useMemo(() => {
-    const todayKey = getTodayDayKey();
-    const candidates = venues.filter((venue) => {
-      if (!venueMatchesAreas(venue, selectedAreas, radiusKm)) return false;
-      if (
-        selectedCuisines.length > 0 &&
-        !selectedCuisines.includes(venue.cuisine_bucket)
-      )
-        return false;
-      if (openNow && !isVenueOpenNow(venue)) return false;
-      if (selectedVibes.length > 0) {
-        if (!selectedVibes.some((vibe) => venueMatchesVibe(venue, vibe, todayKey)))
-          return false;
-      }
-      return true;
-    });
-    const computed = TIME_BANDS.filter((band) =>
-      candidates.some((v) => venueOpenInBand(v, todayKey, band))
-    ).map((b) => b.key);
-    return Array.from(new Set([...computed, ...selectedTimes]));
-  }, [
-    venues,
-    selectedAreas,
-    radiusKm,
-    selectedCuisines,
-    openNow,
-    selectedVibes,
-    selectedTimes,
-  ]);
-
-  const availableVibes = useMemo(() => {
-    const todayKey = getTodayDayKey();
-    const candidates = venues.filter((venue) => {
-      if (!venueMatchesAreas(venue, selectedAreas, radiusKm)) return false;
-      if (
-        selectedCuisines.length > 0 &&
-        !selectedCuisines.includes(venue.cuisine_bucket)
-      )
-        return false;
-      if (openNow && !isVenueOpenNow(venue)) return false;
-      if (selectedTimes.length > 0) {
-        const anyBandMatches = selectedTimes.some((label) => {
-          const band = TIME_BANDS.find((b) => b.key === label);
-          return band && venueOpenInBand(venue, todayKey, band);
-        });
-        if (!anyBandMatches) return false;
-      }
-      return true;
-    });
-    const computed = VIBE_OPTIONS.filter((vibe) =>
-      candidates.some((v) => venueMatchesVibe(v, vibe, todayKey))
-    );
-    return Array.from(new Set([...computed, ...selectedVibes]));
-  }, [
-    venues,
-    selectedAreas,
-    radiusKm,
-    selectedCuisines,
-    openNow,
-    selectedTimes,
-    selectedVibes,
-  ]);
+  // (availableTimes / availableVibes memos removed July 9, 2026 — the redesigned
+  // setup screen shows all time-band and occasion chips unconditionally, so
+  // nothing needs the computed availability lists anymore.)
 
   useEffect(() => {
     setSelectedCuisines((currentSelected) =>
@@ -1714,12 +1641,8 @@ loadAreas();
         if (!anyBandMatches) return false;
       }
  
-      if (selectedVibes.length > 0) {
-        const anyVibeMatches = selectedVibes.some((vibe) =>
-          venueMatchesVibe(venue, vibe, todayKey)
-        );
-        if (!anyVibeMatches) return false;
-      }
+      if (!venueMatchesOccasions(venue, selectedOccasions, todayKey))
+        return false;
 
       if (!venueMatchesPrice(venue, selectedPrices)) return false;
       if (!venueMatchesAmenities(venue, selectedAmenities)) return false;
@@ -1733,7 +1656,7 @@ loadAreas();
     selectedCuisines,
     openNow,
     selectedTimes,
-    selectedVibes,
+    selectedOccasions,
     selectedPrices,
     selectedAmenities,
     hiddenVenueIds,
@@ -1793,6 +1716,11 @@ loadAreas();
         if (!anyBand) return false;
       }
 
+      // New sessions (July 9, 2026+) write selectedOccasions; older sessions'
+      // filters jsonb carries selectedVibes. Support both so old share links
+      // keep filtering the same pool the host saw.
+      if (!venueMatchesOccasions(venue, filters.selectedOccasions, todayKey))
+        return false;
       if (filters.selectedVibes && filters.selectedVibes.length > 0) {
         const anyVibe = filters.selectedVibes.some((vibe) =>
           venueMatchesVibe(venue, vibe, todayKey)
@@ -1843,19 +1771,19 @@ loadAreas();
       (matchMode === "concurrent" || matchMode === "curated") &&
       session?.user?.id
     ) {
-      // expires_at is computed from the time-limit selector (mode default
-      // applied on mode-change useEffect; user can override on Filters).
+      // expires_at: always the 24h default. The host-facing time-limit
+      // selector was removed July 9, 2026 — nothing enforced expiry, so the
+      // control promised something the app didn't do. The column write stays
+      // so the schema seam (and its index) is ready if enforcement lands.
       const expiresAt = new Date();
-      expiresAt.setMinutes(
-        expiresAt.getMinutes() + (timeLimitMinutes || 60 * 24)
-      );
+      expiresAt.setMinutes(expiresAt.getMinutes() + 60 * 24);
 
       const sessionFilters = {
         selectedAreaIds: selectedAreas.map((a) => a.id),
         radiusKm,
         openNow,
         selectedTimes,
-        selectedVibes,
+        selectedOccasions,
         selectedCuisines,
         selectedPrices,
         selectedAmenities,
@@ -2756,33 +2684,65 @@ if (authLoading || guestLoading) {
                 expandedRegions={expandedRegions}
                 setExpandedRegions={setExpandedRegions}
               />
-              {/* Solo only — in multi modes "open now" is either implicit
-                  (Right Now) or irrelevant (Later). */}
-              {matchMode === "solo" && (
-                <OpenNowToggle openNow={openNow} setOpenNow={setOpenNow} />
-              )}
-            {!openNow && availableTimes.length > 0 && (
-                <MultiSelectChips
-                  label="Time of day"
-                  options={availableTimes}
-                  selected={selectedTimes}
-                  setSelected={setSelectedTimes}
+              {/* "How many matches?" is a stop-after-N target — only
+                  meaningful for Right Now (concurrent). Send options
+                  (curated) curates the whole shortlist, so no target. */}
+              {matchMode !== "curated" && (
+                <DropdownField
+                  label="Matches"
+                  value={matchLimit}
+                  onChange={setMatchLimit}
+                  options={MATCH_OPTIONS.map((n) => ({ value: n, label: String(n) }))}
                 />
               )}
-              {availableVibes.length > 0 && (
-                <MultiSelectChips
-                  label="Vibe"
-                  options={availableVibes}
-                  selected={selectedVibes}
-                  setSelected={setSelectedVibes}
-                />
-              )}
-              <MultiSelectChips
-                label="Cuisine"
-                options={cuisines.filter((item) => item !== ALL)}
-                selected={selectedCuisines}
-                setSelected={setSelectedCuisines}
-              />
+              <MapFilterGroup title="Time of day">
+                {TIME_BAND_LABELS.map((label) => (
+                  <MapFilterChip
+                    key={label}
+                    on={selectedTimes.includes(label)}
+                    label={label}
+                    onClick={() =>
+                      setSelectedTimes((prev) =>
+                        prev.includes(label)
+                          ? prev.filter((x) => x !== label)
+                          : [...prev, label]
+                      )
+                    }
+                  />
+                ))}
+              </MapFilterGroup>
+              <MapFilterGroup title="What are you after?">
+                {OCCASION_OPTIONS.map((o) => (
+                  <MapFilterChip
+                    key={o}
+                    on={selectedOccasions.includes(o)}
+                    label={o}
+                    onClick={() =>
+                      setSelectedOccasions((prev) =>
+                        prev.includes(o)
+                          ? prev.filter((x) => x !== o)
+                          : [...prev, o]
+                      )
+                    }
+                  />
+                ))}
+              </MapFilterGroup>
+              <MapFilterGroup title="Must-haves">
+                {AMENITY_FILTERS.map((a) => (
+                  <MapFilterChip
+                    key={a.key}
+                    on={selectedAmenities.includes(a.key)}
+                    label={a.label}
+                    onClick={() =>
+                      setSelectedAmenities((prev) =>
+                        prev.includes(a.key)
+                          ? prev.filter((x) => x !== a.key)
+                          : [...prev, a.key]
+                      )
+                    }
+                  />
+                ))}
+              </MapFilterGroup>
               <MapFilterGroup title="Price">
                 {[1, 2, 3, 4].map((p) => (
                   <MapFilterChip
@@ -2799,48 +2759,30 @@ if (authLoading || guestLoading) {
                   />
                 ))}
               </MapFilterGroup>
-              <MapFilterGroup title="Amenities">
-                {AMENITY_FILTERS.map((a) => (
-                  <MapFilterChip
-                    key={a.key}
-                    on={selectedAmenities.includes(a.key)}
-                    label={a.label}
-                    onClick={() =>
-                      setSelectedAmenities((prev) =>
-                        prev.includes(a.key)
-                          ? prev.filter((x) => x !== a.key)
-                          : [...prev, a.key]
-                      )
-                    }
-                  />
-                ))}
-              </MapFilterGroup>
-              {/* "How many matches?" is a stop-after-N target — only
-                  meaningful for Right Now (concurrent). Send options
-                  (curated) curates the whole shortlist, so no target. */}
-              {matchMode !== "curated" && (
-                <MatchLimitField value={matchLimit} onChange={setMatchLimit} />
-              )}
-
-              {/* Multi-mode-only fields. Solo doesn't need participants or
-                  a session time limit. */}
-              {(matchMode === "concurrent" || matchMode === "curated") && (
-                <>
-                  <ParticipantsField
-                    value={participants}
-                    onChange={setParticipants}
-                  />
-                  <TimeLimitField
-                    value={timeLimitMinutes}
-                    onChange={setTimeLimitMinutes}
-                    options={
-                      matchMode === "concurrent"
-                        ? TIME_LIMIT_OPTIONS_CONCURRENT
-                        : TIME_LIMIT_OPTIONS_CURATED
-                    }
-                  />
-                </>
-              )}
+              <MapFilterSection
+                title="Cuisine"
+                summary={
+                  selectedCuisines.length === 0
+                    ? "Any"
+                    : selectedCuisines.length === 1
+                    ? selectedCuisines[0]
+                    : `${selectedCuisines.length} selected`
+                }
+                accent={selectedCuisines.length > 0}
+              >
+                <SearchableChips
+                  options={cuisines.filter((item) => item !== ALL)}
+                  selected={selectedCuisines}
+                  onToggle={(c) =>
+                    setSelectedCuisines((prev) =>
+                      prev.includes(c)
+                        ? prev.filter((x) => x !== c)
+                        : [...prev, c]
+                    )
+                  }
+                  placeholder="Search cuisines"
+                />
+              </MapFilterSection>
 
               <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600">
                 {swipeQueue.length} places available with these filters.
@@ -3480,7 +3422,12 @@ function AreaFilter({
       )}
  
       <div className="mt-5">
-        <RadiusField value={radiusKm} onChange={setRadiusKm} />
+        <DropdownField
+          label="Radius"
+          value={radiusKm}
+          onChange={setRadiusKm}
+          options={RADIUS_OPTIONS.map((r) => ({ value: r, label: `${r} km` }))}
+        />
       </div>
     </div>
   );

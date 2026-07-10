@@ -177,7 +177,7 @@ export function venueMatchesVibe(venue, vibe, dayKey) {
   const type = (venue.type || "").toLowerCase();
   const cuisine = (venue.cuisine || "").toLowerCase();
   const name = (venue.name || "").toLowerCase();
-  const price = Number(venue.price_level);
+  const price = priceLevelNumber(venue) ?? NaN;
   const rating = Number(venue.rating);
   const isCafe = type.includes("cafe") || type.includes("coffee");
   const isBar = type.includes("bar") || type.includes("pub");
@@ -295,8 +295,6 @@ export function venueMatchesPrice(venue, selectedPrices) {
 // semantics: a venue must have every selected amenity true.
 export const AMENITY_FILTERS = [
   { key: "outdoor_seating", label: "Outdoor seating" },
-  { key: "serves_cocktails", label: "Cocktails" },
-  { key: "serves_wine", label: "Wine" },
   { key: "live_music", label: "Live music" },
   { key: "allows_dogs", label: "Dog-friendly" },
   { key: "good_for_groups", label: "Good for groups" },
@@ -309,4 +307,121 @@ export const AMENITY_FILTERS = [
 export function venueMatchesAmenities(venue, selectedAmenities) {
   if (!selectedAmenities || selectedAmenities.length === 0) return true;
   return selectedAmenities.every((key) => venue?.[key] === true);
+}
+
+// --- Occasions ("What are you after?") ---------------------------------------
+// The merged Vibe + drink-amenity facet (July 9, 2026 setup redesign — see
+// Swipes/04-next.md). Replaces VIBE_OPTIONS on the session setup screen.
+// OR semantics across selected occasions, like the old vibe filter.
+//
+// Three tiers of signal:
+//   1. Fact-backed — the July 3 atmosphere data (google_types[] + serves_*
+//      booleans). A raw boolean alone over-matches (nearly every restaurant
+//      serves_wine), so drink occasions require bar-ish context too.
+//   2. Hybrid — facts plus an hours check (Afternoon drinks).
+//   3. Judgment — Date night / Sit-down meal / Quick bite stay on the old
+//      venueMatchesVibe heuristics (Vibe-v2 LLM pass later).
+// Venues without atmosphere data (older user imports) fall back to the old
+// heuristics so they don't vanish from filters.
+
+export const OCCASION_OPTIONS = [
+  "Coffee",
+  "Breakfast",
+  "Pastry",
+  "Dessert",
+  "Cocktails",
+  "Wine",
+  "Afternoon drinks",
+  "Pub",
+  "Date night",
+  "Sit-down meal",
+  "Quick bite",
+];
+
+function venueGoogleTypes(venue) {
+  return Array.isArray(venue?.google_types) ? venue.google_types : [];
+}
+
+function hasType(venue, ...wanted) {
+  const types = venueGoogleTypes(venue);
+  return wanted.some((t) => types.includes(t));
+}
+
+function hasAtmosphereData(venue) {
+  return venueGoogleTypes(venue).length > 0;
+}
+
+export function venueMatchesOccasion(venue, occasion, dayKey) {
+  const facts = hasAtmosphereData(venue);
+  const barish =
+    hasType(venue, "bar", "pub", "wine_bar", "night_club") ||
+    (venue?.type || "").toLowerCase().includes("bar") ||
+    (venue?.type || "").toLowerCase().includes("pub");
+
+  switch (occasion) {
+    case "Coffee":
+      return facts
+        ? hasType(venue, "cafe", "coffee_shop") && venue.serves_coffee !== false
+        : venueMatchesVibe(venue, "Coffee", dayKey);
+    case "Breakfast":
+      return facts
+        ? venue.serves_breakfast === true ||
+            venue.serves_brunch === true ||
+            hasType(venue, "breakfast_restaurant", "brunch_restaurant")
+        : venueMatchesVibe(venue, "Breakfast", dayKey);
+    case "Pastry":
+      return (
+        hasType(venue, "bakery") || venueMatchesVibe(venue, "Pastry", dayKey)
+      );
+    case "Dessert":
+      return facts
+        ? hasType(
+            venue,
+            "dessert_shop",
+            "dessert_restaurant",
+            "ice_cream_shop",
+            "chocolate_shop"
+          ) ||
+            (venue.serves_dessert === true && hasType(venue, "cafe", "bakery"))
+        : venueMatchesVibe(venue, "Dessert", dayKey);
+    case "Cocktails":
+      return facts
+        ? venue.serves_cocktails === true &&
+            (barish || venueMatchesVibe(venue, "Cocktails", dayKey))
+        : venueMatchesVibe(venue, "Cocktails", dayKey);
+    case "Wine":
+      return facts
+        ? hasType(venue, "wine_bar") ||
+            (venue.serves_wine === true && barish) ||
+            venueMatchesVibe(venue, "Wine bar", dayKey)
+        : venueMatchesVibe(venue, "Wine bar", dayKey);
+    case "Afternoon drinks": {
+      const drinky = facts
+        ? barish ||
+          venue.serves_cocktails === true ||
+          venue.serves_wine === true
+        : venueMatchesVibe(venue, "Drinks", dayKey);
+      const afternoonBand = TIME_BANDS.find((b) => b.key === "Afternoon");
+      return (
+        drinky &&
+        (afternoonBand ? venueOpenInBand(venue, dayKey, afternoonBand) : true)
+      );
+    }
+    case "Pub":
+      return hasType(venue, "pub") || venueMatchesVibe(venue, "Pub", dayKey);
+    case "Date night":
+      return venueMatchesVibe(venue, "Date", dayKey);
+    case "Sit-down meal":
+      if (venue?.dine_in === false) return false;
+      return venueMatchesVibe(venue, "Sit down meal", dayKey);
+    case "Quick bite":
+      return venueMatchesVibe(venue, "Quick bite", dayKey);
+    default:
+      return false;
+  }
+}
+
+export function venueMatchesOccasions(venue, selectedOccasions, dayKey) {
+  if (!selectedOccasions || selectedOccasions.length === 0) return true;
+  return selectedOccasions.some((o) => venueMatchesOccasion(venue, o, dayKey));
 }

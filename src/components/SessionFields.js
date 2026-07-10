@@ -1,8 +1,13 @@
 // Small form-field components for the filters / session-setup screens:
-// the When toggle, area checkbox, multi-select chips, and the match-count,
-// participants, and time-limit pickers. Props-only. Extracted from App.js.
+// the When toggle, area checkbox, multi-select chips, and the dropdown row.
+// Props-only. Extracted from App.js.
+//
+// July 9, 2026 setup redesign: ParticipantsField and TimeLimitField removed
+// (dead controls — participants fed nothing; time limit wrote an expires_at
+// nothing enforces). MatchLimitField and RadiusField replaced by DropdownField
+// rows (single-choice pills → dropdowns, per Mark).
 import { useState } from "react";
-import { ALL, MATCH_OPTIONS, PARTICIPANT_OPTIONS, RADIUS_OPTIONS } from "../lib/constants";
+import { ALL } from "../lib/constants";
 
 export function OpenNowToggle({ openNow, setOpenNow }) {
   return (
@@ -128,95 +133,24 @@ export function MultiSelectChips({ label, options, selected, setSelected }) {
   );
 }
 
-export function MatchLimitField({ value, onChange }) {
+// Compact labelled dropdown row: label left, native select right. Replaces
+// the old segmented-pill fields (Radius, How many matches) — the native
+// select keeps the row one line tall and behaves well on mobile.
+export function DropdownField({ label, value, onChange, options }) {
   return (
-    <SegmentedField label="How many matches?">
-      {MATCH_OPTIONS.map((option) => (
-        <SegmentButton
-          key={option}
-          on={value === option}
-          onClick={() => onChange(option)}
-        >
-          {option}
-        </SegmentButton>
-      ))}
-    </SegmentedField>
-  );
-}
-
-// Segmented-pill control (matches the map's All / My List toggle): a rounded
-// track with the selected option lifted to a white pill.
-function SegmentedField({ label, children }) {
-  return (
-    <div>
-      <span className="mb-2 block text-sm font-medium text-neutral-700">
-        {label}
-      </span>
-      <div className="flex gap-0.5 rounded-full bg-neutral-100 p-0.5">
-        {children}
-      </div>
+    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 border border-neutral-100 px-4 py-3">
+      <span className="text-sm font-medium text-neutral-700">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(options[e.target.selectedIndex].value)}
+        className="bg-transparent text-sm font-medium text-neutral-900 text-right focus:outline-none"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </div>
-  );
-}
-
-function SegmentButton({ on, onClick, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
-        on ? "bg-white text-[#455d3b] shadow-sm" : "text-neutral-500"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function ParticipantsField({ value, onChange }) {
-  return (
-    <SegmentedField label="How many of us?">
-      {PARTICIPANT_OPTIONS.map((option) => (
-        <SegmentButton
-          key={option}
-          on={value === option}
-          onClick={() => onChange(option)}
-        >
-          {option}
-        </SegmentButton>
-      ))}
-    </SegmentedField>
-  );
-}
-
-export function TimeLimitField({ value, onChange, options }) {
-  return (
-    <SegmentedField label="Time limit">
-      {options.map((option) => (
-        <SegmentButton
-          key={option.minutes}
-          on={value === option.minutes}
-          onClick={() => onChange(option.minutes)}
-        >
-          {option.label}
-        </SegmentButton>
-      ))}
-    </SegmentedField>
-  );
-}
-
-export function RadiusField({ value, onChange }) {
-  return (
-    <SegmentedField label="Radius">
-      {RADIUS_OPTIONS.map((radius) => (
-        <SegmentButton
-          key={radius}
-          on={value === radius}
-          onClick={() => onChange(radius)}
-        >
-          {radius}km
-        </SegmentButton>
-      ))}
-    </SegmentedField>
   );
 }
