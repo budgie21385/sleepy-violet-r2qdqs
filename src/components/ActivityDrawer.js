@@ -21,7 +21,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 
   async function load() {
     if (!userId) return;
-    const [incomingRes, acceptedRes, hostedRes, myPartsRes, invitesRes] =
+    const [incomingRes, acceptedRes, hostedRes, myPartsRes, invitesRes, myFriendsRes] =
       await Promise.all([
       // Pending requests where I'm addressee — actionable items.
       supabase
@@ -55,6 +55,12 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         .select("session_id, inviter_id, created_at")
         .eq("invitee_id", userId)
         .order("created_at", { ascending: false }),
+      // All my accepted friendships (both directions) — for check-in items.
+      supabase
+        .from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`),
     ]);
 
     const incomingRows = incomingRes.data || [];
@@ -207,6 +213,55 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       }
     }
 
+    // ---- Friend check-ins ("[Name] is at [venue]") — last 7 days ----
+    const friendIds = Array.from(
+      new Set(
+        (myFriendsRes.data || []).map((f) =>
+          f.requester_id === userId ? f.addressee_id : f.requester_id
+        )
+      )
+    );
+    let checkinItems = [];
+    if (friendIds.length > 0) {
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: checkinRows } = await supabase
+        .from("activities")
+        .select("id, user_id, venue_id, created_at")
+        .eq("kind", "checkin")
+        .in("user_id", friendIds)
+        .gte("created_at", weekAgo)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (checkinRows && checkinRows.length > 0) {
+        const checkinUserIds = Array.from(new Set(checkinRows.map((r) => r.user_id)));
+        const venueIds = Array.from(new Set(checkinRows.map((r) => r.venue_id)));
+        const [profsRes, venuesRes] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, display_name, username, avatar_url")
+            .in("id", checkinUserIds),
+          // Plain venues read — RLS may hide a friend's own unverified venue;
+          // those fall back to "a spot" rather than leaking or breaking.
+          supabase.from("venues").select("*").in("id", venueIds),
+        ]);
+        const profById = Object.fromEntries(
+          (profsRes.data || []).map((p) => [p.id, p])
+        );
+        const venueById = Object.fromEntries(
+          (venuesRes.data || []).map((v) => [v.id, v])
+        );
+        checkinItems = checkinRows.map((r) => ({
+          kind: "friend_checkin",
+          id: `chk_${r.id}`,
+          otherId: r.user_id,
+          profile: profById[r.user_id] || null,
+          venueObj: venueById[r.venue_id] || null,
+          venueName: venueById[r.venue_id]?.name || "a spot",
+          timestamp: r.created_at,
+        }));
+      }
+    }
+
     // ---- Session invites a friend sent me (not ones I've already joined) ----
     const myPartSessionIds = new Set(myPartRows.map((p) => p.session_id));
     const inviteRows = (invitesRes.data || []).filter(
@@ -253,6 +308,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...decidedItems,
       ...connectItems,
       ...inviteItems,
+      ...checkinItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setItems(all);
   }
@@ -566,6 +622,35 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             You're going to <strong className="font-medium">{item.venueName}</strong>
           </p>
           <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "friend_checkin") {
+    // Present tense while plausibly still there (< 3h), past tense after.
+    const fresh = Date.now() - new Date(item.timestamp).getTime() < 3 * 60 * 60 * 1000;
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          item.venueObj
+            ? onOpenVenue?.(item.venueObj)
+            : onOpenProfile?.(item.otherId)
+        }
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <FriendAvatar profile={item.profile} small />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{name}</strong>{" "}
+            {fresh ? "is at" : "checked in at"}{" "}
+            <strong className="font-medium">{item.venueName}</strong>
+          </p>
+          {fresh && (
+            <p className="text-[11px] text-[#455d3b]">Right now · tap to see the spot</p>
+          )}
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
       </button>

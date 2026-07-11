@@ -1016,9 +1016,22 @@ useEffect(() => {
         inviteCount = count ?? 0;
       }
 
+      // Friend check-ins since last seen (activities RLS already scopes reads
+      // to own + friends' rows, so filtering out own is the only client work).
+      let checkinCount = 0;
+      {
+        const { count } = await supabase
+          .from("activities")
+          .select("id", { count: "exact", head: true })
+          .eq("kind", "checkin")
+          .neq("user_id", uid)
+          .gt("created_at", lastSeen);
+        checkinCount = count ?? 0;
+      }
+
       if (cancelled) return;
       setUnreadCount(
-        (reqRes.count ?? 0) + submittedCount + decidedCount + inviteCount
+        (reqRes.count ?? 0) + submittedCount + decidedCount + inviteCount + checkinCount
       );
     })();
     return () => {
@@ -1435,6 +1448,39 @@ useEffect(() => {
   async function signOut() {
     await supabase.auth.signOut();
   }
+  // Check in = "I'm here now". Writes an activities row (kind='checkin');
+  // accepted friends see it in their Activity tab via RLS. Guarded against
+  // double-taps: one check-in per venue per 4 hours.
+  async function handleCheckIn(venue) {
+    const uid = session?.user?.id;
+    if (!uid) {
+      showToast("Sign in to check in");
+      return;
+    }
+    const since = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+    const { data: recent } = await supabase
+      .from("activities")
+      .select("id")
+      .eq("user_id", uid)
+      .eq("venue_id", venue.id)
+      .eq("kind", "checkin")
+      .gte("created_at", since)
+      .limit(1);
+    if (recent && recent.length > 0) {
+      showToast("Already checked in here");
+      return;
+    }
+    const { error } = await supabase
+      .from("activities")
+      .insert({ user_id: uid, kind: "checkin", venue_id: venue.id });
+    if (error) {
+      console.error("Check-in failed:", error);
+      showToast("Couldn't check in");
+      return;
+    }
+    showToast("Checked in — friends can see you're here");
+  }
+
   async function saveVenue(venueId) {
     if (!session?.user?.id) return;
     setSavedVenueIds((prev) => new Set([...prev, venueId]));
@@ -2999,6 +3045,7 @@ if (authLoading || guestLoading) {
                   onSave={saveVenue}
                   onUnsave={unsaveVenue}
                   onHide={hideVenue}
+                  onCheckIn={handleCheckIn}
                 />
               )}
             </div>
@@ -3017,6 +3064,7 @@ if (authLoading || guestLoading) {
           onUnsave={unsaveVenue}
           onHide={hideVenue}
           showToast={showToast}
+          onCheckIn={handleCheckIn}
           onVenueAdded={(venue) => {
             // New venue from the search sheet → into the pool state so it pins
             // immediately; either way mark it saved (add auto-saves to list).
@@ -3107,6 +3155,7 @@ if (authLoading || guestLoading) {
           onSave={saveVenue}
           onUnsave={unsaveVenue}
           onHide={hideVenue}
+          onCheckIn={handleCheckIn}
         />
       )}
       {/* Post-signup onboarding (B): real account, no username yet, not arrived

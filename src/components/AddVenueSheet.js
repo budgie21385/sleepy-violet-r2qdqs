@@ -290,7 +290,7 @@ export function AddVenueSheet({ onClose, onAdded, onOpenVenue, showToast }) {
                 onClick={add}
                 className="w-full mt-4 rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:opacity-60"
               >
-                {adding ? "Adding…" : "Add to Flanit"}
+                {adding ? "Adding…" : "Add to my list"}
               </button>
               <p className="text-[11px] text-neutral-400 text-center mt-2">
                 Saves to your list · pins on your map

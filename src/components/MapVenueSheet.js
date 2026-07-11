@@ -11,7 +11,7 @@
 // don't collide.
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft } from "lucide-react";
+import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin } from "lucide-react";
 import {
   VenueHeroCarousel,
   VenueRating,
@@ -33,6 +33,7 @@ export function MapVenueSheet({
   onSave,
   onUnsave,
   onHide,
+  onCheckIn,
   onNext,
   onPrev,
   hasNext = false,
@@ -231,6 +232,18 @@ export function MapVenueSheet({
           >
             <MoreVertical size={20} />
           </button>
+          {/* Check in = "I'm here NOW" (presence, notifies friends) — the one
+              labeled action on the card. Reviews are a future, quieter kind. */}
+          {onCheckIn && (
+            <button
+              type="button"
+              onClick={() => onCheckIn(venue)}
+              className="flex-1 mx-1 flex items-center justify-center gap-1.5 rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-95 transition"
+            >
+              <MapPin size={15} />
+              Check in
+            </button>
+          )}
           <button
             type="button"
             onClick={handleShare}

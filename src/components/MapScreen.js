@@ -78,7 +78,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, areas = [], onVenueAdded, showToast }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, hiddenIds, areas = [], onVenueAdded, showToast }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -373,6 +373,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          onCheckIn={onCheckIn}
           hasNext={hasNext}
           hasPrev={hasPrev}
           onNext={() =>
