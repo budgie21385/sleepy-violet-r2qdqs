@@ -4,6 +4,9 @@
   "description": "",
   "keywords": [],
   "main": "src/index.tsx",
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.2",
     "@supabase/supabase-js": "^2.49.1",
