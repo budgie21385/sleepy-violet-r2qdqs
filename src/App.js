@@ -327,6 +327,9 @@ export default function RestaurantSwipeMVP() {
   // the same Import from Google Maps overlay. The overlay itself renders at
   // App level (below) and is full-screen, so it covers whatever tab is active.
   const [showImport, setShowImport] = useState(false);
+  // Map search sheet — controlled here so the FAB's "Check in" shortcut can
+  // open it from any tab (jump to map → search → venue card → Check in pill).
+  const [mapSearchOpen, setMapSearchOpen] = useState(false);
   // Find Friends sheet — opened by the FAB's Add friend option AND by the
   // FriendsScreen header + icon. Lifted to App level for that shared access.
   const [showFindFriends, setShowFindFriends] = useState(false);
@@ -1451,11 +1454,13 @@ useEffect(() => {
   // Check in = "I'm here now". Writes an activities row (kind='checkin');
   // accepted friends see it in their Activity tab via RLS. Guarded against
   // double-taps: one check-in per venue per 4 hours.
+  // Returns true when the user ends up checked in (fresh or already) so the
+  // card's pill can flip to its "Checked in ✓" state.
   async function handleCheckIn(venue) {
     const uid = session?.user?.id;
     if (!uid) {
       showToast("Sign in to check in");
-      return;
+      return false;
     }
     const since = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
     const { data: recent } = await supabase
@@ -1468,7 +1473,7 @@ useEffect(() => {
       .limit(1);
     if (recent && recent.length > 0) {
       showToast("Already checked in here");
-      return;
+      return true;
     }
     const { error } = await supabase
       .from("activities")
@@ -1476,9 +1481,10 @@ useEffect(() => {
     if (error) {
       console.error("Check-in failed:", error);
       showToast("Couldn't check in");
-      return;
+      return false;
     }
     showToast("Checked in — friends can see you're here");
+    return true;
   }
 
   async function saveVenue(venueId) {
@@ -3065,6 +3071,8 @@ if (authLoading || guestLoading) {
           onHide={hideVenue}
           showToast={showToast}
           onCheckIn={handleCheckIn}
+          searchOpen={mapSearchOpen}
+          onSearchOpenChange={setMapSearchOpen}
           onVenueAdded={(venue) => {
             // New venue from the search sheet → into the pool state so it pins
             // immediately; either way mark it saved (add auto-saves to list).
@@ -3179,6 +3187,10 @@ if (authLoading || guestLoading) {
         showToast={showToast}
         onAddFriend={() => setShowFindFriends(true)}
         onImportMap={() => setShowImport(true)}
+        onCheckIn={() => {
+          setTab("map");
+          setMapSearchOpen(true);
+        }}
       />
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
       <BottomTabBar

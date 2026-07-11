@@ -3,13 +3,22 @@
 import { useState, useEffect } from "react";
 import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User } from "lucide-react";
 
-export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap }) {
+export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap, onCheckIn }) {
   const [open, setOpen] = useState(false);
 
   // Don't render outside Profile + Map tabs.
   if (tab !== "profile" && tab !== "map") return null;
 
   const profileOptions = [
+    {
+      key: "check_in",
+      icon: <MapPin size={16} />,
+      label: "Check in",
+      action: () => {
+        setOpen(false);
+        onCheckIn();
+      },
+    },
     {
       key: "add_friend",
       icon: <UserPlus size={16} />,
@@ -88,7 +97,7 @@ export function Toast({ message, onDismiss }) {
 
   if (!message) return null;
   return (
-    <div className="fixed bottom-36 left-1/2 -translate-x-1/2 z-[3070] bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg pointer-events-none">
+    <div className="fixed bottom-36 left-1/2 -translate-x-1/2 z-[5000] bg-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg pointer-events-none">
       {message}
     </div>
   );

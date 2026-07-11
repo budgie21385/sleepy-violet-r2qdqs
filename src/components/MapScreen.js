@@ -78,11 +78,15 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, hiddenIds, areas = [], onVenueAdded, showToast }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
-  const [showSearch, setShowSearch] = useState(false);
+  // Search sheet visibility lives in App (controlled) so the FAB's "Check in"
+  // shortcut can open it too; falls back to local state when uncontrolled.
+  const [localSearch, setLocalSearch] = useState(false);
+  const showSearch = searchOpen ?? localSearch;
+  const setShowSearch = onSearchOpenChange ?? setLocalSearch;
   const mapRef = useRef(null);
 
   // Search-sheet tap on a pool venue: fly the map to the pin and open its

@@ -41,6 +41,8 @@ export function MapVenueSheet({
 }) {
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [checkedIn, setCheckedIn] = useState(false); // this card, this open
+  const [checkingIn, setCheckingIn] = useState(false);
   const [enterDir, setEnterDir] = useState(null); // slide-in dir on venue change
   const [hint, setHint] = useState(false); // show the one-time two-way swipe pill
   const [dragX, setDragX] = useState(0); // live finger-follow offset
@@ -61,6 +63,13 @@ export function MapVenueSheet({
     }
     if (!seen) setHint(true);
   }, [navEnabled, hasNext]);
+
+  // Fresh venue on the card → fresh check-in state (swiping venue-to-venue
+  // must not carry the "Checked in ✓" pill across).
+  useEffect(() => {
+    setCheckedIn(false);
+    setCheckingIn(false);
+  }, [venue.id]);
 
   // Retire the tutorial after a few seconds even if they don't swipe.
   useEffect(() => {
@@ -237,11 +246,21 @@ export function MapVenueSheet({
           {onCheckIn && (
             <button
               type="button"
-              onClick={() => onCheckIn(venue)}
-              className="flex-1 mx-1 flex items-center justify-center gap-1.5 rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-95 transition"
+              disabled={checkedIn || checkingIn}
+              onClick={async () => {
+                setCheckingIn(true);
+                const ok = await onCheckIn(venue);
+                setCheckingIn(false);
+                if (ok) setCheckedIn(true);
+              }}
+              className={`flex-1 mx-1 flex items-center justify-center gap-1.5 rounded-full py-2.5 text-sm font-medium active:scale-95 transition ${
+                checkedIn
+                  ? "bg-[#edf2eb] text-[#455d3b]"
+                  : "bg-[#455d3b] text-white"
+              }`}
             >
               <MapPin size={15} />
-              Check in
+              {checkedIn ? "Checked in ✓" : checkingIn ? "Checking in…" : "Check in"}
             </button>
           )}
           <button
