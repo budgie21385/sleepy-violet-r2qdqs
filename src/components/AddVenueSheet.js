@@ -205,12 +205,15 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
           {!card && (
             <div className="flex items-center gap-2 rounded-full border border-neutral-200 px-4 py-2.5 mb-1">
               <Search size={15} className="text-neutral-400 shrink-0" />
+              {/* text-base (16px), not text-sm: iOS Safari auto-zooms the page
+                  when a focused input is under 16px, which shoves the whole
+                  sheet half off-screen. 16px suppresses the zoom. */}
               <input
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search for a place"
-                className="flex-1 text-sm focus:outline-none"
+                className="flex-1 text-base focus:outline-none"
               />
               {q && (
                 <button
