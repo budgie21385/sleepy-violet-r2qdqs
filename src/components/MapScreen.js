@@ -1,12 +1,12 @@
 // The full-screen map surface: clustered emoji markers over a Leaflet map, the
 // All/My List toggle, the independent map filter sheet, and the tap-to-open
 // venue sheet. Extracted from App.js; App.js is the only consumer.
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
-import { SlidersHorizontal, X } from "lucide-react";
+import { SlidersHorizontal, Search, X } from "lucide-react";
 import {
   MELBOURNE_CENTER,
   MELBOURNE_ZOOM,
@@ -28,6 +28,7 @@ import {
   MapAreaFilter,
 } from "./MapFilters";
 import { MapVenueSheet } from "./MapVenueSheet";
+import { AddVenueSheet } from "./AddVenueSheet";
 
 function createEmojiIcon(emoji) {
   return L.divIcon({
@@ -64,10 +65,40 @@ function BoundsWatcher({ onBounds }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, areas = [] }) {
+// Hands the Leaflet map instance up to MapScreen so search results can
+// fly-to a pin (and, later, card swipes can keep the active pin in view).
+function MapRef({ mapRef }) {
+  const map = useMap();
+  useEffect(() => {
+    mapRef.current = map;
+    return () => {
+      if (mapRef.current === map) mapRef.current = null;
+    };
+  }, [map, mapRef]);
+  return null;
+}
+
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenIds, areas = [], onVenueAdded, showToast }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
+  const [showSearch, setShowSearch] = useState(false);
+  const mapRef = useRef(null);
+
+  // Search-sheet tap on a pool venue: fly the map to the pin and open its
+  // card. Also used after a Google add so the new venue is immediately shown.
+  function flyToVenue(venue) {
+    const lat = Number(venue.latitude);
+    const lng = Number(venue.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && mapRef.current) {
+      mapRef.current.flyTo(
+        [lat, lng],
+        Math.max(mapRef.current.getZoom(), 16),
+        { duration: 0.8 }
+      );
+    }
+    setSelectedVenue(venue);
+  }
   const [showFilters, setShowFilters] = useState(false);
   // Map-only filter state. Deliberately LOCAL to MapScreen and independent of
   // the App-level swipe/match filters — toggling these never touches the match
@@ -253,6 +284,14 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
           <div className="flex items-center gap-3">
             <button
               type="button"
+              onClick={() => setShowSearch(true)}
+              aria-label="Find a place"
+              className="w-9 h-9 rounded-full flex items-center justify-center bg-white border border-neutral-200 text-neutral-600 transition"
+            >
+              <Search size={16} />
+            </button>
+            <button
+              type="button"
               onClick={() => setShowFilters(true)}
               aria-label="Filters"
               className={`relative w-9 h-9 rounded-full flex items-center justify-center transition ${
@@ -301,6 +340,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
         >
           <MapResizer />
           <BoundsWatcher onBounds={setMapBounds} />
+          <MapRef mapRef={mapRef} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -350,6 +390,17 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, hiddenId
               ]
             )
           }
+        />
+      )}
+      {showSearch && (
+        <AddVenueSheet
+          onClose={() => setShowSearch(false)}
+          showToast={showToast}
+          onOpenVenue={flyToVenue}
+          onAdded={(venue) => {
+            onVenueAdded?.(venue);
+            flyToVenue(venue);
+          }}
         />
       )}
       {showFilters &&

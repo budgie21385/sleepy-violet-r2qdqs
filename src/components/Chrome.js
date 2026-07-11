@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User } from "lucide-react";
 
-export function FloatingActionButton({ tab, showToast, onAddFriend, onAddVenue, onImportMap }) {
+export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap }) {
   const [open, setOpen] = useState(false);
 
   // Don't render outside Profile + Map tabs.
@@ -19,15 +19,8 @@ export function FloatingActionButton({ tab, showToast, onAddFriend, onAddVenue, 
         onAddFriend();
       },
     },
-    {
-      key: "add_venue",
-      icon: <MapPin size={16} />,
-      label: "Add a venue",
-      action: () => {
-        setOpen(false);
-        onAddVenue();
-      },
-    },
+    // "Add a venue" left the FAB July 11, 2026 — venue search/add lives behind
+    // the magnifier in the map header now (search-first reframe).
     {
       key: "import_map",
       icon: <Upload size={16} />,

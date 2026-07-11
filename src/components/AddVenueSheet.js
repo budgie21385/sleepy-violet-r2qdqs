@@ -1,12 +1,12 @@
-// "Add a venue" bottom sheet (from the map/profile FAB). Two steps:
-//   1. Search — one merged suggestion list: venues already in the pool (free,
-//      instant, from our own DB) deduped against Google Autocomplete results.
-//      No visible split — per Mark, users shouldn't care where a result lives.
-//   2. Confirm — a small card (photo, rating, hours) → "Add to my list".
-// Clicking a known venue never touches Google; clicking a Google result pulls
-// Place Details once (server-side) for the card, and "Add" reuses that work.
-// The add itself runs in /api/add-venue: dedupe → enriched insert (photos
-// cached, cuisine_bucket derived) → saved_venues upsert.
+// "Find a place" — the map's search sheet (magnifier in the map header).
+// One merged suggestion list: venues already in the pool (free, instant, from
+// our own DB) deduped against Google Autocomplete results. No visible split —
+// per Mark, users shouldn't care where a result lives. The TAP does the honest
+// thing for each source (July 11, 2026 search-first reframe):
+//   - pool venue  → onOpenVenue(venue): the map flies to the pin, card opens
+//   - Google result → Place Details (server-side, once) → confirm card →
+//     "Add to Flanit": enriched insert (photos cached, cuisine_bucket derived)
+//     + auto-save to the user's list, via /api/add-venue.
 import { useState, useEffect, useRef } from "react";
 import { Search, X, Star, ArrowLeft } from "lucide-react";
 import { supabase } from "../supabaseClient";
@@ -30,7 +30,7 @@ async function callApi(body) {
   return json;
 }
 
-export function AddVenueSheet({ onClose, onAdded, showToast }) {
+export function AddVenueSheet({ onClose, onAdded, onOpenVenue, showToast }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]); // [{key, kind:'db'|'google', ...}]
   const [searching, setSearching] = useState(false);
@@ -55,9 +55,7 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
         const [dbRes, googleRes] = await Promise.all([
           supabase
             .from("venues")
-            .select(
-              "id, name, suburb, address, rating, review_count, price_level, cuisine, cuisine_bucket, image_cdn_urls, primary_image, google_place_id, monday_hours, tuesday_hours, wednesday_hours, thursday_hours, friday_hours, saturday_hours, sunday_hours"
-            )
+            .select("*")
             .ilike("name", `%${term}%`)
             .limit(5),
           callApi({ action: "search", q: term }).catch(() => ({ results: [] })),
@@ -95,7 +93,10 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
 
   async function pick(r) {
     if (r.kind === "db") {
-      setSelected({ kind: "db", venue: r.venue });
+      // Found it — navigate, don't "add". The map flies to the pin and the
+      // venue card opens; saving stays one tap away on the card's bookmark.
+      onOpenVenue?.(r.venue);
+      onClose();
       return;
     }
     setLoadingCard(true);
@@ -112,23 +113,11 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
   async function add() {
     setAdding(true);
     try {
-      if (selected.kind === "db") {
-        const { data: session } = await supabase.auth.getSession();
-        const userId = session?.session?.user?.id;
-        if (!userId) throw new Error("Not signed in");
-        const { error } = await supabase.from("saved_venues").upsert(
-          { user_id: userId, venue_id: selected.venue.id },
-          { onConflict: "user_id,venue_id", ignoreDuplicates: true }
-        );
-        if (error) throw error;
-        onAdded?.(selected.venue, { existing: true });
-      } else {
-        const { venue, existing } = await callApi({
-          action: "add",
-          placeId: selected.card.place_id,
-        });
-        onAdded?.(venue, { existing });
-      }
+      const { venue, existing } = await callApi({
+        action: "add",
+        placeId: selected.card.place_id,
+      });
+      onAdded?.(venue, { existing });
       showToast?.("Added to your list");
       onClose();
     } catch (e) {
@@ -139,33 +128,18 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
     }
   }
 
-  // Card fields normalised across the two sources.
-  const card =
-    selected?.kind === "db"
-      ? {
-          name: selected.venue.name,
-          address: selected.venue.address || selected.venue.suburb || "",
-          rating: selected.venue.rating,
-          review_count: selected.venue.review_count,
-          priceSymbols: formatPriceSymbols(selected.venue),
-          cuisine: selected.venue.cuisine_bucket || selected.venue.cuisine || "",
-          photo:
-            selected.venue.image_cdn_urls?.[0] ||
-            (selected.venue.primary_image
-              ? `/api/place-photo?url=${encodeURIComponent(selected.venue.primary_image)}`
-              : null),
-        }
-      : selected?.kind === "google"
-      ? {
-          name: selected.card.name,
-          address: selected.card.address,
-          rating: selected.card.rating,
-          review_count: selected.card.review_count,
-          priceSymbols: formatPriceSymbols({ price_level: selected.card.price_level }),
-          cuisine: selected.card.cuisine,
-          photo: selected.card.photo_url,
-        }
-      : null;
+  // Confirm card only ever shows Google results now — pool taps navigate away.
+  const card = selected?.card
+    ? {
+        name: selected.card.name,
+        address: selected.card.address,
+        rating: selected.card.rating,
+        review_count: selected.card.review_count,
+        priceSymbols: formatPriceSymbols({ price_level: selected.card.price_level }),
+        cuisine: selected.card.cuisine,
+        photo: selected.card.photo_url,
+      }
+    : null;
 
   return (
     <div className="fixed inset-0 z-[3200]">
@@ -190,7 +164,7 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
                   <ArrowLeft size={16} />
                 </button>
               )}
-              <h2 className="text-base font-semibold">Add a venue</h2>
+              <h2 className="text-base font-semibold">Find a place</h2>
             </div>
             <button
               type="button"
@@ -316,10 +290,10 @@ export function AddVenueSheet({ onClose, onAdded, showToast }) {
                 onClick={add}
                 className="w-full mt-4 rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:opacity-60"
               >
-                {adding ? "Adding…" : "Add to my list"}
+                {adding ? "Adding…" : "Add to Flanit"}
               </button>
               <p className="text-[11px] text-neutral-400 text-center mt-2">
-                Pins on your map · usable in your sessions
+                Saves to your list · pins on your map
               </p>
             </div>
           )}
