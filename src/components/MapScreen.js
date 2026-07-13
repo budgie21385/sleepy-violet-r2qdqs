@@ -131,7 +131,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -552,6 +552,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           onHide={onHide}
           onCheckIn={onCheckIn}
           onOpenThread={onOpenThread}
+          onOpenProfile={onOpenProfile}
           userId={userId}
           hasNext={hasNext}
           hasPrev={hasPrev}

@@ -544,6 +544,10 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             setThread(null);
             load(); // refresh comment counts / items after the conversation
           }}
+          onOpenProfile={(uid) => {
+            setThread(null); // sheet sits above the profile screen
+            onOpenProfile?.(uid);
+          }}
         />
       )}
     </>

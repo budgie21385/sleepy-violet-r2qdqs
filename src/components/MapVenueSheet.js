@@ -46,6 +46,7 @@ export function MapVenueSheet({
   onHide,
   onCheckIn,
   onOpenThread,
+  onOpenProfile,
   userId,
   onNext,
   onPrev,
@@ -160,6 +161,14 @@ export function MapVenueSheet({
       venueName: venue.name,
       timestamp: t.created_at,
     });
+  }
+
+  // Avatar taps open the person; the card closes so the profile screen
+  // (normal z-stack) isn't buried under this portal.
+  function openProfile(uid) {
+    if (!uid || !onOpenProfile) return;
+    onOpenProfile(uid);
+    onClose?.();
   }
 
   // Retire the tutorial after a few seconds even if they don't swipe.
@@ -305,45 +314,61 @@ export function MapVenueSheet({
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
         {strip && !strip.none && strip.live && (
-          <button
-            type="button"
-            onClick={openStripThread}
-            className="w-full flex items-center gap-2.5 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5 text-left active:scale-[0.99] transition"
-          >
-            <FriendAvatar profile={strip.live.profile} small />
-            <p className="flex-1 min-w-0 text-sm text-[#2f3f29] truncate">
-              <strong className="font-medium">
-                {strip.live.profile?.display_name || "A friend"}
-                {strip.liveCount > 1 ? ` +${strip.liveCount - 1}` : ""}
-              </strong>{" "}
-              is here · {timeAgoShort(strip.live.created_at)}
-            </p>
-            <span className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-[#455d3b]">
-              <MessageCircle size={14} />
-              {strip.commentCount > 0 ? strip.commentCount : ""}
-            </span>
-          </button>
+          <div className="w-full flex items-center gap-2.5 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5">
+            <button
+              type="button"
+              aria-label="View profile"
+              onClick={() => openProfile(strip.live.user_id)}
+              className="shrink-0 active:scale-95 transition"
+            >
+              <FriendAvatar profile={strip.live.profile} small />
+            </button>
+            <button
+              type="button"
+              onClick={openStripThread}
+              className="flex-1 min-w-0 flex items-center gap-2 text-left active:scale-[0.99] transition"
+            >
+              <p className="flex-1 min-w-0 text-sm text-[#2f3f29] truncate">
+                <strong className="font-medium">
+                  {strip.live.profile?.display_name || "A friend"}
+                  {strip.liveCount > 1 ? ` +${strip.liveCount - 1}` : ""}
+                </strong>{" "}
+                is here · {timeAgoShort(strip.live.created_at)}
+              </p>
+              <span className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-[#455d3b]">
+                <MessageCircle size={14} />
+                {strip.commentCount > 0 ? strip.commentCount : ""}
+              </span>
+            </button>
+          </div>
         )}
         {strip && !strip.none && !strip.live && (
-          <button
-            type="button"
-            onClick={openStripThread}
-            className="w-full flex items-center gap-2.5 rounded-2xl border border-neutral-200 px-3 py-2.5 text-left active:scale-[0.99] transition"
-          >
-            <span className="flex shrink-0">
+          <div className="w-full flex items-center gap-2.5 rounded-2xl border border-neutral-200 px-3 py-2.5">
+            <button
+              type="button"
+              aria-label="View profile"
+              onClick={() => openProfile(strip.memory[0]?.id)}
+              className="flex shrink-0 active:scale-95 transition"
+            >
               {strip.memory.map((p, i) => (
                 <span key={p.id} style={i > 0 ? { marginLeft: -8 } : undefined}>
                   <FriendAvatar profile={p} small />
                 </span>
               ))}
-            </span>
-            <p className="flex-1 min-w-0 text-sm text-neutral-600 truncate">
-              {strip.memoryCount === 1
-                ? `${strip.memory[0]?.display_name || "A friend"} has been here`
-                : `${strip.memoryCount} friends have been here`}
-            </p>
-            <ChevronRight size={14} className="shrink-0 text-neutral-400" />
-          </button>
+            </button>
+            <button
+              type="button"
+              onClick={openStripThread}
+              className="flex-1 min-w-0 flex items-center gap-2 text-left active:scale-[0.99] transition"
+            >
+              <p className="flex-1 min-w-0 text-sm text-neutral-600 truncate">
+                {strip.memoryCount === 1
+                  ? `${strip.memory[0]?.display_name || "A friend"} has been here`
+                  : `${strip.memoryCount} friends have been here`}
+              </p>
+              <ChevronRight size={14} className="shrink-0 text-neutral-400" />
+            </button>
+          </div>
         )}
         <VenueEditorial venue={venue} />
         <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>

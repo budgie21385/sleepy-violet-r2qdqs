@@ -17,7 +17,7 @@ function timeAgoShort(ts) {
 }
 
 // thread: { activityId, ownerName, venueName, timestamp }
-export function CheckinThreadSheet({ thread, userId, onClose, showToast }) {
+export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenProfile }) {
   const [comments, setComments] = useState(null); // null = loading
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -124,12 +124,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast }) {
           <div className="space-y-3">
             {(comments || []).map((c) => (
               <div key={c.id} className="flex items-start gap-2.5">
-                <FriendAvatar profile={c.profile} small />
+                <button
+                  type="button"
+                  aria-label="View profile"
+                  onClick={() => onOpenProfile?.(c.user_id)}
+                  className="shrink-0 active:scale-95 transition"
+                >
+                  <FriendAvatar profile={c.profile} small />
+                </button>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-neutral-500">
-                    <span className="font-medium text-neutral-800">
+                    <button
+                      type="button"
+                      onClick={() => onOpenProfile?.(c.user_id)}
+                      className="font-medium text-neutral-800"
+                    >
                       {c.profile?.display_name || "Someone"}
-                    </span>{" "}
+                    </button>{" "}
                     · {timeAgoShort(c.created_at)}
                   </p>
                   <p className="text-sm text-neutral-900 break-words">{c.body}</p>

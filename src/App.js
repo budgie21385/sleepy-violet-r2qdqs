@@ -44,7 +44,7 @@ import {
   DropdownField,
 } from "./components/SessionFields";
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
-import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera } from "lucide-react";
+import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { QRCodeSVG } from "qrcode.react";
 import { Turnstile } from "@marsidev/react-turnstile";
@@ -3085,6 +3085,7 @@ if (authLoading || guestLoading) {
                   onHide={hideVenue}
                   onCheckIn={handleCheckIn}
                   onOpenThread={setThreadCheckin}
+                  onOpenProfile={(uid) => setLookupUserId(uid)}
                   userId={session?.user?.id}
                 />
               )}
@@ -3106,6 +3107,7 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onCheckIn={handleCheckIn}
           onOpenThread={setThreadCheckin}
+          onOpenProfile={(uid) => setLookupUserId(uid)}
           userId={session?.user?.id}
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
@@ -3201,6 +3203,7 @@ if (authLoading || guestLoading) {
           onHide={hideVenue}
           onCheckIn={handleCheckIn}
           onOpenThread={setThreadCheckin}
+          onOpenProfile={(uid) => setLookupUserId(uid)}
           userId={session?.user?.id}
         />
       )}
@@ -3236,6 +3239,10 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           showToast={showToast}
           onClose={() => setThreadCheckin(null)}
+          onOpenProfile={(uid) => {
+            setThreadCheckin(null); // sheet sits above the profile screen
+            setLookupUserId(uid);
+          }}
         />
       )}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
@@ -5346,6 +5353,9 @@ function ProfileLookupScreen({
   // can't be friended — the host invites them to come back to the app instead.
   const [isAnon, setIsAnon] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  // Their recent check-ins (friends only — RLS returns nothing otherwise).
+  // [{id, venueName, created_at}], newest first; first row may be "live" (<3h).
+  const [theirCheckins, setTheirCheckins] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -5383,6 +5393,45 @@ function ProfileLookupScreen({
   const status = friendship?.status; // 'pending' | 'accepted' | 'declined' | 'blocked' | undefined
   const iAmRequester = friendship?.requester_id === viewerUserId;
   const isFriends = status === "accepted";
+
+  // Check-in history for the "Recent activity" section — only meaningful (and
+  // only readable, per activities RLS) once you're friends.
+  useEffect(() => {
+    if (!isFriends || !userId) {
+      setTheirCheckins(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: rows } = await supabase
+        .from("activities")
+        .select("id, venue_id, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .order("created_at", { ascending: false })
+        .limit(8);
+      let nameById = {};
+      const venueIds = Array.from(new Set((rows || []).map((r) => r.venue_id)));
+      if (venueIds.length > 0) {
+        const { data: vRows } = await supabase
+          .from("venues")
+          .select("id, name")
+          .in("id", venueIds);
+        nameById = Object.fromEntries((vRows || []).map((v) => [v.id, v.name]));
+      }
+      if (cancelled) return;
+      setTheirCheckins(
+        (rows || []).map((r) => ({
+          id: r.id,
+          venueName: nameById[r.venue_id] || "a spot",
+          created_at: r.created_at,
+        }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isFriends, userId]);
   const pendingFromMe = status === "pending" && iAmRequester;
   const pendingToMe = status === "pending" && !iAmRequester;
   // 'declined' or 'blocked' or no row → treat as openable (Add friend).
@@ -5729,13 +5778,70 @@ function ProfileLookupScreen({
               <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
                 Recent activity
               </p>
-              <p className="text-sm text-neutral-600">
-                Coming soon — check-ins and reviews ship with D.2.
-              </p>
+              {theirCheckins === null && (
+                <p className="text-sm text-neutral-500">Loading…</p>
+              )}
+              {theirCheckins !== null && theirCheckins.length === 0 && (
+                <p className="text-sm text-neutral-600">
+                  No check-ins yet — when {profile?.display_name || "they"}{" "}
+                  checks in somewhere, it shows up here.
+                </p>
+              )}
+              {theirCheckins !== null && theirCheckins.length > 0 && (
+                <div className="space-y-2">
+                  {(() => {
+                    const [latest, ...rest] = theirCheckins;
+                    const live =
+                      Date.now() - new Date(latest.created_at).getTime() <
+                      3 * 60 * 60 * 1000;
+                    return (
+                      <>
+                        {live ? (
+                          <div className="flex items-center gap-2 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5">
+                            <span className="h-2 w-2 rounded-full bg-[#455d3b] animate-pulse" />
+                            <p className="text-sm text-[#2f3f29]">
+                              Is at{" "}
+                              <strong className="font-medium">
+                                {latest.venueName}
+                              </strong>{" "}
+                              right now
+                            </p>
+                          </div>
+                        ) : (
+                          <CheckinHistoryRow c={latest} />
+                        )}
+                        {rest.slice(0, 5).map((c) => (
+                          <CheckinHistoryRow key={c.id} c={c} />
+                        ))}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// One row of a friend's check-in history on their profile: "Baker Bleu · 2d".
+function CheckinHistoryRow({ c }) {
+  const mins = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 60000);
+  const when =
+    mins < 60
+      ? `${Math.max(mins, 1)}m`
+      : mins < 24 * 60
+      ? `${Math.floor(mins / 60)}h`
+      : `${Math.floor(mins / (24 * 60))}d`;
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <MapPinIcon size={14} className="shrink-0 text-neutral-400" />
+      <p className="flex-1 min-w-0 text-sm text-neutral-700 truncate">
+        {c.venueName}
+      </p>
+      <span className="text-xs text-neutral-400">{when}</span>
     </div>
   );
 }
