@@ -117,9 +117,28 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
           )}
           {comments !== null && comments.length === 0 && (
-            <p className="text-sm text-neutral-500 text-center py-4">
-              No comments yet — say something.
-            </p>
+            <div className="py-4 text-center">
+              {thread.ownerProfile ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenProfile?.(thread.ownerId)}
+                  className="inline-flex flex-col items-center gap-2 active:scale-95 transition"
+                >
+                  <FriendAvatar profile={thread.ownerProfile} />
+                  <span className="text-sm font-medium text-neutral-800">
+                    {thread.ownerProfile.display_name || thread.ownerName}
+                  </span>
+                  {thread.ownerProfile.username && (
+                    <span className="-mt-1.5 text-xs text-neutral-500">
+                      @{thread.ownerProfile.username}
+                    </span>
+                  )}
+                </button>
+              ) : null}
+              <p className="text-sm text-neutral-500 mt-2">
+                No comments yet — say something.
+              </p>
+            </div>
           )}
           <div className="space-y-3">
             {(comments || []).map((c) => (

@@ -157,7 +157,9 @@ export function MapVenueSheet({
     const t = strip.live || strip.target;
     onOpenThread({
       activityId: t.id,
+      ownerId: t.user_id,
       ownerName: t.profile?.display_name || "A friend",
+      ownerProfile: t.profile || null,
       venueName: venue.name,
       timestamp: t.created_at,
     });

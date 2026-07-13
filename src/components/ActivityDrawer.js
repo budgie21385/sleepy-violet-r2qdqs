@@ -754,7 +754,9 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           onClick={() =>
             onOpenThread?.({
               activityId: item.activityId,
+              ownerId: item.otherId,
               ownerName: name,
+              ownerProfile: item.profile || null,
               venueName: item.venueName,
               timestamp: item.timestamp,
             })
