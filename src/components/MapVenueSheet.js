@@ -419,9 +419,9 @@ export function MapVenueSheet({
               value={labelText}
               onChange={(e) => setLabelText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveLabel()}
-              placeholder="What's on tonight? (optional)"
+              placeholder="What's on tonight?"
               maxLength={80}
-              className="flex-1 min-w-0 text-base focus:outline-none"
+              className="flex-1 min-w-0 bg-transparent text-base text-[#2f3f29] placeholder-[#77906c] focus:outline-none"
             />
             {labelText.trim() ? (
               <button
