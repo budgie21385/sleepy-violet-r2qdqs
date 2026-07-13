@@ -80,7 +80,11 @@ function createFriendsIcon(group) {
     .join("");
   const first = (group.entries[0].profile?.display_name || "A friend").split(" ")[0];
   const extra = group.entries.length > 1 ? ` +${group.entries.length - 1}` : "";
-  const label = `${esc(first)}${extra} · ${timeAgoShort(group.entries[0].created_at)}`;
+  // "What's on" label rides along on the pin, truncated so pins stay pins.
+  const whatsOn = group.entries[0].label
+    ? ` · ${group.entries[0].label.length > 16 ? group.entries[0].label.slice(0, 15) + "…" : group.entries[0].label}`
+    : "";
+  const label = `${esc(first)}${extra}${esc(whatsOn)} · ${timeAgoShort(group.entries[0].created_at)}`;
   return L.divIcon({
     html: `<div style="display:flex;flex-direction:column;align-items:center;${fresh ? "" : "opacity:0.6;"}">
       <div style="display:flex;">${avatars}</div>
@@ -227,7 +231,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: rows } = await supabase
         .from("activities")
-        .select("user_id, venue_id, created_at")
+        .select("user_id, venue_id, created_at, label")
         .eq("kind", "checkin")
         .in("user_id", friendIds)
         .gte("created_at", dayAgo)

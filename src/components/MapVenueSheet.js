@@ -57,6 +57,9 @@ export function MapVenueSheet({
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
   const [checkingIn, setCheckingIn] = useState(false);
+  // "What's on?" — one-shot optional label prompt after checking in.
+  const [labelText, setLabelText] = useState("");
+  const [labelState, setLabelState] = useState("idle"); // idle|saving|done|dismissed
   // Friends' check-ins at this venue → the strip. null = loading/none yet.
   // { live: entry|null, liveCount, commentCount, memory: profiles[], memoryCount }
   const [strip, setStrip] = useState(null);
@@ -86,7 +89,23 @@ export function MapVenueSheet({
   useEffect(() => {
     setCheckedIn(null);
     setCheckingIn(false);
+    setLabelText("");
+    setLabelState("idle");
   }, [venue.id]);
+
+  // Save the optional "what's on" label onto the check-in row we just created
+  // (UPDATE — no second item, no duplicate notification; the existing item
+  // simply grows the "· label" suffix wherever it renders).
+  async function saveLabel() {
+    const text = labelText.trim().slice(0, 80);
+    if (!text || !checkedIn) return;
+    setLabelState("saving");
+    const { error } = await supabase
+      .from("activities")
+      .update({ label: text })
+      .eq("id", checkedIn.id);
+    setLabelState(error ? "idle" : "done");
+  }
 
   // Friends' check-ins at this venue. RLS scopes the read to own + friends'
   // rows, so the only client work is excluding self and splitting live (<3h,
@@ -98,7 +117,7 @@ export function MapVenueSheet({
     (async () => {
       const { data: rows } = await supabase
         .from("activities")
-        .select("id, user_id, created_at")
+        .select("id, user_id, created_at, label")
         .eq("kind", "checkin")
         .eq("venue_id", venue.id)
         .order("created_at", { ascending: false })
@@ -161,6 +180,7 @@ export function MapVenueSheet({
       ownerName: t.profile?.display_name || "A friend",
       ownerProfile: t.profile || null,
       venueName: venue.name,
+      label: t.label || null,
       timestamp: t.created_at,
     });
   }
@@ -336,6 +356,7 @@ export function MapVenueSheet({
                   {strip.liveCount > 1 ? ` +${strip.liveCount - 1}` : ""}
                 </strong>{" "}
                 is here · {timeAgoShort(strip.live.created_at)}
+                {strip.live.label ? ` · ${strip.live.label}` : ""}
               </p>
               <span className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-[#455d3b]">
                 <MessageCircle size={14} />
@@ -391,6 +412,44 @@ export function MapVenueSheet({
       )}
 
       <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
+        {checkedIn && labelState !== "dismissed" && labelState !== "done" && (
+          <div className="mb-3 flex items-center gap-2 rounded-full border border-neutral-200 pl-4 pr-1.5 py-1.5">
+            {/* text-base: sub-16px inputs make iOS Safari auto-zoom on focus. */}
+            <input
+              value={labelText}
+              onChange={(e) => setLabelText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveLabel()}
+              placeholder="What's on tonight? (optional)"
+              maxLength={80}
+              className="flex-1 min-w-0 text-base focus:outline-none"
+            />
+            {labelText.trim() ? (
+              <button
+                type="button"
+                aria-label="Save"
+                disabled={labelState === "saving"}
+                onClick={saveLabel}
+                className="w-8 h-8 shrink-0 rounded-full bg-[#455d3b] text-white flex items-center justify-center disabled:opacity-50 active:scale-95 transition"
+              >
+                ✓
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => setLabelState("dismissed")}
+                className="w-8 h-8 shrink-0 rounded-full text-neutral-400 flex items-center justify-center hover:bg-neutral-100"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+        {labelState === "done" && (
+          <p className="mb-3 text-center text-xs text-[#455d3b] font-medium">
+            Added — friends see "{labelText.trim()}"
+          </p>
+        )}
         <div className="flex items-center justify-around relative">
           <button
             type="button"

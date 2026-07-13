@@ -95,6 +95,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">
                 {thread.ownerName} at {thread.venueName}
+                {thread.label ? ` · ${thread.label}` : ""}
               </p>
               <p className="text-[11px] text-neutral-500">
                 {timeAgoShort(thread.timestamp)} · only {thread.ownerName}'s

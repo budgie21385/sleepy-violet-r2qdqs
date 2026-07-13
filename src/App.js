@@ -5405,7 +5405,7 @@ function ProfileLookupScreen({
     (async () => {
       const { data: rows } = await supabase
         .from("activities")
-        .select("id, venue_id, created_at")
+        .select("id, venue_id, created_at, label")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
@@ -5424,6 +5424,7 @@ function ProfileLookupScreen({
         (rows || []).map((r) => ({
           id: r.id,
           venueName: nameById[r.venue_id] || "a spot",
+          label: r.label || null,
           created_at: r.created_at,
         }))
       );
@@ -5805,6 +5806,7 @@ function ProfileLookupScreen({
                                 {latest.venueName}
                               </strong>{" "}
                               right now
+                              {latest.label ? ` · ${latest.label}` : ""}
                             </p>
                           </div>
                         ) : (
@@ -5840,6 +5842,7 @@ function CheckinHistoryRow({ c }) {
       <MapPinIcon size={14} className="shrink-0 text-neutral-400" />
       <p className="flex-1 min-w-0 text-sm text-neutral-700 truncate">
         {c.venueName}
+        {c.label ? <span className="text-neutral-500"> · {c.label}</span> : null}
       </p>
       <span className="text-xs text-neutral-400">{when}</span>
     </div>

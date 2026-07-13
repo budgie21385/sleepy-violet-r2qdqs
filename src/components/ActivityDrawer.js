@@ -228,7 +228,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: checkinRows } = await supabase
         .from("activities")
-        .select("id, user_id, venue_id, created_at")
+        .select("id, user_id, venue_id, created_at, label")
         .eq("kind", "checkin")
         .in("user_id", friendIds)
         .gte("created_at", weekAgo)
@@ -273,6 +273,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           profile: profById[r.user_id] || null,
           venueObj: venueById[r.venue_id] || null,
           venueName: venueById[r.venue_id]?.name || "a spot",
+          label: r.label || null,
           commentCount: countByActivity[r.id] || 0,
           timestamp: r.created_at,
         }));
@@ -742,6 +743,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               <strong className="font-medium">{name}</strong>{" "}
               {fresh ? "is at" : "checked in at"}{" "}
               <strong className="font-medium">{item.venueName}</strong>
+              {item.label ? ` · ${item.label}` : ""}
             </p>
             {fresh && (
               <p className="text-[11px] text-[#455d3b]">Right now · tap to see the spot</p>
@@ -758,6 +760,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               ownerName: name,
               ownerProfile: item.profile || null,
               venueName: item.venueName,
+              label: item.label || null,
               timestamp: item.timestamp,
             })
           }
