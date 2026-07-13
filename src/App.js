@@ -3071,6 +3071,7 @@ if (authLoading || guestLoading) {
           onHide={hideVenue}
           showToast={showToast}
           onCheckIn={handleCheckIn}
+          userId={session?.user?.id}
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
           onVenueAdded={(venue) => {

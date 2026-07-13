@@ -29,6 +29,7 @@ import {
 } from "./MapFilters";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { AddVenueSheet } from "./AddVenueSheet";
+import { supabase } from "../supabaseClient";
 
 function createEmojiIcon(emoji) {
   return L.divIcon({
@@ -36,6 +37,58 @@ function createEmojiIcon(emoji) {
     className: "venue-emoji-icon",
     iconSize: [32, 32],
     iconAnchor: [16, 32],
+  });
+}
+
+// --- Friends mode helpers ------------------------------------------------
+
+const esc = (s) =>
+  String(s || "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
+
+function timeAgoShort(ts) {
+  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+  if (mins < 15) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return "1d";
+}
+
+const FRESH_MS = 3 * 60 * 60 * 1000; // "is at" window, matches Activity copy
+
+// One pin per venue: up to 3 stacked friend avatars + a "Name · 2h" label.
+// Fresh (<3h) check-ins get the olive ring; older-today pins fade.
+function createFriendsIcon(group) {
+  const fresh = group.entries.some(
+    (e) => Date.now() - new Date(e.created_at).getTime() < FRESH_MS
+  );
+  const ring = fresh ? "#455d3b" : "#b5b2ab";
+  const shown = group.entries.slice(0, 3);
+  const avatars = shown
+    .map((e, i) => {
+      const style = `width:30px;height:30px;border-radius:50%;border:2px solid ${ring};box-shadow:0 1px 3px rgba(0,0,0,0.3);${i > 0 ? "margin-left:-9px;" : ""}`;
+      if (e.profile?.avatar_url) {
+        return `<img src="${esc(e.profile.avatar_url)}" style="${style}object-fit:cover;background:#fff;" />`;
+      }
+      const initial = esc(
+        (e.profile?.display_name || "?").trim().charAt(0).toUpperCase()
+      );
+      return `<div style="${style}background:#455d3b;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px sans-serif;">${initial}</div>`;
+    })
+    .join("");
+  const first = (group.entries[0].profile?.display_name || "A friend").split(" ")[0];
+  const extra = group.entries.length > 1 ? ` +${group.entries.length - 1}` : "";
+  const label = `${esc(first)}${extra} · ${timeAgoShort(group.entries[0].created_at)}`;
+  return L.divIcon({
+    html: `<div style="display:flex;flex-direction:column;align-items:center;${fresh ? "" : "opacity:0.6;"}">
+      <div style="display:flex;">${avatars}</div>
+      <div style="margin-top:2px;background:#fff;border-radius:9999px;padding:1px 7px;font:600 10px sans-serif;color:${fresh ? "#455d3b" : "#6b6a65"};box-shadow:0 1px 2px rgba(0,0,0,0.25);white-space:nowrap;">${label}</div>
+    </div>`,
+    className: "friend-checkin-icon",
+    iconSize: [90, 52],
+    iconAnchor: [45, 48],
   });
 }
 
@@ -78,7 +131,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -145,7 +198,81 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     [venues, hiddenIds]
   );
 
+  // --- Friends mode data ---------------------------------------------------
+  // Lazy: fetched when the Friends segment is selected. Latest check-in per
+  // friend from the last 24h; venue objects come from the already-loaded pool
+  // (a friend's RLS-hidden manual venue simply doesn't pin).
+  const [friendCheckins, setFriendCheckins] = useState(null); // null = loading
+  useEffect(() => {
+    if (mapFilter !== "friends" || !userId) return;
+    let cancelled = false;
+    setFriendCheckins(null);
+    (async () => {
+      const { data: fr } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      const friendIds = Array.from(
+        new Set(
+          (fr || []).map((f) =>
+            f.requester_id === userId ? f.addressee_id : f.requester_id
+          )
+        )
+      );
+      if (friendIds.length === 0) {
+        if (!cancelled) setFriendCheckins([]);
+        return;
+      }
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: rows } = await supabase
+        .from("activities")
+        .select("user_id, venue_id, created_at")
+        .eq("kind", "checkin")
+        .in("user_id", friendIds)
+        .gte("created_at", dayAgo)
+        .order("created_at", { ascending: false });
+      // Latest check-in per friend = where they ARE (not their whole trail).
+      const latestByUser = new Map();
+      for (const r of rows || []) {
+        if (!latestByUser.has(r.user_id)) latestByUser.set(r.user_id, r);
+      }
+      const latest = Array.from(latestByUser.values());
+      let profById = {};
+      if (latest.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", latest.map((r) => r.user_id));
+        profById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      }
+      if (cancelled) return;
+      setFriendCheckins(
+        latest.map((r) => ({ ...r, profile: profById[r.user_id] || null }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mapFilter, userId]);
+
+  // Group visible check-ins by venue — the per-viewer "Mark and John are at X"
+  // clustering. One pin per venue, entries newest-first.
+  const friendPins = useMemo(() => {
+    if (mapFilter !== "friends" || !friendCheckins) return [];
+    const venueById = new Map(plottable.map((v) => [v.id, v]));
+    const groups = new Map();
+    for (const c of friendCheckins) {
+      const venue = venueById.get(c.venue_id);
+      if (!venue) continue; // RLS-hidden or unmappable venue
+      if (!groups.has(venue.id)) groups.set(venue.id, { venue, entries: [] });
+      groups.get(venue.id).entries.push(c);
+    }
+    return Array.from(groups.values());
+  }, [mapFilter, friendCheckins, plottable]);
+
   const displayedPlottable = useMemo(() => {
+    if (mapFilter === "friends") return friendPins.map((g) => g.venue);
     const todayKey = getTodayDayKey();
     let list =
       mapFilter === "my_list" && savedIds
@@ -163,7 +290,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     if (fAmenities.length > 0)
       list = list.filter((v) => venueMatchesAmenities(v, fAmenities));
     return list;
-  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities]);
+  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, friendPins]);
 
   const toggleOccasion = (v) =>
     setFOccasions((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
@@ -284,6 +411,17 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             >
               My List
             </button>
+            <button
+              type="button"
+              onClick={() => setMapFilter("friends")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                mapFilter === "friends"
+                  ? "bg-white text-[#455d3b] shadow-sm"
+                  : "text-neutral-500"
+              }`}
+            >
+              Friends
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -312,8 +450,13 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               )}
             </button>
             <span className="text-sm font-medium text-neutral-700 whitespace-nowrap">
-              {inViewPlottable.length}{" "}
-              {inViewPlottable.length === 1 ? "place" : "places"}
+              {mapFilter === "friends"
+                ? `${(friendCheckins || []).length} ${
+                    (friendCheckins || []).length === 1 ? "friend" : "friends"
+                  } out`
+                : `${inViewPlottable.length} ${
+                    inViewPlottable.length === 1 ? "place" : "places"
+                  }`}
             </span>
           </div>
         </div>
@@ -349,26 +492,56 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
-          <MarkerClusterGroup
-            chunkedLoading
-            disableClusteringAtZoom={17}
-            spiderfyOnMaxZoom={true}
-            showCoverageOnHover={false}
-            maxClusterRadius={60}
-          >
-            {displayedPlottable.map((venue) => (
+          {mapFilter === "friends" ? (
+            // Friend pins: one per venue, avatar stack + name label, no
+            // clustering (there are few, and each pin IS the information).
+            friendPins.map((group) => (
               <Marker
-                key={venue.id}
-                position={[Number(venue.latitude), Number(venue.longitude)]}
-                icon={createEmojiIcon(getVenueEmoji(venue))}
+                key={`f_${group.venue.id}`}
+                position={[
+                  Number(group.venue.latitude),
+                  Number(group.venue.longitude),
+                ]}
+                icon={createFriendsIcon(group)}
                 eventHandlers={{
-                  click: () => setSelectedVenue(venue),
+                  click: () => setSelectedVenue(group.venue),
                 }}
               />
-            ))}
-          </MarkerClusterGroup>
+            ))
+          ) : (
+            <MarkerClusterGroup
+              chunkedLoading
+              disableClusteringAtZoom={17}
+              spiderfyOnMaxZoom={true}
+              showCoverageOnHover={false}
+              maxClusterRadius={60}
+            >
+              {displayedPlottable.map((venue) => (
+                <Marker
+                  key={venue.id}
+                  position={[Number(venue.latitude), Number(venue.longitude)]}
+                  icon={createEmojiIcon(getVenueEmoji(venue))}
+                  eventHandlers={{
+                    click: () => setSelectedVenue(venue),
+                  }}
+                />
+              ))}
+            </MarkerClusterGroup>
+          )}
         </MapContainer>
       </div>
+      {mapFilter === "friends" && friendCheckins !== null && friendPins.length === 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
+          <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
+            <p className="text-sm font-medium text-neutral-800">
+              No friends out in the last 24 hours
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Check in somewhere and get things moving
+            </p>
+          </div>
+        </div>
+      )}
       {selectedVenue && (
         <MapVenueSheet
           venue={selectedVenue}
