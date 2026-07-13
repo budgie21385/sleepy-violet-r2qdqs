@@ -11,7 +11,9 @@
 // don't collide.
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin } from "lucide-react";
+import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle } from "lucide-react";
+import { supabase } from "../supabaseClient";
+import { FriendAvatar } from "./FriendAvatar";
 import {
   VenueHeroCarousel,
   VenueRating,
@@ -26,6 +28,15 @@ import { getMapsUrl } from "../lib/venueLogic";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
 
+function timeAgoShort(ts) {
+  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+  if (mins < 15) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
 export function MapVenueSheet({
   venue,
   onClose,
@@ -34,6 +45,8 @@ export function MapVenueSheet({
   onUnsave,
   onHide,
   onCheckIn,
+  onOpenThread,
+  userId,
   onNext,
   onPrev,
   hasNext = false,
@@ -41,8 +54,11 @@ export function MapVenueSheet({
 }) {
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [checkedIn, setCheckedIn] = useState(false); // this card, this open
+  const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
   const [checkingIn, setCheckingIn] = useState(false);
+  // Friends' check-ins at this venue → the strip. null = loading/none yet.
+  // { live: entry|null, liveCount, commentCount, memory: profiles[], memoryCount }
+  const [strip, setStrip] = useState(null);
   const [enterDir, setEnterDir] = useState(null); // slide-in dir on venue change
   const [hint, setHint] = useState(false); // show the one-time two-way swipe pill
   const [dragX, setDragX] = useState(0); // live finger-follow offset
@@ -67,9 +83,84 @@ export function MapVenueSheet({
   // Fresh venue on the card → fresh check-in state (swiping venue-to-venue
   // must not carry the "Checked in ✓" pill across).
   useEffect(() => {
-    setCheckedIn(false);
+    setCheckedIn(null);
     setCheckingIn(false);
   }, [venue.id]);
+
+  // Friends' check-ins at this venue. RLS scopes the read to own + friends'
+  // rows, so the only client work is excluding self and splitting live (<3h,
+  // green "is here" strip) from memory (gray "N friends have been here").
+  useEffect(() => {
+    let cancelled = false;
+    setStrip(null);
+    if (!userId) return;
+    (async () => {
+      const { data: rows } = await supabase
+        .from("activities")
+        .select("id, user_id, created_at")
+        .eq("kind", "checkin")
+        .eq("venue_id", venue.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      const others = (rows || []).filter((r) => r.user_id !== userId);
+      if (others.length === 0) {
+        if (!cancelled) setStrip({ none: true });
+        return;
+      }
+      const FRESH_MS = 3 * 60 * 60 * 1000;
+      const fresh = others.filter(
+        (r) => Date.now() - new Date(r.created_at).getTime() < FRESH_MS
+      );
+      // Distinct friends over all time (memory), newest first.
+      const seen = new Set();
+      const distinct = [];
+      for (const r of others) {
+        if (seen.has(r.user_id)) continue;
+        seen.add(r.user_id);
+        distinct.push(r);
+      }
+      const needIds = Array.from(
+        new Set([...fresh.slice(0, 3), ...distinct.slice(0, 3)].map((r) => r.user_id))
+      );
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", needIds);
+      const profById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      let commentCount = 0;
+      const target = fresh[0] || distinct[0];
+      if (target) {
+        const { count } = await supabase
+          .from("activity_comments")
+          .select("id", { count: "exact", head: true })
+          .eq("activity_id", target.id);
+        commentCount = count ?? 0;
+      }
+      if (cancelled) return;
+      setStrip({
+        live: fresh[0] ? { ...fresh[0], profile: profById[fresh[0].user_id] } : null,
+        liveCount: new Set(fresh.map((r) => r.user_id)).size,
+        memory: distinct.slice(0, 3).map((r) => profById[r.user_id]).filter(Boolean),
+        memoryCount: distinct.length,
+        target: { ...target, profile: profById[target.user_id] },
+        commentCount,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venue.id, userId]);
+
+  function openStripThread() {
+    if (!strip || strip.none || !onOpenThread) return;
+    const t = strip.live || strip.target;
+    onOpenThread({
+      activityId: t.id,
+      ownerName: t.profile?.display_name || "A friend",
+      venueName: venue.name,
+      timestamp: t.created_at,
+    });
+  }
 
   // Retire the tutorial after a few seconds even if they don't swipe.
   useEffect(() => {
@@ -213,6 +304,47 @@ export function MapVenueSheet({
         <VenueHeroCarousel venue={venue} disableSwipe={navEnabled} />
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
+        {strip && !strip.none && strip.live && (
+          <button
+            type="button"
+            onClick={openStripThread}
+            className="w-full flex items-center gap-2.5 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5 text-left active:scale-[0.99] transition"
+          >
+            <FriendAvatar profile={strip.live.profile} small />
+            <p className="flex-1 min-w-0 text-sm text-[#2f3f29] truncate">
+              <strong className="font-medium">
+                {strip.live.profile?.display_name || "A friend"}
+                {strip.liveCount > 1 ? ` +${strip.liveCount - 1}` : ""}
+              </strong>{" "}
+              is here · {timeAgoShort(strip.live.created_at)}
+            </p>
+            <span className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-[#455d3b]">
+              <MessageCircle size={14} />
+              {strip.commentCount > 0 ? strip.commentCount : ""}
+            </span>
+          </button>
+        )}
+        {strip && !strip.none && !strip.live && (
+          <button
+            type="button"
+            onClick={openStripThread}
+            className="w-full flex items-center gap-2.5 rounded-2xl border border-neutral-200 px-3 py-2.5 text-left active:scale-[0.99] transition"
+          >
+            <span className="flex shrink-0">
+              {strip.memory.map((p, i) => (
+                <span key={p.id} style={i > 0 ? { marginLeft: -8 } : undefined}>
+                  <FriendAvatar profile={p} small />
+                </span>
+              ))}
+            </span>
+            <p className="flex-1 min-w-0 text-sm text-neutral-600 truncate">
+              {strip.memoryCount === 1
+                ? `${strip.memory[0]?.display_name || "A friend"} has been here`
+                : `${strip.memoryCount} friends have been here`}
+            </p>
+            <ChevronRight size={14} className="shrink-0 text-neutral-400" />
+          </button>
+        )}
         <VenueEditorial venue={venue} />
         <p className="text-sm leading-6 text-neutral-500">{venue.address}</p>
         <VenueVibes venue={venue} />
@@ -246,12 +378,23 @@ export function MapVenueSheet({
           {onCheckIn && (
             <button
               type="button"
-              disabled={checkedIn || checkingIn}
+              disabled={checkingIn}
               onClick={async () => {
+                // Second tap after checking in → open your own thread to
+                // watch comments arrive.
+                if (checkedIn) {
+                  onOpenThread?.({
+                    activityId: checkedIn.id,
+                    ownerName: "You",
+                    venueName: venue.name,
+                    timestamp: checkedIn.created_at,
+                  });
+                  return;
+                }
                 setCheckingIn(true);
-                const ok = await onCheckIn(venue);
+                const activity = await onCheckIn(venue);
                 setCheckingIn(false);
-                if (ok) setCheckedIn(true);
+                if (activity) setCheckedIn(activity);
               }}
               className={`flex-1 mx-1 flex items-center justify-center gap-1.5 rounded-full py-2.5 text-sm font-medium active:scale-95 transition ${
                 checkedIn
@@ -259,7 +402,7 @@ export function MapVenueSheet({
                   : "bg-[#455d3b] text-white"
               }`}
             >
-              <MapPin size={15} />
+              {checkedIn ? <MessageCircle size={15} /> : <MapPin size={15} />}
               {checkedIn ? "Checked in ✓" : checkingIn ? "Checking in…" : "Check in"}
             </button>
           )}

@@ -38,6 +38,7 @@ import { OnboardingScreen } from "./components/OnboardingScreen";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { FriendAvatar } from "./components/FriendAvatar";
+import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
 import {
   AreaCheckbox,
   DropdownField,
@@ -330,6 +331,9 @@ export default function RestaurantSwipeMVP() {
   // Map search sheet — controlled here so the FAB's "Check in" shortcut can
   // open it from any tab (jump to map → search → venue card → Check in pill).
   const [mapSearchOpen, setMapSearchOpen] = useState(false);
+  // Comment thread opened from a venue card's check-in strip or the
+  // checked-in pill (the Activity tab renders its own sheet internally).
+  const [threadCheckin, setThreadCheckin] = useState(null);
   // Find Friends sheet — opened by the FAB's Add friend option AND by the
   // FriendsScreen header + icon. Lifted to App level for that shared access.
   const [showFindFriends, setShowFindFriends] = useState(false);
@@ -1479,18 +1483,19 @@ useEffect(() => {
   // Check in = "I'm here now". Writes an activities row (kind='checkin');
   // accepted friends see it in their Activity tab via RLS. Guarded against
   // double-taps: one check-in per venue per 4 hours.
-  // Returns true when the user ends up checked in (fresh or already) so the
-  // card's pill can flip to its "Checked in ✓" state.
+  // Returns the check-in activity row ({id, created_at}) when the user ends
+  // up checked in (fresh or already) — the card's pill flips to "Checked in ✓"
+  // and a second tap opens that check-in's comment thread. Null on failure.
   async function handleCheckIn(venue) {
     const uid = session?.user?.id;
     if (!uid) {
       showToast("Sign in to check in");
-      return false;
+      return null;
     }
     const since = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
     const { data: recent } = await supabase
       .from("activities")
-      .select("id")
+      .select("id, created_at")
       .eq("user_id", uid)
       .eq("venue_id", venue.id)
       .eq("kind", "checkin")
@@ -1498,18 +1503,20 @@ useEffect(() => {
       .limit(1);
     if (recent && recent.length > 0) {
       showToast("Already checked in here");
-      return true;
+      return recent[0];
     }
-    const { error } = await supabase
+    const { data: inserted, error } = await supabase
       .from("activities")
-      .insert({ user_id: uid, kind: "checkin", venue_id: venue.id });
+      .insert({ user_id: uid, kind: "checkin", venue_id: venue.id })
+      .select("id, created_at")
+      .single();
     if (error) {
       console.error("Check-in failed:", error);
       showToast("Couldn't check in");
-      return false;
+      return null;
     }
     showToast("Checked in — friends can see you're here");
-    return true;
+    return inserted;
   }
 
   async function saveVenue(venueId) {
@@ -3077,6 +3084,8 @@ if (authLoading || guestLoading) {
                   onUnsave={unsaveVenue}
                   onHide={hideVenue}
                   onCheckIn={handleCheckIn}
+                  onOpenThread={setThreadCheckin}
+                  userId={session?.user?.id}
                 />
               )}
             </div>
@@ -3096,6 +3105,7 @@ if (authLoading || guestLoading) {
           onHide={hideVenue}
           showToast={showToast}
           onCheckIn={handleCheckIn}
+          onOpenThread={setThreadCheckin}
           userId={session?.user?.id}
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
@@ -3190,6 +3200,8 @@ if (authLoading || guestLoading) {
           onUnsave={unsaveVenue}
           onHide={hideVenue}
           onCheckIn={handleCheckIn}
+          onOpenThread={setThreadCheckin}
+          userId={session?.user?.id}
         />
       )}
       {/* Post-signup onboarding (B): real account, no username yet, not arrived
@@ -3218,6 +3230,14 @@ if (authLoading || guestLoading) {
           setMapSearchOpen(true);
         }}
       />
+      {threadCheckin && (
+        <CheckinThreadSheet
+          thread={threadCheckin}
+          userId={session?.user?.id}
+          showToast={showToast}
+          onClose={() => setThreadCheckin(null)}
+        />
+      )}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
       <BottomTabBar
         tab={tab}
