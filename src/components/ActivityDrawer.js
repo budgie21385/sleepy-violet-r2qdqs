@@ -7,13 +7,15 @@
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect } from "react";
-import { X, UserPlus, Check, MapPin } from "lucide-react";
+import { X, UserPlus, Check, MapPin, MessageCircle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
+import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
 export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
   const [items, setItems] = useState(null); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
+  const [thread, setThread] = useState(null); // open comment thread sheet
   const [lastSeen] = useState(() => {
     const stored = localStorage.getItem("flanit_drawer_last_seen");
     return stored ? new Date(stored) : new Date(0);
@@ -250,15 +252,88 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         const venueById = Object.fromEntries(
           (venuesRes.data || []).map((v) => [v.id, v])
         );
+        // Comment counts for these check-ins, one query (RLS trims to what
+        // the viewer may see anyway).
+        const countByActivity = {};
+        {
+          const { data: cRows } = await supabase
+            .from("activity_comments")
+            .select("activity_id")
+            .in("activity_id", checkinRows.map((r) => r.id));
+          for (const c of cRows || []) {
+            countByActivity[c.activity_id] =
+              (countByActivity[c.activity_id] || 0) + 1;
+          }
+        }
         checkinItems = checkinRows.map((r) => ({
           kind: "friend_checkin",
           id: `chk_${r.id}`,
+          activityId: r.id,
           otherId: r.user_id,
           profile: profById[r.user_id] || null,
           venueObj: venueById[r.venue_id] || null,
           venueName: venueById[r.venue_id]?.name || "a spot",
+          commentCount: countByActivity[r.id] || 0,
           timestamp: r.created_at,
         }));
+      }
+    }
+
+    // ---- Comments on MY check-ins ("[Name] commented on your check-in") ----
+    let commentItems = [];
+    {
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: myActs } = await supabase
+        .from("activities")
+        .select("id, venue_id, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .gte("created_at", weekAgo);
+      if (myActs && myActs.length > 0) {
+        const { data: cRows } = await supabase
+          .from("activity_comments")
+          .select("id, activity_id, user_id, body, created_at")
+          .in("activity_id", myActs.map((a) => a.id))
+          .neq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (cRows && cRows.length > 0) {
+          const actById = Object.fromEntries(myActs.map((a) => [a.id, a]));
+          const commenterIds = Array.from(new Set(cRows.map((c) => c.user_id)));
+          const venueIds = Array.from(
+            new Set(cRows.map((c) => actById[c.activity_id]?.venue_id).filter(Boolean))
+          );
+          const [profsRes, venuesRes] = await Promise.all([
+            supabase
+              .from("profiles")
+              .select("id, display_name, username, avatar_url")
+              .in("id", commenterIds),
+            supabase.from("venues").select("id, name").in("id", venueIds),
+          ]);
+          const profById2 = Object.fromEntries(
+            (profsRes.data || []).map((p) => [p.id, p])
+          );
+          const vNameById = Object.fromEntries(
+            (venuesRes.data || []).map((v) => [v.id, v.name])
+          );
+          // One item per check-in (latest comment shown), not one per comment.
+          const seenAct = new Set();
+          for (const c of cRows) {
+            if (seenAct.has(c.activity_id)) continue;
+            seenAct.add(c.activity_id);
+            const act = actById[c.activity_id];
+            commentItems.push({
+              kind: "checkin_comment",
+              id: `cmt_${c.id}`,
+              activityId: c.activity_id,
+              profile: profById2[c.user_id] || null,
+              venueName: vNameById[act?.venue_id] || "your check-in",
+              body: c.body,
+              checkinTimestamp: act?.created_at,
+              timestamp: c.created_at,
+            });
+          }
+        }
       }
     }
 
@@ -309,6 +384,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...connectItems,
       ...inviteItems,
       ...checkinItems,
+      ...commentItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setItems(all);
   }
@@ -428,6 +504,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
+                onOpenThread={setThread}
               />
             ))}
           </div>
@@ -451,10 +528,23 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
+                onOpenThread={setThread}
               />
             ))}
           </div>
         </>
+      )}
+
+      {thread && (
+        <CheckinThreadSheet
+          thread={thread}
+          userId={userId}
+          showToast={showToast}
+          onClose={() => {
+            setThread(null);
+            load(); // refresh comment counts / items after the conversation
+          }}
+        />
       )}
     </>
   );
@@ -485,7 +575,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession, onOpenVenue }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -632,27 +722,71 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
     // Present tense while plausibly still there (< 3h), past tense after.
     const fresh = Date.now() - new Date(item.timestamp).getTime() < 3 * 60 * 60 * 1000;
     return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
+        <button
+          type="button"
+          onClick={() =>
+            item.venueObj
+              ? onOpenVenue?.(item.venueObj)
+              : onOpenProfile?.(item.otherId)
+          }
+          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong>{" "}
+              {fresh ? "is at" : "checked in at"}{" "}
+              <strong className="font-medium">{item.venueName}</strong>
+            </p>
+            {fresh && (
+              <p className="text-[11px] text-[#455d3b]">Right now · tap to see the spot</p>
+            )}
+          </div>
+        </button>
+        <button
+          type="button"
+          aria-label="Comments"
+          onClick={() =>
+            onOpenThread?.({
+              activityId: item.activityId,
+              ownerName: name,
+              venueName: item.venueName,
+              timestamp: item.timestamp,
+            })
+          }
+          className="shrink-0 flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-50 active:scale-95 transition"
+        >
+          <MessageCircle size={14} />
+          {item.commentCount > 0 ? item.commentCount : ""}
+        </button>
+      </div>
+    );
+  }
+
+  if (item.kind === "checkin_comment") {
+    return (
       <button
         type="button"
         onClick={() =>
-          item.venueObj
-            ? onOpenVenue?.(item.venueObj)
-            : onOpenProfile?.(item.otherId)
+          onOpenThread?.({
+            activityId: item.activityId,
+            ownerName: "You",
+            venueName: item.venueName,
+            timestamp: item.checkinTimestamp || item.timestamp,
+          })
         }
         className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
       >
         <FriendAvatar profile={item.profile} small />
         <div className="flex-1 min-w-0">
           <p className="text-sm text-neutral-900">
-            <strong className="font-medium">{name}</strong>{" "}
-            {fresh ? "is at" : "checked in at"}{" "}
-            <strong className="font-medium">{item.venueName}</strong>
+            <strong className="font-medium">{name}</strong> commented on your
+            check-in at <strong className="font-medium">{item.venueName}</strong>
           </p>
-          {fresh && (
-            <p className="text-[11px] text-[#455d3b]">Right now · tap to see the spot</p>
-          )}
+          <p className="text-[11px] text-neutral-500 truncate">“{item.body}”</p>
         </div>
-        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+        <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
       </button>
     );
   }
