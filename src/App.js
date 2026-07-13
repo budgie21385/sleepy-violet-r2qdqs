@@ -1502,7 +1502,8 @@ useEffect(() => {
       .gte("created_at", since)
       .limit(1);
     if (recent && recent.length > 0) {
-      showToast("Already checked in here");
+      // No toast — the pill flipping to "Checked in ✓" is the feedback, and a
+      // toast would sit right on top of the what's-on prompt.
       return recent[0];
     }
     const { data: inserted, error } = await supabase
@@ -1515,7 +1516,8 @@ useEffect(() => {
       showToast("Couldn't check in");
       return null;
     }
-    showToast("Checked in — friends can see you're here");
+    // Success is shown in-card (pill state + what's-on prompt) — no toast,
+    // it was covering the prompt.
     return inserted;
   }
 

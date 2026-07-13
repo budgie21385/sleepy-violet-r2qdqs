@@ -413,7 +413,7 @@ export function MapVenueSheet({
 
       <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
         {checkedIn && labelState !== "dismissed" && labelState !== "done" && (
-          <div className="mb-3 flex items-center gap-2 rounded-full border border-neutral-200 pl-4 pr-1.5 py-1.5">
+          <div className="mb-3 flex items-center gap-2 rounded-full bg-[#edf2eb] border border-[#cdd9c6] pl-4 pr-1.5 py-1.5">
             {/* text-base: sub-16px inputs make iOS Safari auto-zoom on focus. */}
             <input
               value={labelText}
