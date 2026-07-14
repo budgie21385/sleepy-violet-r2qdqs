@@ -60,6 +60,10 @@ export function MapVenueSheet({
   // "What's on?" — one-shot optional label prompt after checking in.
   const [labelText, setLabelText] = useState("");
   const [labelState, setLabelState] = useState("idle"); // idle|saving|done|dismissed
+  // "With friends?" — optional tagging after checking in. Tags only render on
+  // YOUR check-in (your audience) + nudge the friend to check in themselves.
+  const [tagFriends, setTagFriends] = useState(null); // accepted friends, lazy
+  const [taggedIds, setTaggedIds] = useState(() => new Set());
   // Friends' check-ins at this venue → the strip. null = loading/none yet.
   // { live: entry|null, liveCount, commentCount, memory: profiles[], memoryCount }
   const [strip, setStrip] = useState(null);
@@ -91,7 +95,73 @@ export function MapVenueSheet({
     setCheckingIn(false);
     setLabelText("");
     setLabelState("idle");
+    setTaggedIds(new Set());
   }, [venue.id]);
+
+  // Load accepted friends once, the first time a check-in succeeds — they
+  // become the tag chips.
+  useEffect(() => {
+    if (!checkedIn || tagFriends !== null || !userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: fr } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      const ids = Array.from(
+        new Set(
+          (fr || []).map((f) =>
+            f.requester_id === userId ? f.addressee_id : f.requester_id
+          )
+        )
+      );
+      if (ids.length === 0) {
+        if (!cancelled) setTagFriends([]);
+        return;
+      }
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", ids);
+      if (!cancelled) setTagFriends(profs || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkedIn, tagFriends, userId]);
+
+  // Toggle a tag: insert (pending) or delete — takes effect immediately, no
+  // extra save step. The friend gets the consent nudge in their Activity.
+  async function toggleTag(friendId) {
+    if (!checkedIn) return;
+    const isTagged = taggedIds.has(friendId);
+    setTaggedIds((prev) => {
+      const next = new Set(prev);
+      if (isTagged) next.delete(friendId);
+      else next.add(friendId);
+      return next;
+    });
+    if (isTagged) {
+      await supabase
+        .from("activity_tags")
+        .delete()
+        .eq("activity_id", checkedIn.id)
+        .eq("tagged_user_id", friendId);
+    } else {
+      const { error } = await supabase
+        .from("activity_tags")
+        .insert({ activity_id: checkedIn.id, tagged_user_id: friendId });
+      if (error) {
+        console.error("Tag failed:", error);
+        setTaggedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(friendId);
+          return next;
+        });
+      }
+    }
+  }
 
   // Save the optional "what's on" label onto the check-in row we just created
   // (UPDATE — no second item, no duplicate notification; the existing item
@@ -449,6 +519,34 @@ export function MapVenueSheet({
           <p className="mb-3 text-center text-xs text-[#455d3b] font-medium">
             Added — friends see "{labelText.trim()}"
           </p>
+        )}
+        {checkedIn && tagFriends && tagFriends.length > 0 && (
+          <div className="mb-3">
+            <p className="mb-1.5 px-1 text-[11px] font-medium text-neutral-500">
+              With friends? They'll be asked before their friends see anything.
+            </p>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {tagFriends.map((f) => {
+                const on = taggedIds.has(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => toggleTag(f.id)}
+                    className={`shrink-0 flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium active:scale-95 transition ${
+                      on
+                        ? "bg-[#455d3b] border-[#455d3b] text-white"
+                        : "border-neutral-200 text-neutral-700"
+                    }`}
+                  >
+                    <FriendAvatar profile={f} small />
+                    {(f.display_name || "?").split(" ")[0]}
+                    {on ? " ✓" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
         <div className="flex items-center justify-around relative">
           <button

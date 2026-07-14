@@ -1036,6 +1036,18 @@ useEffect(() => {
         checkinCount = count ?? 0;
       }
 
+      // Pending tag nudges — actionable, so counted regardless of last-seen
+      // (same treatment as pending friend requests).
+      let tagCount = 0;
+      {
+        const { count } = await supabase
+          .from("activity_tags")
+          .select("id", { count: "exact", head: true })
+          .eq("tagged_user_id", uid)
+          .eq("status", "pending");
+        tagCount = count ?? 0;
+      }
+
       // New comments on MY check-ins since last seen.
       let commentCount = 0;
       {
@@ -1063,7 +1075,8 @@ useEffect(() => {
           decidedCount +
           inviteCount +
           checkinCount +
-          commentCount
+          commentCount +
+          tagCount
       );
     })();
     return () => {

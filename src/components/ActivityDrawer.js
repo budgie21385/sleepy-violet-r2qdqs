@@ -265,6 +265,32 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               (countByActivity[c.activity_id] || 0) + 1;
           }
         }
+        // "with [names]" — tags on these check-ins (pending + accepted both
+        // render on the tagger's item; removed never does).
+        const withByActivity = {};
+        {
+          const { data: tRows } = await supabase
+            .from("activity_tags")
+            .select("activity_id, tagged_user_id, status")
+            .in("activity_id", checkinRows.map((r) => r.id))
+            .neq("status", "removed");
+          const taggedIds = Array.from(
+            new Set((tRows || []).map((t) => t.tagged_user_id))
+          );
+          let tagProfById = {};
+          if (taggedIds.length > 0) {
+            const { data: tp } = await supabase
+              .from("profiles")
+              .select("id, display_name")
+              .in("id", taggedIds);
+            tagProfById = Object.fromEntries((tp || []).map((p) => [p.id, p]));
+          }
+          for (const t of tRows || []) {
+            const nm = (tagProfById[t.tagged_user_id]?.display_name || "").split(" ")[0];
+            if (!nm) continue;
+            (withByActivity[t.activity_id] = withByActivity[t.activity_id] || []).push(nm);
+          }
+        }
         checkinItems = checkinRows.map((r) => ({
           kind: "friend_checkin",
           id: `chk_${r.id}`,
@@ -274,9 +300,71 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           venueObj: venueById[r.venue_id] || null,
           venueName: venueById[r.venue_id]?.name || "a spot",
           label: r.label || null,
+          withNames: withByActivity[r.id] || [],
           commentCount: countByActivity[r.id] || 0,
           timestamp: r.created_at,
         }));
+      }
+    }
+
+    // ---- Tag nudges: "[Name] checked you in at [venue]" (pending only) ----
+    let tagNudgeItems = [];
+    {
+      const { data: tagRows } = await supabase
+        .from("activity_tags")
+        .select("id, activity_id, created_at")
+        .eq("tagged_user_id", userId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (tagRows && tagRows.length > 0) {
+        const actIds = tagRows.map((t) => t.activity_id);
+        const { data: acts } = await supabase
+          .from("activities")
+          .select("id, user_id, venue_id, label, created_at")
+          .in("id", actIds);
+        const actById = Object.fromEntries((acts || []).map((a) => [a.id, a]));
+        const taggerIds = Array.from(
+          new Set((acts || []).map((a) => a.user_id))
+        );
+        const venueIds = Array.from(
+          new Set((acts || []).map((a) => a.venue_id).filter(Boolean))
+        );
+        const [profsRes, venuesRes] = await Promise.all([
+          taggerIds.length
+            ? supabase
+                .from("profiles")
+                .select("id, display_name, username, avatar_url")
+                .in("id", taggerIds)
+            : { data: [] },
+          venueIds.length
+            ? supabase.from("venues").select("id, name").in("id", venueIds)
+            : { data: [] },
+        ]);
+        const tProfById = Object.fromEntries(
+          (profsRes.data || []).map((p) => [p.id, p])
+        );
+        const vNameById2 = Object.fromEntries(
+          (venuesRes.data || []).map((v) => [v.id, v.name])
+        );
+        tagNudgeItems = tagRows
+          .filter((t) => actById[t.activity_id])
+          .map((t) => {
+            const act = actById[t.activity_id];
+            return {
+              kind: "tag_nudge",
+              id: `tag_${t.id}`,
+              tagId: t.id,
+              activityId: t.activity_id,
+              otherId: act.user_id,
+              profile: tProfById[act.user_id] || null,
+              venueId: act.venue_id,
+              venueName: vNameById2[act.venue_id] || "a spot",
+              label: act.label || null,
+              checkinTimestamp: act.created_at,
+              timestamp: t.created_at,
+            };
+          });
       }
     }
 
@@ -386,6 +474,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...inviteItems,
       ...checkinItems,
       ...commentItems,
+      ...tagNudgeItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     setItems(all);
   }
@@ -416,6 +505,49 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     };
     // load only depends on userId.
   }, [userId]);
+
+  // Accept a tag: create YOUR OWN check-in, copying the venue, label, and the
+  // ORIGINAL timestamp — a late accept lands as history ("checked in at"),
+  // never a false live "is at" pin.
+  async function acceptTag(item) {
+    setActing(item.tagId);
+    const { error } = await supabase.from("activities").insert({
+      user_id: userId,
+      kind: "checkin",
+      venue_id: item.venueId,
+      label: item.label || null,
+      created_at: item.checkinTimestamp,
+    });
+    if (!error) {
+      await supabase
+        .from("activity_tags")
+        .update({ status: "accepted", responded_at: new Date().toISOString() })
+        .eq("id", item.tagId);
+    }
+    setActing(null);
+    if (error) {
+      console.error("Tag accept failed:", error);
+      showToast?.("Couldn't check in");
+      return;
+    }
+    await load();
+  }
+
+  // Remove: strips your name off the tagger's check-in too.
+  async function removeTag(item) {
+    setActing(item.tagId);
+    const { error } = await supabase
+      .from("activity_tags")
+      .update({ status: "removed", responded_at: new Date().toISOString() })
+      .eq("id", item.tagId);
+    setActing(null);
+    if (error) {
+      console.error("Tag remove failed:", error);
+      showToast?.("Couldn't update");
+      return;
+    }
+    await load();
+  }
 
   async function setStatus(friendshipId, newStatus) {
     setActing(friendshipId);
@@ -498,10 +630,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 key={item.id}
                 item={item}
                 isNew
-                acting={acting === item.friendshipId || acting === item.otherId}
+                acting={
+                  acting === item.friendshipId ||
+                  acting === item.otherId ||
+                  acting === item.tagId
+                }
                 onAccept={() => setStatus(item.friendshipId, "accepted")}
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
+                onAcceptTag={() => acceptTag(item)}
+                onRemoveTag={() => removeTag(item)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
@@ -522,10 +660,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               <ActivityItem
                 key={item.id}
                 item={item}
-                acting={acting === item.friendshipId || acting === item.otherId}
+                acting={
+                  acting === item.friendshipId ||
+                  acting === item.otherId ||
+                  acting === item.tagId
+                }
                 onAccept={() => setStatus(item.friendshipId, "accepted")}
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
+                onAcceptTag={() => acceptTag(item)}
+                onRemoveTag={() => removeTag(item)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
@@ -580,7 +724,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAcceptTag, onRemoveTag, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -723,6 +867,54 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
     );
   }
 
+  if (item.kind === "tag_nudge") {
+    // Consent nudge: you appear on the tagger's check-in (their audience);
+    // accepting creates YOUR check-in, backdated to the original moment.
+    const fresh =
+      Date.now() - new Date(item.checkinTimestamp || item.timestamp).getTime() <
+      3 * 60 * 60 * 1000;
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <button
+          type="button"
+          onClick={() => onOpenProfile?.(item.otherId)}
+          className="w-full flex items-center gap-3 text-left mb-1.5"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong> checked you in at{" "}
+              <strong className="font-medium">{item.venueName}</strong>
+              {item.label ? ` · ${item.label}` : ""}
+            </p>
+          </div>
+        </button>
+        <p className="mb-2.5 px-0.5 text-[11px] text-neutral-500">
+          You appear on {name}'s check-in to their friends. Check in too and
+          yours will see it.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onAcceptTag}
+            className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
+          >
+            {fresh ? "I'm here too" : "Add to my history"}
+          </button>
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onRemoveTag}
+            className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Remove me
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (item.kind === "friend_checkin") {
     // Present tense while plausibly still there (< 3h), past tense after.
     const fresh = Date.now() - new Date(item.timestamp).getTime() < 3 * 60 * 60 * 1000;
@@ -744,6 +936,9 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               {fresh ? "is at" : "checked in at"}{" "}
               <strong className="font-medium">{item.venueName}</strong>
               {item.label ? ` · ${item.label}` : ""}
+              {item.withNames && item.withNames.length > 0
+                ? ` · with ${item.withNames.join(", ")}`
+                : ""}
             </p>
             {fresh && (
               <p className="text-[11px] text-[#455d3b]">Right now · tap to see the spot</p>
