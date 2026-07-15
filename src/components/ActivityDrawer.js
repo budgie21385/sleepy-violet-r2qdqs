@@ -693,6 +693,10 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             setThread(null); // sheet sits above the profile screen
             onOpenProfile?.(uid);
           }}
+          onOpenVenue={(v) => {
+            setThread(null);
+            onOpenVenue?.(v);
+          }}
         />
       )}
     </>
@@ -923,9 +927,16 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         <button
           type="button"
           onClick={() =>
-            item.venueObj
-              ? onOpenVenue?.(item.venueObj)
-              : onOpenProfile?.(item.otherId)
+            onOpenThread?.({
+              activityId: item.activityId,
+              ownerId: item.otherId,
+              ownerName: name,
+              ownerProfile: item.profile || null,
+              venueName: item.venueName,
+              label: item.label || null,
+              venueObj: item.venueObj || null,
+              timestamp: item.timestamp,
+            })
           }
           className="flex items-center gap-3 flex-1 min-w-0 text-left"
         >
@@ -941,7 +952,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
                 : ""}
             </p>
             {fresh && (
-              <p className="text-[11px] text-[#455d3b]">Right now · tap to see the spot</p>
+              <p className="text-[11px] text-[#455d3b]">Right now · tap to open</p>
             )}
           </div>
         </button>
@@ -956,6 +967,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               ownerProfile: item.profile || null,
               venueName: item.venueName,
               label: item.label || null,
+              venueObj: item.venueObj || null,
               timestamp: item.timestamp,
             })
           }

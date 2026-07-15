@@ -3268,6 +3268,10 @@ if (authLoading || guestLoading) {
             setThreadCheckin(null); // sheet sits above the profile screen
             setLookupUserId(uid);
           }}
+          onOpenVenue={(v) => {
+            setThreadCheckin(null);
+            setCardVenue(v);
+          }}
         />
       )}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
@@ -5915,6 +5919,9 @@ function ProfileLookupScreen({
 function BeenScreen({ userId, venues, savedIds, onSave, onUnsave, onHide, onBack }) {
   const [rows, setRows] = useState(null); // null = loading
   const [selectedVenue, setSelectedVenue] = useState(null);
+  // Tapping a row opens the CHECK-IN (its own object: label, companions,
+  // thread) — the venue card is one tap deeper via the venue name inside.
+  const [thread, setThread] = useState(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -5984,7 +5991,18 @@ function BeenScreen({ userId, venues, savedIds, onSave, onUnsave, onHide, onBack
               <button
                 key={r.id}
                 type="button"
-                onClick={() => venue && setSelectedVenue(venue)}
+                onClick={() =>
+                  setThread({
+                    activityId: r.id,
+                    ownerId: userId,
+                    ownerName: "You",
+                    ownerProfile: null,
+                    venueName: venue?.name || "a spot",
+                    label: r.label || null,
+                    venueObj: venue,
+                    timestamp: r.created_at,
+                  })
+                }
                 className="w-full rounded-2xl bg-white border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
@@ -5999,14 +6017,23 @@ function BeenScreen({ userId, venues, savedIds, onSave, onUnsave, onHide, onBack
                   </p>
                   <p className="text-[11px] text-neutral-500">{when(r.created_at)}</p>
                 </div>
-                {venue && (
-                  <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
-                )}
+                <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
               </button>
             );
           })}
         </div>
       </div>
+      {thread && (
+        <CheckinThreadSheet
+          thread={thread}
+          userId={userId}
+          onClose={() => setThread(null)}
+          onOpenVenue={(v) => {
+            setThread(null);
+            setSelectedVenue(v);
+          }}
+        />
+      )}
       {selectedVenue && (
         <MapVenueSheet
           venue={selectedVenue}

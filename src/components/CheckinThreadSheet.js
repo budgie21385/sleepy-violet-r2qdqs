@@ -16,12 +16,49 @@ function timeAgoShort(ts) {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-// thread: { activityId, ownerName, venueName, timestamp }
-export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenProfile }) {
+// The check-in's own view — a check-in is a first-class object (owner, moment,
+// label, companions, conversation), NOT a shortcut to the venue card. The
+// venue name inside taps through to the card when the caller passes
+// venueObj + onOpenVenue.
+// thread: { activityId, ownerId?, ownerName, ownerProfile?, venueName,
+//           label?, venueObj?, timestamp }
+export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenProfile, onOpenVenue }) {
   const [comments, setComments] = useState(null); // null = loading
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
+  const [withNames, setWithNames] = useState([]); // tagged companions
   const listRef = useRef(null);
+
+  // "with JD and Bianca" — tags on this check-in (pending + accepted render;
+  // removed never does).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: tags } = await supabase
+        .from("activity_tags")
+        .select("tagged_user_id, status")
+        .eq("activity_id", thread.activityId)
+        .neq("status", "removed");
+      const ids = Array.from(new Set((tags || []).map((t) => t.tagged_user_id)));
+      if (ids.length === 0) {
+        if (!cancelled) setWithNames([]);
+        return;
+      }
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", ids);
+      if (cancelled) return;
+      setWithNames(
+        (profs || [])
+          .map((p) => (p.display_name || "").split(" ")[0])
+          .filter(Boolean)
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.activityId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,9 +131,28 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           <div className="flex items-center justify-between">
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">
-                {thread.ownerName} at {thread.venueName}
+                {thread.ownerName} at{" "}
+                {thread.venueObj && onOpenVenue ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenVenue(thread.venueObj)}
+                    className="underline decoration-[#455d3b]/40 underline-offset-2"
+                  >
+                    {thread.venueName}
+                  </button>
+                ) : (
+                  thread.venueName
+                )}
                 {thread.label ? ` · ${thread.label}` : ""}
               </p>
+              {withNames.length > 0 && (
+                <p className="text-xs text-neutral-700">
+                  with{" "}
+                  {withNames.length === 1
+                    ? withNames[0]
+                    : `${withNames.slice(0, -1).join(", ")} and ${withNames[withNames.length - 1]}`}
+                </p>
+              )}
               <p className="text-[11px] text-neutral-500">
                 {timeAgoShort(thread.timestamp)} · only {thread.ownerName}'s
                 friends see this
