@@ -17,12 +17,15 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
   const [friends, setFriends] = useState(null); // null = loading
   const [taggedIds, setTaggedIds] = useState(() => new Set());
   const [q, setQ] = useState("");
-  // One-shot celebration when the sheet opens (same burst as match reveals).
-  const [confetti, setConfetti] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setConfetti(false), 2500);
-    return () => clearTimeout(t);
-  }, []);
+  // Celebration fires on DONE (after label + friends are in), not on open —
+  // the payoff lands when the check-in is complete. Sheet lingers briefly so
+  // the burst is seen, then closes itself.
+  const [celebrating, setCelebrating] = useState(false);
+  function finish() {
+    if (celebrating) return; // double-tap guard
+    setCelebrating(true);
+    setTimeout(onClose, 1700);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +109,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
 
   return (
     <div className="fixed inset-0 z-[3300]">
-      {confetti && <ConfettiBurst />}
+      {celebrating && <ConfettiBurst />}
       <button
         type="button"
         aria-label="Close"
@@ -210,10 +213,11 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
 
           <button
             type="button"
-            onClick={onClose}
-            className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition"
+            disabled={celebrating}
+            onClick={finish}
+            className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-70"
           >
-            Done
+            {celebrating ? "Checked in 🎉" : "Done"}
           </button>
         </div>
       </div>
