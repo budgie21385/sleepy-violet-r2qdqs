@@ -30,7 +30,7 @@ async function callApi(body) {
   return json;
 }
 
-export function AddVenueSheet({ onClose, onAdded, onOpenVenue, showToast }) {
+export function AddVenueSheet({ onClose, onAdded, onOpenVenue, onCheckInAfterAdd, showToast }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]); // [{key, kind:'db'|'google', ...}]
   const [searching, setSearching] = useState(false);
@@ -110,16 +110,21 @@ export function AddVenueSheet({ onClose, onAdded, onOpenVenue, showToast }) {
     }
   }
 
-  async function add() {
+  // save=true → "Add to my list" (curation). save=false → "Check in here":
+  // the venue row exists for the check-in but stays off the user's map/list —
+  // nobody wants the concert hall on their map just to check in at a gig.
+  async function add(save) {
     setAdding(true);
     try {
       const { venue, existing } = await callApi({
         action: "add",
         placeId: selected.card.place_id,
+        save,
       });
-      onAdded?.(venue, { existing });
-      showToast?.("Added to your list");
+      onAdded?.(venue, { existing, saved: save });
+      if (save) showToast?.("Added to your list");
       onClose();
+      if (!save) onCheckInAfterAdd?.(venue);
     } catch (e) {
       console.error("Add venue failed:", e);
       showToast?.("Couldn't add that venue");
@@ -287,13 +292,21 @@ export function AddVenueSheet({ onClose, onAdded, onOpenVenue, showToast }) {
               <button
                 type="button"
                 disabled={adding}
-                onClick={add}
+                onClick={() => add(false)}
                 className="w-full mt-4 rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:opacity-60"
               >
-                {adding ? "Adding…" : "Add to my list"}
+                {adding ? "One sec…" : "Check in here"}
+              </button>
+              <button
+                type="button"
+                disabled={adding}
+                onClick={() => add(true)}
+                className="w-full mt-2 rounded-full border border-neutral-300 py-3 text-sm font-medium text-neutral-700 disabled:opacity-60"
+              >
+                Add to my list
               </button>
               <p className="text-[11px] text-neutral-400 text-center mt-2">
-                Saves to your list · pins on your map
+                Check in = just tonight · Add = pins on your map
               </p>
             </div>
           )}

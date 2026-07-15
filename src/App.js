@@ -1725,9 +1725,19 @@ loadAreas();
     );
   }, [cuisines]);
  
+  // With venue reads now open (any signed-in user resolves any venue for
+  // check-in/social surfaces), CURATION is client-side: the swipe/match pool
+  // only ever contains verified venues, your own additions, or your saved
+  // ones — strangers' manual venues resolve by id but never enter your pool.
+  const isPoolVenue = (venue) =>
+    venue.verified === true ||
+    venue.created_by === session?.user?.id ||
+    savedVenueIds.has(venue.id);
+
   const filteredVenues = useMemo(() => {
     const todayKey = getTodayDayKey();
     return venues.filter((venue) => {
+      if (!isPoolVenue(venue)) return false;
       if (hiddenVenueIds.has(venue.id)) return false;
       const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
       if (!matchesArea) return false;
@@ -1766,6 +1776,8 @@ loadAreas();
     selectedPrices,
     selectedAmenities,
     hiddenVenueIds,
+    savedVenueIds,
+    session?.user?.id,
   ]);
  
   const currentUserSwipedIds =
@@ -1806,6 +1818,17 @@ loadAreas();
     const sessionRadius = typeof filters.radiusKm === "number" ? filters.radiusKm : 1;
 
     return pool.filter((venue) => {
+      // Same client-side curation as the host pool (see isPoolVenue): open
+      // venue reads must not leak strangers' manual venues into guest queues.
+      if (
+        guestSessionData.source_type !== "list" &&
+        !(
+          venue.verified === true ||
+          venue.created_by === session?.user?.id ||
+          savedVenueIds.has(venue.id)
+        )
+      )
+        return false;
       if (!venueMatchesAreas(venue, sessionAreas, sessionRadius)) return false;
 
       if (filters.selectedCuisines && filters.selectedCuisines.length > 0) {
@@ -1839,7 +1862,7 @@ loadAreas();
 
       return true;
     });
-  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues, guestListVenues]);
+  }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues, guestListVenues, savedVenueIds, session?.user?.id]);
 
   const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
@@ -3127,13 +3150,16 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
-          onVenueAdded={(venue) => {
-            // New venue from the search sheet → into the pool state so it pins
-            // immediately; either way mark it saved (add auto-saves to list).
+          onVenueAdded={(venue, opts) => {
+            // New venue from the search sheet → into the pool state so the
+            // card/fly-to work. Only mark saved when the user chose "Add to
+            // my list" — a check-in-only add stays off their map.
             setVenues((prev) =>
               prev.some((v) => v.id === venue.id) ? prev : [...prev, venue]
             );
-            setSavedVenueIds((prev) => new Set([...prev, venue.id]));
+            if (opts?.saved !== false) {
+              setSavedVenueIds((prev) => new Set([...prev, venue.id]));
+            }
           }}
         />
       )}
@@ -5918,6 +5944,7 @@ function ProfileLookupScreen({
 // when; tap opens the venue card (when the venue resolves from the pool).
 function BeenScreen({ userId, venues, savedIds, onSave, onUnsave, onHide, onBack }) {
   const [rows, setRows] = useState(null); // null = loading
+  const [venueById, setVenueById] = useState(() => new Map());
   const [selectedVenue, setSelectedVenue] = useState(null);
   // Tapping a row opens the CHECK-IN (its own object: label, companions,
   // thread) — the venue card is one tap deeper via the venue name inside.
@@ -5934,17 +5961,25 @@ function BeenScreen({ userId, venues, savedIds, onSave, onUnsave, onHide, onBack
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
         .limit(100);
-      if (!cancelled) setRows(data || []);
+      // Resolve venues directly (not from the curated pool prop) — open venue
+      // reads mean even a check-in at someone else's manual venue resolves.
+      const ids = Array.from(new Set((data || []).map((r) => r.venue_id)));
+      let vMap = new Map();
+      if (ids.length > 0) {
+        const { data: vens } = await supabase
+          .from("venues")
+          .select("*")
+          .in("id", ids);
+        vMap = new Map((vens || []).map((v) => [v.id, v]));
+      }
+      if (cancelled) return;
+      setVenueById(vMap);
+      setRows(data || []);
     })();
     return () => {
       cancelled = true;
     };
   }, [userId]);
-
-  const venueById = useMemo(
-    () => new Map((venues || []).map((v) => [v.id, v])),
-    [venues]
-  );
 
   function when(ts) {
     const d = new Date(ts);

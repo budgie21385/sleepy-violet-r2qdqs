@@ -231,7 +231,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { action, q, placeId } = req.body || {};
+    const { action, q, placeId, save } = req.body || {};
+    // save=false → "check in here" flow: the venue row is created (it must
+    // exist for the check-in FK) but is NOT added to the user's list — going
+    // somewhere and curating your map are different intents.
+    const saveToList = save !== false;
     const supabase = serviceClient();
 
     const user = await requireUser(req, supabase);
@@ -259,10 +263,12 @@ export default async function handler(req, res) {
         .eq("google_place_id", placeId)
         .maybeSingle();
       if (existing) {
-        await supabase.from("saved_venues").upsert(
-          { user_id: user.id, venue_id: existing.id },
-          { onConflict: "user_id,venue_id", ignoreDuplicates: true }
-        );
+        if (saveToList) {
+          await supabase.from("saved_venues").upsert(
+            { user_id: user.id, venue_id: existing.id },
+            { onConflict: "user_id,venue_id", ignoreDuplicates: true }
+          );
+        }
         return res.json({ venue: existing, existing: true });
       }
 
@@ -286,10 +292,12 @@ export default async function handler(req, res) {
             .update({ google_place_id: placeId })
             .eq("id", match.venue_id)
             .or("google_place_id.is.null,google_place_id.eq.");
-          await supabase.from("saved_venues").upsert(
-            { user_id: user.id, venue_id: match.venue_id },
-            { onConflict: "user_id,venue_id", ignoreDuplicates: true }
-          );
+          if (saveToList) {
+            await supabase.from("saved_venues").upsert(
+              { user_id: user.id, venue_id: match.venue_id },
+              { onConflict: "user_id,venue_id", ignoreDuplicates: true }
+            );
+          }
           const { data: matched } = await supabase
             .from("venues")
             .select("*")
@@ -378,10 +386,12 @@ export default async function handler(req, res) {
         }
       }
 
-      await supabase.from("saved_venues").upsert(
-        { user_id: user.id, venue_id: venue.id },
-        { onConflict: "user_id,venue_id", ignoreDuplicates: true }
-      );
+      if (saveToList) {
+        await supabase.from("saved_venues").upsert(
+          { user_id: user.id, venue_id: venue.id },
+          { onConflict: "user_id,venue_id", ignoreDuplicates: true }
+        );
+      }
 
       return res.json({ venue, existing: false });
     }

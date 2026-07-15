@@ -243,16 +243,34 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       }
       const latest = Array.from(latestByUser.values());
       let profById = {};
+      let venById = {};
       if (latest.length > 0) {
-        const { data: profs } = await supabase
-          .from("profiles")
-          .select("id, display_name, username, avatar_url")
-          .in("id", latest.map((r) => r.user_id));
-        profById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+        const [profsRes, vensRes] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, display_name, username, avatar_url")
+            .in("id", latest.map((r) => r.user_id)),
+          // Direct fetch (not the curated pool) — open venue reads mean a
+          // friend's check-in at their own manual venue still pins for you.
+          supabase
+            .from("venues")
+            .select("*")
+            .in("id", Array.from(new Set(latest.map((r) => r.venue_id)))),
+        ]);
+        profById = Object.fromEntries(
+          (profsRes.data || []).map((p) => [p.id, p])
+        );
+        venById = Object.fromEntries(
+          (vensRes.data || []).map((v) => [v.id, v])
+        );
       }
       if (cancelled) return;
       setFriendCheckins(
-        latest.map((r) => ({ ...r, profile: profById[r.user_id] || null }))
+        latest.map((r) => ({
+          ...r,
+          profile: profById[r.user_id] || null,
+          venue: venById[r.venue_id] || null,
+        }))
       );
     })();
     return () => {
@@ -264,24 +282,33 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   // clustering. One pin per venue, entries newest-first.
   const friendPins = useMemo(() => {
     if (mapFilter !== "friends" || !friendCheckins) return [];
-    const venueById = new Map(plottable.map((v) => [v.id, v]));
     const groups = new Map();
     for (const c of friendCheckins) {
-      const venue = venueById.get(c.venue_id);
-      if (!venue) continue; // RLS-hidden or unmappable venue
+      const venue = c.venue; // resolved directly at fetch time
+      if (
+        !venue ||
+        !Number.isFinite(Number(venue.latitude)) ||
+        !Number.isFinite(Number(venue.longitude))
+      )
+        continue;
       if (!groups.has(venue.id)) groups.set(venue.id, { venue, entries: [] });
       groups.get(venue.id).entries.push(c);
     }
     return Array.from(groups.values());
-  }, [mapFilter, friendCheckins, plottable]);
+  }, [mapFilter, friendCheckins]);
 
   const displayedPlottable = useMemo(() => {
     if (mapFilter === "friends") return friendPins.map((g) => g.venue);
     const todayKey = getTodayDayKey();
+    // Browse map stays curated even though venue READS are open now: pins are
+    // verified venues + your saved ones. A venue you created just to check in
+    // (e.g. a concert hall) doesn't clutter your map unless you save it.
     let list =
       mapFilter === "my_list" && savedIds
         ? plottable.filter((v) => savedIds.has(v.id))
-        : plottable;
+        : plottable.filter(
+            (v) => v.verified === true || (savedIds && savedIds.has(v.id))
+          );
     if (fAreas.length > 0)
       list = list.filter((v) => venueMatchesAreas(v, fAreas, MAP_AREA_RADIUS_KM));
     if (fCuisines.length > 0)
@@ -582,10 +609,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           onClose={() => setShowSearch(false)}
           showToast={showToast}
           onOpenVenue={flyToVenue}
-          onAdded={(venue) => {
-            onVenueAdded?.(venue);
+          onAdded={(venue, opts) => {
+            onVenueAdded?.(venue, opts);
             flyToVenue(venue);
           }}
+          onCheckInAfterAdd={(venue) => onCheckIn?.(venue)}
         />
       )}
       {showFilters &&
