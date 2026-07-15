@@ -57,13 +57,9 @@ export function MapVenueSheet({
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
   const [checkingIn, setCheckingIn] = useState(false);
-  // "What's on?" — one-shot optional label prompt after checking in.
-  const [labelText, setLabelText] = useState("");
-  const [labelState, setLabelState] = useState("idle"); // idle|saving|done|dismissed
-  // "With friends?" — optional tagging after checking in. Tags only render on
-  // YOUR check-in (your audience) + nudge the friend to check in themselves.
-  const [tagFriends, setTagFriends] = useState(null); // accepted friends, lazy
-  const [taggedIds, setTaggedIds] = useState(() => new Set());
+  // (The post-check-in "what's on" + tagging UI lives in CheckinSheet now —
+  // App opens it over this card on a fresh check-in. Mark: embedding it here
+  // felt too glued to the venue card.)
   // Friends' check-ins at this venue → the strip. null = loading/none yet.
   // { live: entry|null, liveCount, commentCount, memory: profiles[], memoryCount }
   const [strip, setStrip] = useState(null);
@@ -93,89 +89,7 @@ export function MapVenueSheet({
   useEffect(() => {
     setCheckedIn(null);
     setCheckingIn(false);
-    setLabelText("");
-    setLabelState("idle");
-    setTaggedIds(new Set());
   }, [venue.id]);
-
-  // Load accepted friends once, the first time a check-in succeeds — they
-  // become the tag chips.
-  useEffect(() => {
-    if (!checkedIn || tagFriends !== null || !userId) return;
-    let cancelled = false;
-    (async () => {
-      const { data: fr } = await supabase
-        .from("friendships")
-        .select("requester_id, addressee_id")
-        .eq("status", "accepted")
-        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
-      const ids = Array.from(
-        new Set(
-          (fr || []).map((f) =>
-            f.requester_id === userId ? f.addressee_id : f.requester_id
-          )
-        )
-      );
-      if (ids.length === 0) {
-        if (!cancelled) setTagFriends([]);
-        return;
-      }
-      const { data: profs } = await supabase
-        .from("profiles")
-        .select("id, display_name, username, avatar_url")
-        .in("id", ids);
-      if (!cancelled) setTagFriends(profs || []);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [checkedIn, tagFriends, userId]);
-
-  // Toggle a tag: insert (pending) or delete — takes effect immediately, no
-  // extra save step. The friend gets the consent nudge in their Activity.
-  async function toggleTag(friendId) {
-    if (!checkedIn) return;
-    const isTagged = taggedIds.has(friendId);
-    setTaggedIds((prev) => {
-      const next = new Set(prev);
-      if (isTagged) next.delete(friendId);
-      else next.add(friendId);
-      return next;
-    });
-    if (isTagged) {
-      await supabase
-        .from("activity_tags")
-        .delete()
-        .eq("activity_id", checkedIn.id)
-        .eq("tagged_user_id", friendId);
-    } else {
-      const { error } = await supabase
-        .from("activity_tags")
-        .insert({ activity_id: checkedIn.id, tagged_user_id: friendId });
-      if (error) {
-        console.error("Tag failed:", error);
-        setTaggedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(friendId);
-          return next;
-        });
-      }
-    }
-  }
-
-  // Save the optional "what's on" label onto the check-in row we just created
-  // (UPDATE — no second item, no duplicate notification; the existing item
-  // simply grows the "· label" suffix wherever it renders).
-  async function saveLabel() {
-    const text = labelText.trim().slice(0, 80);
-    if (!text || !checkedIn) return;
-    setLabelState("saving");
-    const { error } = await supabase
-      .from("activities")
-      .update({ label: text })
-      .eq("id", checkedIn.id);
-    setLabelState(error ? "idle" : "done");
-  }
 
   // Friends' check-ins at this venue. RLS scopes the read to own + friends'
   // rows, so the only client work is excluding self and splitting live (<3h,
@@ -482,72 +396,6 @@ export function MapVenueSheet({
       )}
 
       <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
-        {checkedIn && labelState !== "dismissed" && labelState !== "done" && (
-          <div className="mb-3 flex items-center gap-2 rounded-full bg-[#edf2eb] border border-[#cdd9c6] pl-4 pr-1.5 py-1.5">
-            {/* text-base: sub-16px inputs make iOS Safari auto-zoom on focus. */}
-            <input
-              value={labelText}
-              onChange={(e) => setLabelText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveLabel()}
-              placeholder="What's on tonight?"
-              maxLength={80}
-              className="flex-1 min-w-0 bg-transparent text-base text-[#2f3f29] placeholder-[#77906c] focus:outline-none"
-            />
-            {labelText.trim() ? (
-              <button
-                type="button"
-                aria-label="Save"
-                disabled={labelState === "saving"}
-                onClick={saveLabel}
-                className="w-8 h-8 shrink-0 rounded-full bg-[#455d3b] text-white flex items-center justify-center disabled:opacity-50 active:scale-95 transition"
-              >
-                ✓
-              </button>
-            ) : (
-              <button
-                type="button"
-                aria-label="Dismiss"
-                onClick={() => setLabelState("dismissed")}
-                className="w-8 h-8 shrink-0 rounded-full text-neutral-400 flex items-center justify-center hover:bg-neutral-100"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-        )}
-        {labelState === "done" && (
-          <p className="mb-3 text-center text-xs text-[#455d3b] font-medium">
-            Added — friends see "{labelText.trim()}"
-          </p>
-        )}
-        {checkedIn && tagFriends && tagFriends.length > 0 && (
-          <div className="mb-3">
-            <p className="mb-1.5 px-1 text-[11px] font-medium text-neutral-500">
-              With friends? They'll be asked before their friends see anything.
-            </p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {tagFriends.map((f) => {
-                const on = taggedIds.has(f.id);
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => toggleTag(f.id)}
-                    className={`shrink-0 flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium active:scale-95 transition ${
-                      on
-                        ? "bg-[#455d3b] border-[#455d3b] text-white"
-                        : "border-neutral-200 text-neutral-700"
-                    }`}
-                  >
-                    <FriendAvatar profile={f} small />
-                    {(f.display_name || "?").split(" ")[0]}
-                    {on ? " ✓" : ""}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
         <div className="flex items-center justify-around relative">
           <button
             type="button"

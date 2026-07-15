@@ -39,6 +39,7 @@ import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { FriendAvatar } from "./components/FriendAvatar";
 import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
+import { CheckinSheet } from "./components/CheckinSheet";
 import {
   AreaCheckbox,
   DropdownField,
@@ -334,6 +335,9 @@ export default function RestaurantSwipeMVP() {
   // Comment thread opened from a venue card's check-in strip or the
   // checked-in pill (the Activity tab renders its own sheet internally).
   const [threadCheckin, setThreadCheckin] = useState(null);
+  // Post-check-in sheet (what's-on label + tag friends) — its own layer over
+  // the venue card, opened on every FRESH check-in. { venue, activity }.
+  const [checkinSheet, setCheckinSheet] = useState(null);
   // Find Friends sheet — opened by the FAB's Add friend option AND by the
   // FriendsScreen header + icon. Lifted to App level for that shared access.
   const [showFindFriends, setShowFindFriends] = useState(false);
@@ -1529,8 +1533,9 @@ useEffect(() => {
       showToast("Couldn't check in");
       return null;
     }
-    // Success is shown in-card (pill state + what's-on prompt) — no toast,
-    // it was covering the prompt.
+    // Success feedback = the pill flip + the CheckinSheet opening (its own
+    // layer — Mark: embedding the follow-ups in the card felt too glued on).
+    setCheckinSheet({ venue, activity: inserted });
     return inserted;
   }
 
@@ -3248,6 +3253,15 @@ if (authLoading || guestLoading) {
           setMapSearchOpen(true);
         }}
       />
+      {checkinSheet && (
+        <CheckinSheet
+          venue={checkinSheet.venue}
+          activity={checkinSheet.activity}
+          userId={session?.user?.id}
+          showToast={showToast}
+          onClose={() => setCheckinSheet(null)}
+        />
+      )}
       {threadCheckin && (
         <CheckinThreadSheet
           thread={threadCheckin}
