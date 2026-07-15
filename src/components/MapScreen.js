@@ -148,7 +148,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
 
   // Search-sheet tap on a pool venue: fly the map to the pin and open its
   // card. Also used after a Google add so the new venue is immediately shown.
-  function flyToVenue(venue) {
+  // openCard=false for the check-in-only flow — the CheckinSheet is the
+  // destination there; a venue card lurking behind it is clutter.
+  function flyToVenue(venue, { openCard = true } = {}) {
     const lat = Number(venue.latitude);
     const lng = Number(venue.longitude);
     if (Number.isFinite(lat) && Number.isFinite(lng) && mapRef.current) {
@@ -158,7 +160,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         { duration: 0.8 }
       );
     }
-    setSelectedVenue(venue);
+    if (openCard) setSelectedVenue(venue);
   }
   const [showFilters, setShowFilters] = useState(false);
   // Map-only filter state. Deliberately LOCAL to MapScreen and independent of
@@ -611,7 +613,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           onOpenVenue={flyToVenue}
           onAdded={(venue, opts) => {
             onVenueAdded?.(venue, opts);
-            flyToVenue(venue);
+            // Check-in-only add: glide the map there but keep the card shut —
+            // the confetti sheet is the moment.
+            flyToVenue(venue, { openCard: opts?.saved !== false });
           }}
           onCheckInAfterAdd={(venue) => onCheckIn?.(venue)}
         />
