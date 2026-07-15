@@ -3625,6 +3625,9 @@ function ProfileTab({
   const [showMyList, setShowMyList] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [sessionsCount, setSessionsCount] = useState(null);
+  // Been — your own check-in history (the memory ledger).
+  const [showBeen, setShowBeen] = useState(false);
+  const [beenCount, setBeenCount] = useState(null);
   // Friend graph counts for the entry card subtitle. Two queries kept simple
   // (count, head:true). Task #8 will lift requestCount to App level so the
   // bell badge shares the same source.
@@ -3647,6 +3650,28 @@ function ProfileTab({
       .then(({ count, error }) => {
         if (cancelled || error) return;
         setSessionsCount(count ?? 0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
+  // Been count for the card subtitle.
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) {
+      setBeenCount(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("activities")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", uid)
+      .eq("kind", "checkin")
+      .then(({ count, error }) => {
+        if (cancelled || error) return;
+        setBeenCount(count ?? 0);
       });
     return () => {
       cancelled = true;
@@ -3857,6 +3882,17 @@ function ProfileTab({
           onOpenProfile={onOpenProfile}
         />
       )}
+      {showBeen && (
+        <BeenScreen
+          userId={session?.user?.id}
+          venues={venues}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+          onBack={() => setShowBeen(false)}
+        />
+      )}
       <div className="w-full max-w-sm">
         <div className="mb-5">
           <p className="text-sm text-neutral-500">Account</p>
@@ -3972,6 +4008,27 @@ function ProfileTab({
             <p className="font-medium">My List</p>
             <p className="text-xs text-neutral-500">
               {savedIds?.size || 0} saved · {hiddenIds?.size || 0} hidden
+            </p>
+          </div>
+          <span className="text-neutral-400 text-lg leading-none">›</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowBeen(true)}
+          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+            <MapPinIcon size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium">Been</p>
+            <p className="text-xs text-neutral-500">
+              {beenCount === null
+                ? "Loading..."
+                : beenCount === 0
+                ? "No check-ins yet"
+                : `${beenCount} check-in${beenCount === 1 ? "" : "s"}`}
             </p>
           </div>
           <span className="text-neutral-400 text-lg leading-none">›</span>
@@ -5849,6 +5906,117 @@ function ProfileLookupScreen({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Been — your own check-in history, the memory ledger. Rows: venue · label ·
+// when; tap opens the venue card (when the venue resolves from the pool).
+function BeenScreen({ userId, venues, savedIds, onSave, onUnsave, onHide, onBack }) {
+  const [rows, setRows] = useState(null); // null = loading
+  const [selectedVenue, setSelectedVenue] = useState(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("activities")
+        .select("id, venue_id, label, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (!cancelled) setRows(data || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const venueById = useMemo(
+    () => new Map((venues || []).map((v) => [v.id, v])),
+    [venues]
+  );
+
+  function when(ts) {
+    const d = new Date(ts);
+    const days = Math.floor((Date.now() - d.getTime()) / (24 * 60 * 60 * 1000));
+    if (days === 0) return "today";
+    if (days === 1) return "yesterday";
+    if (days < 7) return `${days}d ago`;
+    return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  }
+
+  return (
+    <div className="fixed inset-0 z-[2500] overflow-y-auto bg-[#fdf6f0]">
+      <div className="mx-auto w-full max-w-sm p-4 pb-24">
+        <div className="mb-5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white border border-neutral-100 text-neutral-600"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div>
+            <p className="text-sm text-neutral-500">Your check-ins</p>
+            <h1 className="text-2xl font-semibold tracking-tight">Been</h1>
+          </div>
+        </div>
+
+        {rows === null && (
+          <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
+        )}
+        {rows !== null && rows.length === 0 && (
+          <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+            <p className="text-sm text-neutral-600">Nowhere yet.</p>
+            <p className="text-xs text-neutral-500 mt-1">
+              Check in when you're out — every spot lands here.
+            </p>
+          </div>
+        )}
+        <div className="space-y-2">
+          {(rows || []).map((r) => {
+            const venue = venueById.get(r.venue_id) || null;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => venue && setSelectedVenue(venue)}
+                className="w-full rounded-2xl bg-white border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+                  <MapPinIcon size={16} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-neutral-900 truncate">
+                    {venue?.name || "A spot"}
+                    {r.label ? (
+                      <span className="font-normal text-neutral-500"> · {r.label}</span>
+                    ) : null}
+                  </p>
+                  <p className="text-[11px] text-neutral-500">{when(r.created_at)}</p>
+                </div>
+                {venue && (
+                  <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {selectedVenue && (
+        <MapVenueSheet
+          venue={selectedVenue}
+          onClose={() => setSelectedVenue(null)}
+          savedIds={savedIds}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onHide={onHide}
+        />
+      )}
     </div>
   );
 }
