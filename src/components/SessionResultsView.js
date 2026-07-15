@@ -8,7 +8,7 @@ import { Check } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 
-function ConfettiBurst() {
+export function ConfettiBurst() {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;

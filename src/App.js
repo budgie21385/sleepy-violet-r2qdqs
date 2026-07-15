@@ -2688,11 +2688,7 @@ if (authLoading || guestLoading) {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
-        Loading venues...
-      </div>
-    );
+    return <LoadingScreen />;
   }
  
   return (
@@ -5853,6 +5849,43 @@ function ProfileLookupScreen({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Fresh-load screen. Rotating wry one-liners instead of "Loading venues..." —
+// starts on a random line so repeat visitors don't see the same one twice.
+const LOADING_LINES = [
+  "finding the good spots",
+  "checking who's out tonight",
+  "scouting the laneways",
+  "asking the group chat",
+  "reading the chalkboard menu",
+  "judging a bar by its lighting",
+  "lining up for coffee, it's melbourne",
+  "saving you the corner table",
+];
+
+function LoadingScreen() {
+  const [i, setI] = useState(() =>
+    Math.floor(Math.random() * LOADING_LINES.length)
+  );
+  useEffect(() => {
+    const t = setInterval(
+      () => setI((prev) => (prev + 1) % LOADING_LINES.length),
+      1600
+    );
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex flex-col items-center justify-center gap-4 p-4">
+      <div className="relative flex h-12 w-12 items-center justify-center">
+        <span className="absolute inset-0 rounded-full bg-[#455d3b]/15 animate-ping" />
+        <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[#455d3b] text-white">
+          <MapPinIcon size={18} />
+        </span>
+      </div>
+      <p className="text-sm text-neutral-500">{LOADING_LINES[i]}…</p>
     </div>
   );
 }

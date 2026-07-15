@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { X, Check, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
+import { ConfettiBurst } from "./SessionResultsView";
 
 const SEARCH_THRESHOLD = 8; // chips-only below this many friends
 
@@ -16,6 +17,12 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
   const [friends, setFriends] = useState(null); // null = loading
   const [taggedIds, setTaggedIds] = useState(() => new Set());
   const [q, setQ] = useState("");
+  // One-shot celebration when the sheet opens (same burst as match reveals).
+  const [confetti, setConfetti] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setConfetti(false), 2500);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +106,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
 
   return (
     <div className="fixed inset-0 z-[3300]">
+      {confetti && <ConfettiBurst />}
       <button
         type="button"
         aria-label="Close"
