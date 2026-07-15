@@ -22,7 +22,7 @@ function timeAgoShort(ts) {
 // venueObj + onOpenVenue.
 // thread: { activityId, ownerId?, ownerName, ownerProfile?, venueName,
 //           label?, venueObj?, timestamp }
-export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenProfile, onOpenVenue }) {
+export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenProfile, onOpenVenue, onCheckIn }) {
   const [comments, setComments] = useState(null); // null = loading
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -169,6 +169,27 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </div>
         </div>
 
+        {/* Join — presence begets presence. Only on someone else's FRESH
+            check-in with a known venue: one tap closes this thread and runs
+            your own check-in there (dupe-guarded, confetti sheet and all). */}
+        {onCheckIn &&
+          thread.venueObj &&
+          thread.ownerId !== userId &&
+          Date.now() - new Date(thread.timestamp).getTime() <
+            3 * 60 * 60 * 1000 && (
+            <div className="px-5 pt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onCheckIn(thread.venueObj);
+                }}
+                className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition"
+              >
+                I'm here too — join {thread.ownerName}
+              </button>
+            </div>
+          )}
         <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-3">
           {comments === null && (
             <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>

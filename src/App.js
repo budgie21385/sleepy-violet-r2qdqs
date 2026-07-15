@@ -3190,6 +3190,7 @@ if (authLoading || guestLoading) {
           onOpenProfile={(uid) => setLookupUserId(uid)}
           onOpenSession={(sid) => setNotifSessionId(sid)}
           onOpenVenue={(v) => setCardVenue(v)}
+          onCheckIn={handleCheckIn}
           profileIncomplete={profileIncomplete}
           onFinishProfile={() => setTab("profile")}
           showToast={showToast}
@@ -3298,6 +3299,7 @@ if (authLoading || guestLoading) {
             setThreadCheckin(null);
             setCardVenue(v);
           }}
+          onCheckIn={handleCheckIn}
         />
       )}
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />

@@ -165,6 +165,7 @@ export function MapVenueSheet({
       ownerProfile: t.profile || null,
       venueName: venue.name,
       label: t.label || null,
+      venueObj: venue, // enables the Join button (and venue link) in the thread
       timestamp: t.created_at,
     });
   }

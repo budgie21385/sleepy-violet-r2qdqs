@@ -12,7 +12,7 @@ import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
-export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
+export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, onCheckIn, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
   const [items, setItems] = useState(null); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [thread, setThread] = useState(null); // open comment thread sheet
@@ -697,6 +697,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             setThread(null);
             onOpenVenue?.(v);
           }}
+          onCheckIn={onCheckIn}
         />
       )}
     </>
