@@ -117,9 +117,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         onClick={onClose}
         className="absolute inset-0 bg-black/30"
       />
-      <div className="absolute left-0 right-0 bottom-0 max-h-[75%] flex flex-col bg-white rounded-t-3xl shadow-2xl">
-        <div className="px-5 pt-3 pb-2 border-b border-neutral-100">
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-200" />
+      {/* Floating card, same geometry as the venue card — a check-in is a
+          first-class object and its view should carry itself like one. */}
+      <div
+        className="absolute left-0 right-0 mx-auto max-w-sm flex flex-col bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-hidden"
+        style={{
+          bottom: 80,
+          width: "calc(100% - 1.5rem)",
+          maxHeight: "calc(100% - 100px)",
+        }}
+      >
+        <div className="px-5 pt-4 pb-2 border-b border-neutral-100">
           <div className="flex items-center justify-between">
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">
