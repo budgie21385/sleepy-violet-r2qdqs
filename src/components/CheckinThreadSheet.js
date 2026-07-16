@@ -101,30 +101,38 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     thread.ownerId !== userId &&
     Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS;
 
-  // Runs on any friend's card with a known venue (not just fresh ones) so a
-  // joined viewer gets the camera tile even after the join window's over.
+  // "Was I there the SAME NIGHT as this check-in?" — window is relative to
+  // the check-in's moment, not to now (a DUPE_MS-from-now check went stale
+  // the instant your own check-in aged past 4h). Same-night = ±12h.
   useEffect(() => {
     if (isOwner || !thread.venueObj || !userId) return;
     let cancelled = false;
     (async () => {
-      const since = new Date(Date.now() - DUPE_MS).toISOString();
+      const SAME_NIGHT_MS = 12 * 60 * 60 * 1000;
+      const ref = new Date(thread.timestamp).getTime();
       const { data } = await supabase
         .from("activities")
-        .select("id")
+        .select("id, created_at")
         .eq("user_id", userId)
         .eq("venue_id", thread.venueObj.id)
         .eq("kind", "checkin")
-        .gte("created_at", since)
+        .gte("created_at", new Date(ref - SAME_NIGHT_MS).toISOString())
+        .lte("created_at", new Date(ref + SAME_NIGHT_MS).toISOString())
         .order("created_at", { ascending: false })
         .limit(1);
       if (cancelled) return;
-      setJoined((data || []).length > 0);
+      // joined still means "currently there" for the join-button state.
+      setJoined(
+        (data || []).some(
+          (a) => Date.now() - new Date(a.created_at).getTime() < DUPE_MS
+        )
+      );
       setMyActivityId(data?.[0]?.id ?? null);
     })();
     return () => {
       cancelled = true;
     };
-  }, [isOwner, userId, thread.venueObj?.id]);
+  }, [isOwner, userId, thread.venueObj?.id, thread.timestamp]);
 
   // "with JD and Bianca" — tags on this check-in (pending + accepted render;
   // removed never does).
@@ -259,7 +267,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </p>
               )}
               <p className="text-[11px] text-neutral-500">
-                {timeAgoShort(thread.timestamp)} · only {thread.ownerName}'s
+                {timeAgoShort(thread.timestamp)} · only{" "}
+                {thread.ownerName === "You"
+                  ? "your"
+                  : `${thread.ownerName}'s`}{" "}
                 friends see this
               </p>
             </div>

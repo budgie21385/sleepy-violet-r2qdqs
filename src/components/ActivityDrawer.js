@@ -718,18 +718,34 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   // never a false live "is at" pin.
   async function acceptTag(item) {
     setActing(item.tagId);
-    const { error } = await supabase.from("activities").insert({
-      user_id: userId,
-      kind: "checkin",
-      venue_id: item.venueId,
-      label: item.label || null,
-      created_at: item.checkinTimestamp,
-    });
+    const { data: act, error } = await supabase
+      .from("activities")
+      .insert({
+        user_id: userId,
+        kind: "checkin",
+        venue_id: item.venueId,
+        label: item.label || null,
+        created_at: item.checkinTimestamp,
+      })
+      .select("id")
+      .single();
     if (!error) {
       await supabase
         .from("activity_tags")
         .update({ status: "accepted", responded_at: new Date().toISOString() })
         .eq("id", item.tagId);
+      // Reciprocal tag: YOUR check-in says "with [tagger]" too — so your Been
+      // list carries the companionship, not just theirs. Consent holds: they
+      // tapped to tag you, you tapped to accept — both agreed to the
+      // association. Inserted pre-accepted so it never nudges them back.
+      if (act?.id) {
+        await supabase.from("activity_tags").insert({
+          activity_id: act.id,
+          tagged_user_id: item.otherId,
+          status: "accepted",
+          responded_at: new Date().toISOString(),
+        });
+      }
     }
     setActing(null);
     if (error) {
