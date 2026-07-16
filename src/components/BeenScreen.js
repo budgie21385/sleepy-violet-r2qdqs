@@ -150,7 +150,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
           userId={userId}
           onClose={() => setThread(null)}
           onOpenVenue={(v) => {
-            setThread(null);
+            // Thread stays open underneath; the venue card stacks above it.
             setSelectedVenue(v);
           }}
         />
@@ -163,6 +163,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          zIndex={3700}
         />
       )}
     </div>

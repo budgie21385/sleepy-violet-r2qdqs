@@ -3231,6 +3231,7 @@ if (authLoading || guestLoading) {
           onOpenThread={setThreadCheckin}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           userId={session?.user?.id}
+          zIndex={3700}
         />
       )}
       {/* Post-signup onboarding (B): real account, no username yet, not arrived
@@ -3279,7 +3280,8 @@ if (authLoading || guestLoading) {
             setLookupUserId(uid);
           }}
           onOpenVenue={(v) => {
-            setThreadCheckin(null);
+            // Keep the check-in card open underneath — the venue card stacks
+            // above it (zIndex 3700) and closing it returns you here.
             setCardVenue(v);
           }}
           onCheckIn={handleCheckIn}

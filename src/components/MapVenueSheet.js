@@ -44,6 +44,9 @@ export function MapVenueSheet({
   onPrev,
   hasNext = false,
   hasPrev = false,
+  // Raise above the check-in card (z-3600) when opened FROM one, so closing
+  // this returns you to the check-in rather than losing it.
+  zIndex = 3100,
 }) {
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -294,8 +297,9 @@ export function MapVenueSheet({
         bottom: 80,
         width: "calc(100% - 1.5rem)",
         maxHeight: "calc(100% - 100px)",
-        // Above the bell (2950) and FAB (3060) so the open card is top-level.
-        zIndex: 3100,
+        // Above the bell (2950) and FAB (3060) so the open card is top-level;
+        // callers opening from a check-in card pass 3700 to stack above it.
+        zIndex,
         // Live finger-follow while dragging; left undefined at rest so the
         // one-time nudge animation can drive the transform.
         transform: dragX !== 0 ? `translateX(${dragX}px)` : undefined,

@@ -738,7 +738,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             onOpenProfile?.(uid);
           }}
           onOpenVenue={(v) => {
-            setThread(null);
+            // Thread stays open underneath; the venue card stacks above it.
             onOpenVenue?.(v);
           }}
           onCheckIn={onCheckIn}
