@@ -7,6 +7,7 @@ import { X, Send } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
+import { fetchCheckinPhotos } from "../lib/photos";
 
 // The check-in's own view — a check-in is a first-class object (owner, moment,
 // label, companions, conversation), NOT a shortcut to the venue card. The
@@ -22,7 +23,20 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // Whether the VIEWER already has a recent check-in at this venue —
   // null = still checking (render neither state to avoid a wrong flash).
   const [joined, setJoined] = useState(null);
+  // Photos on this check-in (signed web-derivative URLs) + tap-to-enlarge.
+  const [photos, setPhotos] = useState([]);
+  const [lightbox, setLightbox] = useState(null); // signed url
   const listRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCheckinPhotos(thread.activityId).then((rows) => {
+      if (!cancelled) setPhotos(rows.filter((r) => r.url));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.activityId]);
 
   const joinEligible =
     !!onCheckIn &&
@@ -201,6 +215,26 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         {/* Join — presence begets presence. Only on someone else's FRESH
             check-in with a known venue. If the viewer already checked in here
             recently, show the joined state instead of re-offering. */}
+        {photos.length > 0 && (
+          <div className="px-5 pt-3">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {photos.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setLightbox(p.url)}
+                  className="shrink-0 active:scale-95 transition"
+                >
+                  <img
+                    src={p.url}
+                    alt=""
+                    className="h-24 w-24 rounded-xl object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {joinEligible && joined === false && (
           <div className="px-5 pt-3">
             <button
@@ -300,6 +334,20 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </button>
         </div>
       </div>
+      {lightbox && (
+        <button
+          type="button"
+          aria-label="Close photo"
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-[3800] bg-black/85 flex items-center justify-center p-3"
+        >
+          <img
+            src={lightbox}
+            alt=""
+            className="max-h-full max-w-full rounded-2xl object-contain"
+          />
+        </button>
+      )}
     </div>
   );
 }

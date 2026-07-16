@@ -3,11 +3,15 @@
 // after a fresh check-in with: confirmation, the optional "what's on" label,
 // and the with-friends tag chips (adaptive search once the friend list is
 // long). Everything applies live; Done just closes.
-import { useState, useEffect } from "react";
-import { X, Check, MapPin } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Check, MapPin, Camera } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { ConfettiBurst } from "./SessionResultsView";
+import {
+  uploadCheckinPhoto,
+  MAX_PHOTOS_PER_CHECKIN,
+} from "../lib/photos";
 
 const SEARCH_THRESHOLD = 8; // chips-only below this many friends
 
@@ -17,6 +21,33 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
   const [friends, setFriends] = useState(null); // null = loading
   const [taggedIds, setTaggedIds] = useState(() => new Set());
   const [q, setQ] = useState("");
+  // Photos: previews appear immediately, uploads run in the background
+  // (original + web derivative via lib/photos). Cap per check-in.
+  const [photos, setPhotos] = useState([]); // [{key, preview, state}]
+  const fileInputRef = useRef(null);
+
+  async function addPhotos(fileList) {
+    const files = Array.from(fileList || []).slice(
+      0,
+      MAX_PHOTOS_PER_CHECKIN - photos.length
+    );
+    for (const file of files) {
+      const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const preview = URL.createObjectURL(file);
+      setPhotos((prev) => [...prev, { key, preview, state: "uploading" }]);
+      uploadCheckinPhoto(userId, activity.id, file)
+        .then(() => {
+          setPhotos((prev) =>
+            prev.map((p) => (p.key === key ? { ...p, state: "done" } : p))
+          );
+        })
+        .catch((e) => {
+          console.error("Photo upload failed:", e);
+          setPhotos((prev) => prev.filter((p) => p.key !== key));
+          showToast?.("Couldn't upload a photo");
+        });
+    }
+  }
   // Celebration fires on DONE (after label + friends are in), not on open —
   // the payoff lands when the check-in is complete. Sheet lingers briefly so
   // the burst is seen, then closes itself.
@@ -170,6 +201,53 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
               Added — friends see "{labelText.trim()}"
             </p>
           )}
+
+          <div className="mb-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addPhotos(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              {photos.map((p) => (
+                <div key={p.key} className="relative shrink-0">
+                  <img
+                    src={p.preview}
+                    alt=""
+                    className={`h-16 w-16 rounded-xl object-cover ${
+                      p.state === "uploading" ? "opacity-50" : ""
+                    }`}
+                  />
+                  {p.state === "uploading" && (
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-white">
+                      …
+                    </span>
+                  )}
+                </div>
+              ))}
+              {photos.length < MAX_PHOTOS_PER_CHECKIN && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-16 w-16 shrink-0 rounded-xl border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-0.5 text-neutral-500 active:scale-95 transition"
+                >
+                  <Camera size={18} />
+                  <span className="text-[10px] font-medium">
+                    {photos.length === 0 ? "Photos" : "More"}
+                  </span>
+                </button>
+              )}
+            </div>
+            <p className="mt-1 px-1 text-[11px] text-neutral-400">
+              Stored in original quality — only your friends see them.
+            </p>
+          </div>
 
           {friends && friends.length > 0 && (
             <div className="mb-4">
