@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
+import { timeAgoShort, FRESH_MS } from "../lib/checkins";
 import {
   VenueHeroCarousel,
   VenueRating,
@@ -27,15 +28,6 @@ import {
 import { getMapsUrl } from "../lib/venueLogic";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
-
-function timeAgoShort(ts) {
-  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
-  if (mins < 15) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
-}
 
 export function MapVenueSheet({
   venue,
@@ -113,7 +105,6 @@ export function MapVenueSheet({
         if (!cancelled) setStrip({ none: true });
         return;
       }
-      const FRESH_MS = 3 * 60 * 60 * 1000;
       const fresh = all.filter(
         (r) => Date.now() - new Date(r.created_at).getTime() < FRESH_MS
       );

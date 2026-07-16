@@ -6,15 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Send } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
-
-function timeAgoShort(ts) {
-  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
-  if (mins < 15) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
-}
+import { timeAgoShort, FRESH_MS } from "../lib/checkins";
 
 // The check-in's own view — a check-in is a first-class object (owner, moment,
 // label, companions, conversation), NOT a shortcut to the venue card. The
@@ -175,8 +167,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         {onCheckIn &&
           thread.venueObj &&
           thread.ownerId !== userId &&
-          Date.now() - new Date(thread.timestamp).getTime() <
-            3 * 60 * 60 * 1000 && (
+          Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS && (
             <div className="px-5 pt-3">
               <button
                 type="button"

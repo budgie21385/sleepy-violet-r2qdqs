@@ -30,6 +30,7 @@ import {
 import { MapVenueSheet } from "./MapVenueSheet";
 import { AddVenueSheet } from "./AddVenueSheet";
 import { supabase } from "../supabaseClient";
+import { timeAgoShort, FRESH_MS } from "../lib/checkins";
 
 function createEmojiIcon(emoji) {
   return L.divIcon({
@@ -46,17 +47,6 @@ const esc = (s) =>
   String(s || "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
   );
-
-function timeAgoShort(ts) {
-  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
-  if (mins < 15) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return "1d";
-}
-
-const FRESH_MS = 3 * 60 * 60 * 1000; // "is at" window, matches Activity copy
 
 // One pin per venue: up to 3 stacked friend avatars + a "Name · 2h" label.
 // Fresh (<3h) check-ins get the olive ring; older-today pins fade.
