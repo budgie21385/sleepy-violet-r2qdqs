@@ -1074,6 +1074,30 @@ useEffect(() => {
         }
       }
 
+      // Morning-after photo nudge: own photoless check-ins 12–36h old.
+      // Counted regardless of last-seen (actionable, self-expiring window).
+      let photoNudgeCount = 0;
+      {
+        const from = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+        const to = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+        const { data: recent } = await supabase
+          .from("activities")
+          .select("id")
+          .eq("user_id", uid)
+          .eq("kind", "checkin")
+          .gte("created_at", from)
+          .lte("created_at", to);
+        const recentIds = (recent || []).map((a) => a.id);
+        if (recentIds.length > 0) {
+          const { data: withPhotos } = await supabase
+            .from("activity_photos")
+            .select("activity_id")
+            .in("activity_id", recentIds);
+          const has = new Set((withPhotos || []).map((p) => p.activity_id));
+          photoNudgeCount = recentIds.filter((id) => !has.has(id)).length;
+        }
+      }
+
       if (cancelled) return;
       setUnreadCount(
         (reqRes.count ?? 0) +
@@ -1082,7 +1106,8 @@ useEffect(() => {
           inviteCount +
           checkinCount +
           commentCount +
-          tagCount
+          tagCount +
+          photoNudgeCount
       );
     })();
     return () => {

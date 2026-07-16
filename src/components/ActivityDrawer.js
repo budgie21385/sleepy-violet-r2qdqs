@@ -7,7 +7,7 @@
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect } from "react";
-import { X, UserPlus, Check, MapPin, MessageCircle } from "lucide-react";
+import { X, UserPlus, Check, MapPin, MessageCircle, Camera } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
@@ -387,6 +387,55 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return tagNudgeItems;
     })();
 
+    // ---- Morning-after photo nudge: MY photoless check-ins, 12–36h old ----
+    // The one deliberate self-item: prompts collection at the moment people
+    // relive the night. Self-expires (window), disappears once photos exist.
+    const photoNudgeP = (async () => {
+      const nudgeItems = [];
+      const from = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
+      const to = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      const { data: acts } = await supabase
+        .from("activities")
+        .select("id, venue_id, label, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .gte("created_at", from)
+        .lte("created_at", to);
+      if (!acts || acts.length === 0) return nudgeItems;
+      const [photosRes, vensRes] = await Promise.all([
+        supabase
+          .from("activity_photos")
+          .select("activity_id")
+          .in("activity_id", acts.map((a) => a.id)),
+        supabase
+          .from("venues")
+          .select("*")
+          .in("id", Array.from(new Set(acts.map((a) => a.venue_id)))),
+      ]);
+      const hasPhotos = new Set((photosRes.data || []).map((p) => p.activity_id));
+      const venById = Object.fromEntries(
+        (vensRes.data || []).map((v) => [v.id, v])
+      );
+      for (const a of acts) {
+        if (hasPhotos.has(a.id)) continue;
+        nudgeItems.push({
+          kind: "photo_nudge",
+          id: `pn_${a.id}`,
+          activityId: a.id,
+          ownerId: userId,
+          venueObj: venById[a.venue_id] || null,
+          venueName: venById[a.venue_id]?.name || "last night's spot",
+          label: a.label || null,
+          checkinTimestamp: a.created_at,
+          // Surfaces as NEW the morning after, not buried at check-in time.
+          timestamp: new Date(
+            new Date(a.created_at).getTime() + 12 * 60 * 60 * 1000
+          ).toISOString(),
+        });
+      }
+      return nudgeItems;
+    })();
+
     // ---- Comments on MY check-ins ("[Name] commented on your check-in") ----
     const commentP = (async () => {
       let commentItems = [];
@@ -498,6 +547,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       tagNudgeItems,
       commentItems,
       inviteItems,
+      photoNudgeItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -507,6 +557,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       tagNudgeP,
       commentP,
       inviteP,
+      photoNudgeP,
     ]);
 
     const all = [
@@ -519,6 +570,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...checkinItems,
       ...commentItems,
       ...tagNudgeItems,
+      ...photoNudgeItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     drawerCache = { uid: userId, items: all };
     setItems(all);
@@ -1050,6 +1102,41 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-[11px] text-neutral-500 truncate">“{item.body}”</p>
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
+      </button>
+    );
+  }
+
+  if (item.kind === "photo_nudge") {
+    // Morning-after collection prompt: your own photoless check-in from last
+    // night. Opens your check-in card, where the camera tile is waiting.
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenThread?.({
+            activityId: item.activityId,
+            ownerId: item.ownerId,
+            ownerName: "You",
+            venueName: item.venueName,
+            venueObj: item.venueObj,
+            label: item.label,
+            timestamp: item.checkinTimestamp,
+          })
+        }
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb]">
+          <Camera size={17} className="text-[#455d3b]" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            Add photos from{" "}
+            <strong className="font-medium">{item.venueName}</strong>?
+          </p>
+          <p className="text-[11px] text-neutral-500">
+            Last night's check-in — while it's still fresh
+          </p>
+        </div>
       </button>
     );
   }
