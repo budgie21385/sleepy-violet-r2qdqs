@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
-import { timeAgoShort, FRESH_MS } from "../lib/checkins";
+import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
   VenueHeroCarousel,
   VenueRating,
@@ -84,7 +84,27 @@ export function MapVenueSheet({
   useEffect(() => {
     setCheckedIn(null);
     setCheckingIn(false);
-  }, [venue.id]);
+    // Pre-flip the pill if you're ALREADY checked in here (recent window) —
+    // otherwise a fresh card-open shows "Check in" at a venue you're standing
+    // in, which lies. Second tap still opens your thread as usual.
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const since = new Date(Date.now() - DUPE_MS).toISOString();
+      const { data } = await supabase
+        .from("activities")
+        .select("id, created_at")
+        .eq("user_id", userId)
+        .eq("venue_id", venue.id)
+        .eq("kind", "checkin")
+        .gte("created_at", since)
+        .limit(1);
+      if (!cancelled && data && data.length > 0) setCheckedIn(data[0]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [venue.id, userId]);
 
   // Friends' check-ins at this venue. RLS scopes the read to own + friends'
   // rows, so the only client work is excluding self and splitting live (<3h,
