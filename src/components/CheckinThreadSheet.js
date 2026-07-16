@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Send } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
-import { timeAgoShort, FRESH_MS } from "../lib/checkins";
+import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 
 // The check-in's own view — a check-in is a first-class object (owner, moment,
 // label, companions, conversation), NOT a shortcut to the venue card. The
@@ -19,7 +19,36 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [withNames, setWithNames] = useState([]); // tagged companions
+  // Whether the VIEWER already has a recent check-in at this venue —
+  // null = still checking (render neither state to avoid a wrong flash).
+  const [joined, setJoined] = useState(null);
   const listRef = useRef(null);
+
+  const joinEligible =
+    !!onCheckIn &&
+    !!thread.venueObj &&
+    thread.ownerId !== userId &&
+    Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS;
+
+  useEffect(() => {
+    if (!joinEligible || !userId) return;
+    let cancelled = false;
+    (async () => {
+      const since = new Date(Date.now() - DUPE_MS).toISOString();
+      const { data } = await supabase
+        .from("activities")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("venue_id", thread.venueObj.id)
+        .eq("kind", "checkin")
+        .gte("created_at", since)
+        .limit(1);
+      if (!cancelled) setJoined((data || []).length > 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [joinEligible, userId, thread.venueObj?.id]);
 
   // "with JD and Bianca" — tags on this check-in (pending + accepted render;
   // removed never does).
@@ -170,25 +199,29 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         </div>
 
         {/* Join — presence begets presence. Only on someone else's FRESH
-            check-in with a known venue: one tap closes this thread and runs
-            your own check-in there (dupe-guarded, confetti sheet and all). */}
-        {onCheckIn &&
-          thread.venueObj &&
-          thread.ownerId !== userId &&
-          Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS && (
-            <div className="px-5 pt-3">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onCheckIn(thread.venueObj);
-                }}
-                className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition"
-              >
-                I'm here too — join {thread.ownerName}
-              </button>
-            </div>
-          )}
+            check-in with a known venue. If the viewer already checked in here
+            recently, show the joined state instead of re-offering. */}
+        {joinEligible && joined === false && (
+          <div className="px-5 pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onCheckIn(thread.venueObj);
+              }}
+              className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition"
+            >
+              I'm here too — join {thread.ownerName}
+            </button>
+          </div>
+        )}
+        {joinEligible && joined === true && (
+          <div className="px-5 pt-3">
+            <p className="w-full rounded-full bg-[#edf2eb] border border-[#cdd9c6] py-2.5 text-center text-sm font-medium text-[#455d3b]">
+              You're here too ✓
+            </p>
+          </div>
+        )}
         <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-3">
           {comments === null && (
             <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
