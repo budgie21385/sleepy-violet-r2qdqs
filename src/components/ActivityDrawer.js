@@ -572,13 +572,13 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               .from("profiles")
               .select("id, display_name, username, avatar_url")
               .in("id", commenterIds),
-            supabase.from("venues").select("id, name").in("id", venueIds),
+            supabase.from("venues").select("*").in("id", venueIds),
           ]);
           const profById2 = Object.fromEntries(
             (profsRes.data || []).map((p) => [p.id, p])
           );
-          const vNameById = Object.fromEntries(
-            (venuesRes.data || []).map((v) => [v.id, v.name])
+          const vById = Object.fromEntries(
+            (venuesRes.data || []).map((v) => [v.id, v])
           );
           // One item per check-in (latest comment shown), not one per comment.
           const seenAct = new Set();
@@ -592,7 +592,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               activityId: c.activity_id,
               ownerId: userId, // it's YOUR check-in — enables add-photos in the card
               profile: profById2[c.user_id] || null,
-              venueName: vNameById[act?.venue_id] || "your check-in",
+              venueName: vById[act?.venue_id]?.name || "your check-in",
+              venueObj: vById[act?.venue_id] || null, // venue link inside the card
               body: c.body,
               checkinTimestamp: act?.created_at,
               timestamp: c.created_at,
@@ -1258,6 +1259,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             ownerId: item.ownerId,
             ownerName: "You",
             venueName: item.venueName,
+            venueObj: item.venueObj || null,
             timestamp: item.checkinTimestamp || item.timestamp,
           })
         }

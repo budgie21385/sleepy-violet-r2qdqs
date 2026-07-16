@@ -93,7 +93,7 @@ export function MapVenueSheet({
       const since = new Date(Date.now() - DUPE_MS).toISOString();
       const { data } = await supabase
         .from("activities")
-        .select("id, created_at")
+        .select("id, created_at, label")
         .eq("user_id", userId)
         .eq("venue_id", venue.id)
         .eq("kind", "checkin")
@@ -465,8 +465,13 @@ export function MapVenueSheet({
                 if (checkedIn) {
                   onOpenThread?.({
                     activityId: checkedIn.id,
+                    // ownerId makes it YOUR card — without it the thread
+                    // doesn't know it's yours and hides the camera tile.
+                    ownerId: userId,
                     ownerName: "You",
                     venueName: venue.name,
+                    label: checkedIn.label || null,
+                    venueObj: venue,
                     timestamp: checkedIn.created_at,
                   });
                   return;
