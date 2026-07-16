@@ -33,6 +33,7 @@ export function CheckinHistoryRow({ c }) {
 export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack }) {
   const [rows, setRows] = useState(null); // null = loading
   const [venueById, setVenueById] = useState(() => new Map());
+  const [withByAct, setWithByAct] = useState(() => new Map()); // activityId → first names
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [thread, setThread] = useState(null);
 
@@ -58,8 +59,41 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
           .in("id", ids);
         vMap = new Map((vens || []).map((v) => [v.id, v]));
       }
+      // "with John" — companions tagged on each check-in (pending + accepted
+      // render, removed never does — same rule as the thread card).
+      const wMap = new Map();
+      const actIds = (data || []).map((r) => r.id);
+      if (actIds.length > 0) {
+        const { data: tags } = await supabase
+          .from("activity_tags")
+          .select("activity_id, tagged_user_id, status")
+          .in("activity_id", actIds)
+          .neq("status", "removed");
+        const uids = Array.from(
+          new Set((tags || []).map((t) => t.tagged_user_id))
+        );
+        if (uids.length > 0) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("id, display_name")
+            .in("id", uids);
+          const nameById = Object.fromEntries(
+            (profs || []).map((p) => [
+              p.id,
+              (p.display_name || "").split(" ")[0],
+            ])
+          );
+          for (const t of tags || []) {
+            const n = nameById[t.tagged_user_id];
+            if (!n) continue;
+            if (!wMap.has(t.activity_id)) wMap.set(t.activity_id, []);
+            wMap.get(t.activity_id).push(n);
+          }
+        }
+      }
       if (cancelled) return;
       setVenueById(vMap);
+      setWithByAct(wMap);
       setRows(data || []);
     })();
     return () => {
@@ -136,7 +170,18 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
                       <span className="font-normal text-neutral-500"> · {r.label}</span>
                     ) : null}
                   </p>
-                  <p className="text-[11px] text-neutral-500">{when(r.created_at)}</p>
+                  <p className="text-[11px] text-neutral-500">
+                    {when(r.created_at)}
+                    {(() => {
+                      const names = withByAct.get(r.id);
+                      if (!names || names.length === 0) return null;
+                      const who =
+                        names.length === 1
+                          ? names[0]
+                          : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+                      return ` · with ${who}`;
+                    })()}
+                  </p>
                 </div>
                 <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
               </button>

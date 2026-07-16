@@ -27,44 +27,71 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [withNames, setWithNames] = useState([]); // tagged companions
   // Whether the VIEWER already has a recent check-in at this venue —
   // null = still checking (render neither state to avoid a wrong flash).
+  // myActivityId = that check-in's id: on a friend's card, YOUR uploads
+  // attach to YOUR check-in (photos always live on your own object; the
+  // strip below merges both so the card reads as the shared night).
   const [joined, setJoined] = useState(null);
-  // Photos on this check-in (signed web-derivative URLs) + tap-to-enlarge.
-  // The OWNER can add more right here — this is the "add last night's photos"
-  // path (Been / Activity → your check-in → camera tile).
+  const [myActivityId, setMyActivityId] = useState(null);
+  // Photos (signed web-derivative URLs) + tap-to-enlarge. Owner adds to the
+  // thread's check-in ("add last night's photos" path); a joined viewer adds
+  // to their own parallel check-in.
   const [photos, setPhotos] = useState([]);
   const [lightbox, setLightbox] = useState(null); // signed url
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const listRef = useRef(null);
   const isOwner = thread.ownerId === userId;
+  const uploadTargetId = isOwner ? thread.activityId : myActivityId;
+  // Cap applies per check-in — only count photos on the one I'd upload to.
+  const myPhotoCount = photos.filter(
+    (p) => p.activity_id === uploadTargetId
+  ).length;
 
   useEffect(() => {
     let cancelled = false;
-    fetchCheckinPhotos(thread.activityId).then((rows) => {
-      if (!cancelled) setPhotos(rows.filter((r) => r.url));
-    });
+    (async () => {
+      const rows = await fetchCheckinPhotos(thread.activityId);
+      const mine = myActivityId
+        ? await fetchCheckinPhotos(myActivityId)
+        : [];
+      if (cancelled) return;
+      setPhotos(
+        [...rows, ...mine]
+          .filter((r) => r.url)
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      );
+    })();
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId]);
+  }, [thread.activityId, myActivityId]);
 
   async function addPhotos(fileList) {
+    if (!uploadTargetId) return;
     const files = Array.from(fileList || []).slice(
       0,
-      MAX_PHOTOS_PER_CHECKIN - photos.length
+      MAX_PHOTOS_PER_CHECKIN - myPhotoCount
     );
     if (files.length === 0) return;
     setUploading(true);
     for (const file of files) {
       try {
-        await uploadCheckinPhoto(userId, thread.activityId, file);
+        await uploadCheckinPhoto(userId, uploadTargetId, file);
       } catch (e) {
         console.error("Photo upload failed:", e);
         showToast?.("Couldn't upload a photo");
       }
     }
     const rows = await fetchCheckinPhotos(thread.activityId);
-    setPhotos(rows.filter((r) => r.url));
+    const mine =
+      uploadTargetId !== thread.activityId
+        ? await fetchCheckinPhotos(uploadTargetId)
+        : [];
+    setPhotos(
+      [...rows, ...mine]
+        .filter((r) => r.url)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    );
     setUploading(false);
   }
 
@@ -74,8 +101,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     thread.ownerId !== userId &&
     Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS;
 
+  // Runs on any friend's card with a known venue (not just fresh ones) so a
+  // joined viewer gets the camera tile even after the join window's over.
   useEffect(() => {
-    if (!joinEligible || !userId) return;
+    if (isOwner || !thread.venueObj || !userId) return;
     let cancelled = false;
     (async () => {
       const since = new Date(Date.now() - DUPE_MS).toISOString();
@@ -86,13 +115,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .eq("venue_id", thread.venueObj.id)
         .eq("kind", "checkin")
         .gte("created_at", since)
+        .order("created_at", { ascending: false })
         .limit(1);
-      if (!cancelled) setJoined((data || []).length > 0);
+      if (cancelled) return;
+      setJoined((data || []).length > 0);
+      setMyActivityId(data?.[0]?.id ?? null);
     })();
     return () => {
       cancelled = true;
     };
-  }, [joinEligible, userId, thread.venueObj?.id]);
+  }, [isOwner, userId, thread.venueObj?.id]);
 
   // "with JD and Bianca" — tags on this check-in (pending + accepted render;
   // removed never does).
@@ -242,10 +274,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </div>
         </div>
 
-        {/* Join — presence begets presence. Only on someone else's FRESH
-            check-in with a known venue. If the viewer already checked in here
-            recently, show the joined state instead of re-offering. */}
-        {(photos.length > 0 || isOwner) && (
+        {/* Photo strip — the owner's photos plus, if the viewer joined this
+            check-in, their own. The camera tile shows for whoever has a
+            check-in to hang photos on (owner always; joined viewer via
+            their own parallel check-in). */}
+        {(photos.length > 0 || uploadTargetId) && (
           <div className="px-5 pt-3">
             <input
               ref={fileInputRef}
@@ -273,7 +306,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   />
                 </button>
               ))}
-              {isOwner && photos.length < MAX_PHOTOS_PER_CHECKIN && (
+              {uploadTargetId && myPhotoCount < MAX_PHOTOS_PER_CHECKIN && (
                 <button
                   type="button"
                   disabled={uploading}
@@ -282,7 +315,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 >
                   <Camera size={20} />
                   <span className="text-[10px] font-medium">
-                    {uploading ? "Uploading…" : photos.length === 0 ? "Add photos" : "More"}
+                    {uploading ? "Uploading…" : myPhotoCount === 0 ? "Add photos" : "More"}
                   </span>
                 </button>
               )}

@@ -1098,6 +1098,67 @@ useEffect(() => {
         }
       }
 
+      // Session "Did you go?" nudges active this week (following Monday
+      // after the outing, not yet answered, no check-in near the date).
+      let sessionNudgeCount = 0;
+      {
+        const followingMonday = (ts) => {
+          const d = new Date(ts);
+          const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          m.setDate(m.getDate() + (((8 - m.getDay()) % 7) || 7));
+          return m.getTime();
+        };
+        let doneIds = [];
+        try {
+          doneIds = JSON.parse(
+            localStorage.getItem("flanit_session_nudges_done") || "[]"
+          );
+        } catch {}
+        const doneSet = new Set(doneIds);
+        const allSessIds = Array.from(
+          new Set([
+            ...hostedIds,
+            ...(myPartsRes.data || []).map((p) => p.session_id),
+          ])
+        );
+        if (allSessIds.length > 0) {
+          const { data: sess } = await supabase
+            .from("match_sessions")
+            .select("id, decided_venue_id, event_at, updated_at")
+            .in("id", allSessIds)
+            .not("decided_venue_id", "is", null);
+          const now = Date.now();
+          const WEEK = 7 * 24 * 60 * 60 * 1000;
+          const cands = (sess || []).filter((s) => {
+            if (doneSet.has(s.id)) return false;
+            const ref = new Date(s.event_at || s.updated_at).getTime();
+            if (ref > now) return false;
+            const start = followingMonday(ref);
+            return now >= start && now < start + WEEK;
+          });
+          if (cands.length > 0) {
+            const { data: myCheckins } = await supabase
+              .from("activities")
+              .select("venue_id, created_at")
+              .eq("user_id", uid)
+              .eq("kind", "checkin")
+              .in(
+                "venue_id",
+                Array.from(new Set(cands.map((s) => s.decided_venue_id)))
+              );
+            sessionNudgeCount = cands.filter((s) => {
+              const ref = new Date(s.event_at || s.updated_at).getTime();
+              return !(myCheckins || []).some(
+                (c) =>
+                  c.venue_id === s.decided_venue_id &&
+                  Math.abs(new Date(c.created_at).getTime() - ref) <
+                    48 * 60 * 60 * 1000
+              );
+            }).length;
+          }
+        }
+      }
+
       if (cancelled) return;
       setUnreadCount(
         (reqRes.count ?? 0) +
@@ -1107,7 +1168,8 @@ useEffect(() => {
           checkinCount +
           commentCount +
           tagCount +
-          photoNudgeCount
+          photoNudgeCount +
+          sessionNudgeCount
       );
     })();
     return () => {

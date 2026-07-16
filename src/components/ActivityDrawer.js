@@ -8,6 +8,15 @@
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect } from "react";
 import { X, UserPlus, Check, MapPin, MessageCircle, Camera } from "lucide-react";
+
+// Local midnight of the Monday strictly AFTER the given time — the session
+// "Did you go?" nudge fires then (Mark: following Monday, no matter what).
+function followingMonday(ts) {
+  const d = new Date(ts);
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  m.setDate(m.getDate() + (((8 - m.getDay()) % 7) || 7));
+  return m;
+}
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
@@ -26,6 +35,29 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     const stored = localStorage.getItem("flanit_drawer_last_seen");
     return stored ? new Date(stored) : new Date(0);
   });
+
+  // ---- Session "Did you go?" nudge helpers (Mark, July 16: fires the
+  // following Monday, no matter when the outing was — one weekly moment).
+  const SESSION_NUDGE_DONE_KEY = "flanit_session_nudges_done";
+  function readNudgesDone() {
+    try {
+      return new Set(
+        JSON.parse(localStorage.getItem(SESSION_NUDGE_DONE_KEY) || "[]")
+      );
+    } catch {
+      return new Set();
+    }
+  }
+  function markNudgeDone(sessionId) {
+    const done = readNudgesDone();
+    done.add(sessionId);
+    try {
+      localStorage.setItem(
+        SESSION_NUDGE_DONE_KEY,
+        JSON.stringify(Array.from(done))
+      );
+    } catch {}
+  }
 
   async function load() {
     if (!userId) return;
@@ -436,6 +468,81 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return nudgeItems;
     })();
 
+    // ---- Session "Did you go?" nudge: decided sessions I hosted or joined,
+    // surfaced the FOLLOWING MONDAY after the outing (event_at for planned
+    // sessions, decision time for Right Now). Yes → backdated check-in +
+    // photos; Not yet → dismissed (localStorage). Window: that one week.
+    const sessionNudgeP = (async () => {
+      const nudges = [];
+      const sessIds = Array.from(
+        new Set([
+          ...hostedRows.map((s) => s.id),
+          ...myPartRows.map((p) => p.session_id),
+        ])
+      );
+      if (sessIds.length === 0) return nudges;
+      const doneSet = readNudgesDone();
+      const { data: sess } = await supabase
+        .from("match_sessions")
+        .select("id, name, decided_venue_id, event_at, updated_at")
+        .in("id", sessIds)
+        .not("decided_venue_id", "is", null);
+      const now = Date.now();
+      const WEEK = 7 * 24 * 60 * 60 * 1000;
+      const candidates = (sess || []).filter((s) => {
+        if (doneSet.has(s.id)) return false;
+        const ref = new Date(s.event_at || s.updated_at).getTime();
+        if (ref > now) return false; // outing hasn't happened yet
+        const start = followingMonday(ref).getTime();
+        return now >= start && now < start + WEEK;
+      });
+      if (candidates.length === 0) return nudges;
+      // If they checked in near the outing, we already know they went.
+      const { data: myCheckins } = await supabase
+        .from("activities")
+        .select("venue_id, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .in(
+          "venue_id",
+          Array.from(new Set(candidates.map((s) => s.decided_venue_id)))
+        );
+      for (const s of candidates) {
+        const ref = new Date(s.event_at || s.updated_at).getTime();
+        const went = (myCheckins || []).some(
+          (c) =>
+            c.venue_id === s.decided_venue_id &&
+            Math.abs(new Date(c.created_at).getTime() - ref) <
+              48 * 60 * 60 * 1000
+        );
+        if (went) continue;
+        // Shortlist RPC resolves the venue even if RLS would hide it.
+        let venueName = "the spot you picked";
+        let venueObj = null;
+        const { data: vts } = await supabase.rpc(
+          "get_session_shortlist_venues",
+          { p_session_id: s.id }
+        );
+        const v = (vts || []).find((x) => x.id === s.decided_venue_id);
+        if (v) {
+          venueObj = v;
+          venueName = v.name || venueName;
+        }
+        nudges.push({
+          kind: "session_nudge",
+          id: `sn_${s.id}`,
+          sessionId: s.id,
+          venueId: s.decided_venue_id,
+          venueName,
+          venueObj,
+          sessionName: s.name || null,
+          refTimestamp: s.event_at || s.updated_at,
+          timestamp: followingMonday(ref).toISOString(), // NEW on Monday
+        });
+      }
+      return nudges;
+    })();
+
     // ---- Comments on MY check-ins ("[Name] commented on your check-in") ----
     const commentP = (async () => {
       let commentItems = [];
@@ -548,6 +655,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       commentItems,
       inviteItems,
       photoNudgeItems,
+      sessionNudgeItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -558,6 +666,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       commentP,
       inviteP,
       photoNudgeP,
+      sessionNudgeP,
     ]);
 
     const all = [
@@ -571,6 +680,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...commentItems,
       ...tagNudgeItems,
       ...photoNudgeItems,
+      ...sessionNudgeItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     drawerCache = { uid: userId, items: all };
     setItems(all);
@@ -628,6 +738,44 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return;
     }
     await load();
+  }
+
+  // "Did you go?" → Yes: backdated check-in at the decided venue (lands in
+  // Been, past the fresh window so no live pin), then the card opens with the
+  // camera tile ready. Same mechanics as accepting a tag.
+  async function sessionNudgeYes(item) {
+    setActing(item.id);
+    const { data: act, error } = await supabase
+      .from("activities")
+      .insert({
+        user_id: userId,
+        kind: "checkin",
+        venue_id: item.venueId,
+        created_at: item.refTimestamp,
+      })
+      .select("*")
+      .single();
+    setActing(null);
+    if (error) {
+      console.error("Session nudge check-in failed:", error);
+      showToast?.("Couldn't add that");
+      return;
+    }
+    markNudgeDone(item.sessionId);
+    setItems((prev) => (prev || []).filter((i) => i.id !== item.id));
+    setThread({
+      activityId: act.id,
+      ownerId: userId,
+      ownerName: "You",
+      venueName: item.venueName,
+      venueObj: item.venueObj,
+      timestamp: act.created_at,
+    });
+  }
+
+  function sessionNudgeNo(item) {
+    markNudgeDone(item.sessionId);
+    setItems((prev) => (prev || []).filter((i) => i.id !== item.id));
   }
 
   // Remove: strips your name off the tagger's check-in too.
@@ -730,13 +878,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 acting={
                   acting === item.friendshipId ||
                   acting === item.otherId ||
-                  acting === item.tagId
+                  acting === item.tagId ||
+                  acting === item.id
                 }
                 onAccept={() => setStatus(item.friendshipId, "accepted")}
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
                 onAcceptTag={() => acceptTag(item)}
                 onRemoveTag={() => removeTag(item)}
+                onSessionNudgeYes={() => sessionNudgeYes(item)}
+                onSessionNudgeNo={() => sessionNudgeNo(item)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
@@ -760,13 +911,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 acting={
                   acting === item.friendshipId ||
                   acting === item.otherId ||
-                  acting === item.tagId
+                  acting === item.tagId ||
+                  acting === item.id
                 }
                 onAccept={() => setStatus(item.friendshipId, "accepted")}
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
                 onAcceptTag={() => acceptTag(item)}
                 onRemoveTag={() => removeTag(item)}
+                onSessionNudgeYes={() => sessionNudgeYes(item)}
+                onSessionNudgeNo={() => sessionNudgeNo(item)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
@@ -826,7 +980,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAcceptTag, onRemoveTag, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -1103,6 +1257,52 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
       </button>
+    );
+  }
+
+  if (item.kind === "session_nudge") {
+    // Monday-after ask for a decided session. Yes → backdated check-in +
+    // photos; Not yet → dismissed for good on this session.
+    const when = new Date(item.refTimestamp).toLocaleDateString(undefined, {
+      weekday: "long",
+    });
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <div className="flex items-center gap-3 mb-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb]">
+            <MapPin size={17} className="text-[#455d3b]" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              Did you go to{" "}
+              <strong className="font-medium">{item.venueName}</strong>?
+            </p>
+            <p className="text-[11px] text-neutral-500">
+              {item.sessionName
+                ? `Your pick from “${item.sessionName}”`
+                : `Your session pick from ${when}`}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onSessionNudgeYes}
+            className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Yes
+          </button>
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onSessionNudgeNo}
+            className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Not yet
+          </button>
+        </div>
+      </div>
     );
   }
 
