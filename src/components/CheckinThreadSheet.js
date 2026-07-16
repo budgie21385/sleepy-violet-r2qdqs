@@ -7,7 +7,12 @@ import { X, Send } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
-import { fetchCheckinPhotos } from "../lib/photos";
+import {
+  fetchCheckinPhotos,
+  uploadCheckinPhoto,
+  MAX_PHOTOS_PER_CHECKIN,
+} from "../lib/photos";
+import { Camera } from "lucide-react";
 
 // The check-in's own view — a check-in is a first-class object (owner, moment,
 // label, companions, conversation), NOT a shortcut to the venue card. The
@@ -24,9 +29,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // null = still checking (render neither state to avoid a wrong flash).
   const [joined, setJoined] = useState(null);
   // Photos on this check-in (signed web-derivative URLs) + tap-to-enlarge.
+  // The OWNER can add more right here — this is the "add last night's photos"
+  // path (Been / Activity → your check-in → camera tile).
   const [photos, setPhotos] = useState([]);
   const [lightbox, setLightbox] = useState(null); // signed url
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
   const listRef = useRef(null);
+  const isOwner = thread.ownerId === userId;
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +47,26 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       cancelled = true;
     };
   }, [thread.activityId]);
+
+  async function addPhotos(fileList) {
+    const files = Array.from(fileList || []).slice(
+      0,
+      MAX_PHOTOS_PER_CHECKIN - photos.length
+    );
+    if (files.length === 0) return;
+    setUploading(true);
+    for (const file of files) {
+      try {
+        await uploadCheckinPhoto(userId, thread.activityId, file);
+      } catch (e) {
+        console.error("Photo upload failed:", e);
+        showToast?.("Couldn't upload a photo");
+      }
+    }
+    const rows = await fetchCheckinPhotos(thread.activityId);
+    setPhotos(rows.filter((r) => r.url));
+    setUploading(false);
+  }
 
   const joinEligible =
     !!onCheckIn &&
@@ -215,8 +245,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         {/* Join — presence begets presence. Only on someone else's FRESH
             check-in with a known venue. If the viewer already checked in here
             recently, show the joined state instead of re-offering. */}
-        {photos.length > 0 && (
+        {(photos.length > 0 || isOwner) && (
           <div className="px-5 pt-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addPhotos(e.target.files);
+                e.target.value = "";
+              }}
+            />
             <div className="flex gap-2 overflow-x-auto pb-1">
               {photos.map((p) => (
                 <button
@@ -232,6 +273,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   />
                 </button>
               ))}
+              {isOwner && photos.length < MAX_PHOTOS_PER_CHECKIN && (
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-24 w-24 shrink-0 rounded-xl border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-1 text-neutral-500 active:scale-95 transition disabled:opacity-50"
+                >
+                  <Camera size={20} />
+                  <span className="text-[10px] font-medium">
+                    {uploading ? "Uploading…" : photos.length === 0 ? "Add photos" : "More"}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         )}

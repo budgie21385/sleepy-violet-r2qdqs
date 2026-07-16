@@ -434,6 +434,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               kind: "checkin_comment",
               id: `cmt_${c.id}`,
               activityId: c.activity_id,
+              ownerId: userId, // it's YOUR check-in — enables add-photos in the card
               profile: profById2[c.user_id] || null,
               venueName: vNameById[act?.venue_id] || "your check-in",
               body: c.body,
@@ -1032,6 +1033,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         onClick={() =>
           onOpenThread?.({
             activityId: item.activityId,
+            ownerId: item.ownerId,
             ownerName: "You",
             venueName: item.venueName,
             timestamp: item.checkinTimestamp || item.timestamp,
