@@ -12,8 +12,14 @@ import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
+// Last loaded items, module-level — reopening the tab paints instantly from
+// this while load() refreshes in the background (stale-while-revalidate).
+let drawerCache = null; // { uid, items }
+
 export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, onCheckIn, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
-  const [items, setItems] = useState(null); // null = loading
+  const [items, setItems] = useState(() =>
+    drawerCache && drawerCache.uid === userId ? drawerCache.items : null
+  ); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [thread, setThread] = useState(null); // open comment thread sheet
   const [lastSeen] = useState(() => {
@@ -73,41 +79,46 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     incomingRows.forEach((r) => otherIds.add(r.requester_id));
     acceptedRows.forEach((r) => otherIds.add(r.addressee_id));
 
-    let profilesById = {};
-    if (otherIds.size > 0) {
-      const { data: profileRows } = await supabase
-        .from("profiles")
-        .select("id, display_name, username, avatar_url")
-        .in("id", Array.from(otherIds));
-      profilesById = Object.fromEntries(
-        (profileRows || []).map((p) => [p.id, p])
-      );
-    }
-
-    // Shape into a flat sortable list of activity items.
-    const incomingItems = incomingRows.map((r) => ({
-      kind: "request_received",
-      id: `req_${r.id}`,
-      friendshipId: r.id,
-      otherId: r.requester_id,
-      profile: profilesById[r.requester_id] || null,
-      timestamp: r.created_at,
-    }));
-    const acceptedItems = acceptedRows.map((r) => ({
-      kind: "request_accepted",
-      id: `acc_${r.id}`,
-      otherId: r.addressee_id,
-      profile: profilesById[r.addressee_id] || null,
-      timestamp: r.responded_at,
-    }));
+    // All derivation blocks below run CONCURRENTLY — they only depend on the
+    // phase-1 results, and running them in sequence was the drawer's whole
+    // slowness (each block is 1–4 further round-trips).
+    const requestsP = (async () => {
+      let profilesById = {};
+      if (otherIds.size > 0) {
+        const { data: profileRows } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", Array.from(otherIds));
+        profilesById = Object.fromEntries(
+          (profileRows || []).map((p) => [p.id, p])
+        );
+      }
+      const incomingItems = incomingRows.map((r) => ({
+        kind: "request_received",
+        id: `req_${r.id}`,
+        friendshipId: r.id,
+        otherId: r.requester_id,
+        profile: profilesById[r.requester_id] || null,
+        timestamp: r.created_at,
+      }));
+      const acceptedItems = acceptedRows.map((r) => ({
+        kind: "request_accepted",
+        id: `acc_${r.id}`,
+        otherId: r.addressee_id,
+        profile: profilesById[r.addressee_id] || null,
+        timestamp: r.responded_at,
+      }));
+      return [incomingItems, acceptedItems];
+    })();
 
     // ---- Host: guests who submitted their picks on sessions I host ----
     const hostedRows = hostedRes.data || [];
     const hostedNameById = Object.fromEntries(
       hostedRows.map((s) => [s.id, s.name])
     );
-    let submittedItems = [];
-    if (hostedRows.length > 0) {
+    const submittedP = (async () => {
+      let submittedItems = [];
+      if (hostedRows.length === 0) return submittedItems;
       const { data: subRows } = await supabase
         .from("session_participants")
         .select("session_id, user_id, display_name, submitted_at")
@@ -124,12 +135,14 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         sessionName: hostedNameById[r.session_id] || "your session",
         timestamp: r.submitted_at,
       }));
-    }
+      return submittedItems;
+    })();
 
     // ---- Guest: a host's final pick on a session I'm in (not hosting) ----
     const myPartRows = myPartsRes.data || [];
-    let decidedItems = [];
-    if (myPartRows.length > 0) {
+    const decidedP = (async () => {
+      let decidedItems = [];
+      if (myPartRows.length === 0) return decidedItems;
       const { data: decidedRows } = await supabase
         .from("match_sessions")
         .select("id, name, host_user_id, decided_venue_id, updated_at")
@@ -158,12 +171,14 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           };
         })
       );
-    }
+      return decidedItems;
+    })();
 
     // ---- Connect: people from my sessions I'm not yet connected with ----
     // Add (signed-up) or invite (anon) each one — actionable from the drawer.
-    let connectItems = [];
-    if (myPartRows.length > 0) {
+    const connectP = (async () => {
+      let connectItems = [];
+      if (myPartRows.length === 0) return connectItems;
       const [coPartsRes, myFriendshipsRes] = await Promise.all([
         supabase
           .from("session_participants")
@@ -213,7 +228,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           };
         });
       }
-    }
+      return connectItems;
+    })();
 
     // ---- Friend check-ins ("[Name] is at [venue]") — last 7 days ----
     const friendIds = Array.from(
@@ -223,8 +239,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         )
       )
     );
-    let checkinItems = [];
-    if (friendIds.length > 0) {
+    const checkinP = (async () => {
+      let checkinItems = [];
+      if (friendIds.length === 0) return checkinItems;
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: checkinRows } = await supabase
         .from("activities")
@@ -305,11 +322,12 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           timestamp: r.created_at,
         }));
       }
-    }
+      return checkinItems;
+    })();
 
     // ---- Tag nudges: "[Name] checked you in at [venue]" (pending only) ----
-    let tagNudgeItems = [];
-    {
+    const tagNudgeP = (async () => {
+      let tagNudgeItems = [];
       const { data: tagRows } = await supabase
         .from("activity_tags")
         .select("id, activity_id, created_at")
@@ -366,11 +384,12 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             };
           });
       }
-    }
+      return tagNudgeItems;
+    })();
 
     // ---- Comments on MY check-ins ("[Name] commented on your check-in") ----
-    let commentItems = [];
-    {
+    const commentP = (async () => {
+      let commentItems = [];
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: myActs } = await supabase
         .from("activities")
@@ -424,15 +443,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           }
         }
       }
-    }
+      return commentItems;
+    })();
 
     // ---- Session invites a friend sent me (not ones I've already joined) ----
-    const myPartSessionIds = new Set(myPartRows.map((p) => p.session_id));
-    const inviteRows = (invitesRes.data || []).filter(
-      (r) => !myPartSessionIds.has(r.session_id)
-    );
-    let inviteItems = [];
-    if (inviteRows.length > 0) {
+    const inviteP = (async () => {
+      const myPartSessionIds = new Set(myPartRows.map((p) => p.session_id));
+      const inviteRows = (invitesRes.data || []).filter(
+        (r) => !myPartSessionIds.has(r.session_id)
+      );
+      let inviteItems = [];
+      if (inviteRows.length === 0) return inviteItems;
       const inviterIds = Array.from(new Set(inviteRows.map((r) => r.inviter_id)));
       const invSessionIds = Array.from(new Set(inviteRows.map((r) => r.session_id)));
       const [inviterProfsRes, invSessRes] = await Promise.all([
@@ -463,7 +484,29 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           timestamp: r.created_at,
         };
       });
-    }
+      return inviteItems;
+    })();
+
+    // Everything lands together — one concurrent wave instead of a waterfall.
+    const [
+      [incomingItems, acceptedItems],
+      submittedItems,
+      decidedItems,
+      connectItems,
+      checkinItems,
+      tagNudgeItems,
+      commentItems,
+      inviteItems,
+    ] = await Promise.all([
+      requestsP,
+      submittedP,
+      decidedP,
+      connectP,
+      checkinP,
+      tagNudgeP,
+      commentP,
+      inviteP,
+    ]);
 
     const all = [
       ...incomingItems,
@@ -476,6 +519,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...commentItems,
       ...tagNudgeItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    drawerCache = { uid: userId, items: all };
     setItems(all);
   }
 
