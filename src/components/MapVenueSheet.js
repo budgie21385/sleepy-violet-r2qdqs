@@ -106,25 +106,27 @@ export function MapVenueSheet({
         .eq("venue_id", venue.id)
         .order("created_at", { ascending: false })
         .limit(50);
-      const others = (rows || []).filter((r) => r.user_id !== userId);
-      if (others.length === 0) {
+      // YOU cluster with your friends here — "You and Mark are here", not a
+      // strip that pretends you're elsewhere.
+      const all = rows || [];
+      if (all.length === 0) {
         if (!cancelled) setStrip({ none: true });
         return;
       }
       const FRESH_MS = 3 * 60 * 60 * 1000;
-      const fresh = others.filter(
+      const fresh = all.filter(
         (r) => Date.now() - new Date(r.created_at).getTime() < FRESH_MS
       );
-      // Distinct friends over all time (memory), newest first.
+      // Distinct people over all time (memory), newest first, self included.
       const seen = new Set();
       const distinct = [];
-      for (const r of others) {
+      for (const r of all) {
         if (seen.has(r.user_id)) continue;
         seen.add(r.user_id);
         distinct.push(r);
       }
       const needIds = Array.from(
-        new Set([...fresh.slice(0, 3), ...distinct.slice(0, 3)].map((r) => r.user_id))
+        new Set([...fresh.slice(0, 4), ...distinct.slice(0, 4)].map((r) => r.user_id))
       );
       const { data: profs } = await supabase
         .from("profiles")
@@ -141,11 +143,21 @@ export function MapVenueSheet({
         commentCount = count ?? 0;
       }
       if (cancelled) return;
+      const freshUsers = Array.from(new Set(fresh.map((r) => r.user_id)));
+      const selfFresh = freshUsers.includes(userId);
+      const firstOtherId = freshUsers.find((id) => id !== userId) || null;
       setStrip({
         live: fresh[0] ? { ...fresh[0], profile: profById[fresh[0].user_id] } : null,
-        liveCount: new Set(fresh.map((r) => r.user_id)).size,
-        memory: distinct.slice(0, 3).map((r) => profById[r.user_id]).filter(Boolean),
+        liveCount: freshUsers.length,
+        selfFresh,
+        otherProfile: firstOtherId ? profById[firstOtherId] || null : null,
+        selfProfile: profById[userId] || null,
+        memory: distinct.slice(0, 3).map((r) => ({
+          ...(profById[r.user_id] || {}),
+          isSelf: r.user_id === userId,
+        })),
         memoryCount: distinct.length,
+        memoryHasSelf: distinct.some((r) => r.user_id === userId),
         target: { ...target, profile: profById[target.user_id] },
         commentCount,
       });
@@ -322,14 +334,21 @@ export function MapVenueSheet({
         <OpeningHours venue={venue} />
         {strip && !strip.none && strip.live && (
           <div className="w-full flex items-center gap-2.5 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5">
-            <button
-              type="button"
-              aria-label="View profile"
-              onClick={() => openProfile(strip.live.user_id)}
-              className="shrink-0 active:scale-95 transition"
-            >
-              <FriendAvatar profile={strip.live.profile} small />
-            </button>
+            <span className="flex shrink-0">
+              {strip.selfFresh && strip.selfProfile && (
+                <FriendAvatar profile={strip.selfProfile} small />
+              )}
+              {strip.otherProfile && (
+                <button
+                  type="button"
+                  aria-label="View profile"
+                  onClick={() => openProfile(strip.otherProfile.id)}
+                  className={`active:scale-95 transition ${strip.selfFresh && strip.selfProfile ? "-ml-2" : ""}`}
+                >
+                  <FriendAvatar profile={strip.otherProfile} small />
+                </button>
+              )}
+            </span>
             <button
               type="button"
               onClick={openStripThread}
@@ -337,10 +356,17 @@ export function MapVenueSheet({
             >
               <p className="flex-1 min-w-0 text-sm text-[#2f3f29] truncate">
                 <strong className="font-medium">
-                  {strip.live.profile?.display_name || "A friend"}
-                  {strip.liveCount > 1 ? ` +${strip.liveCount - 1}` : ""}
+                  {strip.selfFresh
+                    ? strip.liveCount === 1
+                      ? "You're"
+                      : strip.liveCount === 2
+                      ? `You and ${(strip.otherProfile?.display_name || "a friend").split(" ")[0]} are`
+                      : `You, ${(strip.otherProfile?.display_name || "a friend").split(" ")[0]} +${strip.liveCount - 2} are`
+                    : `${strip.live.profile?.display_name || "A friend"}${
+                        strip.liveCount > 1 ? ` +${strip.liveCount - 1}` : ""
+                      } is`}
                 </strong>{" "}
-                is here · {timeAgoShort(strip.live.created_at)}
+                here · {timeAgoShort(strip.live.created_at)}
                 {strip.live.label ? ` · ${strip.live.label}` : ""}
               </p>
               <span className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-[#455d3b]">
@@ -355,11 +381,13 @@ export function MapVenueSheet({
             <button
               type="button"
               aria-label="View profile"
-              onClick={() => openProfile(strip.memory[0]?.id)}
+              onClick={() =>
+                openProfile(strip.memory.find((p) => !p.isSelf)?.id)
+              }
               className="flex shrink-0 active:scale-95 transition"
             >
               {strip.memory.map((p, i) => (
-                <span key={p.id} style={i > 0 ? { marginLeft: -8 } : undefined}>
+                <span key={p.id || i} style={i > 0 ? { marginLeft: -8 } : undefined}>
                   <FriendAvatar profile={p} small />
                 </span>
               ))}
@@ -370,7 +398,11 @@ export function MapVenueSheet({
               className="flex-1 min-w-0 flex items-center gap-2 text-left active:scale-[0.99] transition"
             >
               <p className="flex-1 min-w-0 text-sm text-neutral-600 truncate">
-                {strip.memoryCount === 1
+                {strip.memoryHasSelf
+                  ? strip.memoryCount === 1
+                    ? "You've been here"
+                    : `You and ${strip.memoryCount - 1} friend${strip.memoryCount === 2 ? "" : "s"} have been here`
+                  : strip.memoryCount === 1
                   ? `${strip.memory[0]?.display_name || "A friend"} has been here`
                   : `${strip.memoryCount} friends have been here`}
               </p>
