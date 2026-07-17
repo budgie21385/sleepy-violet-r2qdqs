@@ -626,22 +626,33 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         </div>
       </div>
       {lightbox && (
-        <div className="fixed inset-0 z-[3800] bg-black/85 flex flex-col">
-          {/* Tap the photo area to close; the panel below is its thread. */}
+        // One floating card — the photo with its reactions + comments
+        // attached directly beneath it, centered and detached from the
+        // screen edges (Mark: too many things rising from the bottom).
+        <div className="fixed inset-0 z-[3800] flex items-center justify-center p-4">
           <button
             type="button"
             aria-label="Close photo"
             onClick={() => setLightbox(null)}
-            className="flex-1 min-h-0 flex items-center justify-center p-3"
-          >
-            <img
-              src={lightbox.url}
-              alt=""
-              className="max-h-full max-w-full rounded-2xl object-contain"
-            />
-          </button>
-          <div className="shrink-0 max-h-[45%] flex flex-col bg-white rounded-t-3xl">
-            <div className="px-5 pt-3 pb-2">
+            className="absolute inset-0 bg-black/85"
+          />
+          <div className="relative w-full max-w-sm max-h-[90%] flex flex-col bg-white rounded-3xl overflow-hidden shadow-2xl">
+            <div className="relative shrink-0 bg-black">
+              <img
+                src={lightbox.url}
+                alt=""
+                className="w-full max-h-[50vh] object-contain"
+              />
+              <button
+                type="button"
+                aria-label="Close photo"
+                onClick={() => setLightbox(null)}
+                className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-4 pt-3 pb-1">
               <ReactionBar
                 counts={summarizeReactions(reactions, userId, lightbox.id).counts}
                 mine={summarizeReactions(reactions, userId, lightbox.id).mine}
@@ -649,12 +660,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 onTap={(e) => react(e, lightbox)}
               />
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-2">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
               {photoComments === null && (
-                <p className="text-xs text-neutral-400 py-2">Loading…</p>
+                <p className="text-xs text-neutral-400 py-1">Loading…</p>
               )}
               {photoComments !== null && photoComments.length === 0 && (
-                <p className="text-xs text-neutral-400 py-2">
+                <p className="text-xs text-neutral-400 py-1">
                   No comments on this photo yet.
                 </p>
               )}
@@ -677,7 +688,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 ))}
               </div>
             </div>
-            <div className="px-4 py-3 border-t border-neutral-100 flex items-center gap-2">
+            <div className="px-3 py-2.5 border-t border-neutral-100 flex items-center gap-2">
               {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
               <input
                 value={photoBody}
