@@ -91,10 +91,17 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
 // Photos for a check-in, with signed display URLs. Returns
 // [{ ...row, url }] — url is the web derivative, valid for SIGNED_URL_TTL.
 export async function fetchCheckinPhotos(activityId) {
+  return fetchCheckinPhotosMany([activityId]);
+}
+
+// Same, across a same-night CLUSTER of check-ins (tag-accept twins, joins).
+// RLS trims rows the viewer can't see, so passing the whole cluster is safe.
+export async function fetchCheckinPhotosMany(activityIds) {
+  if (!activityIds || activityIds.length === 0) return [];
   const { data: rows } = await supabase
     .from("activity_photos")
     .select("*")
-    .eq("activity_id", activityId)
+    .in("activity_id", activityIds)
     .order("created_at", { ascending: true });
   if (!rows || rows.length === 0) return [];
   const { data: signed } = await supabase.storage

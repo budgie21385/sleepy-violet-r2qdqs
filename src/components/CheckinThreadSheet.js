@@ -8,13 +8,13 @@ import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
-  fetchCheckinPhotos,
+  fetchCheckinPhotosMany,
   uploadCheckinPhoto,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
 import {
   REACTION_SET,
-  fetchReactions,
+  fetchReactionsMany,
   summarizeReactions,
   toggleReaction,
 } from "../lib/reactions";
@@ -94,50 +94,79 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const listRef = useRef(null);
   const isOwner = thread.ownerId === userId;
   const uploadTargetId = isOwner ? thread.activityId : myActivityId;
-  // Cap applies per check-in — only count photos on the one I'd upload to.
-  const myPhotoCount = photos.filter(
-    (p) => p.activity_id === uploadTargetId
-  ).length;
+  // THE SHARED NIGHT: a tag-accept creates a twin check-in with the SAME
+  // timestamp, and a join creates a sibling — content (comments/photos/
+  // reactions) can land on any of them. The card merges the whole same-night
+  // cluster at this venue so it never opens "the wrong twin" (Mark hit this:
+  // photo + comments lived on the twin, card showed the bare one). RLS still
+  // trims every row to what the viewer may see — merging widens nothing.
+  const [clusterIds, setClusterIds] = useState([thread.activityId]);
+  const clusterKey = clusterIds.join(",");
 
   useEffect(() => {
     let cancelled = false;
+    if (!thread.venueObj) {
+      setClusterIds([thread.activityId]);
+      return;
+    }
     (async () => {
-      const rows = await fetchCheckinPhotos(thread.activityId);
-      const mine = myActivityId
-        ? await fetchCheckinPhotos(myActivityId)
-        : [];
+      const SAME_NIGHT_MS = 12 * 60 * 60 * 1000;
+      const ref = new Date(thread.timestamp).getTime();
+      const { data } = await supabase
+        .from("activities")
+        .select("id")
+        .eq("venue_id", thread.venueObj.id)
+        .eq("kind", "checkin")
+        .gte("created_at", new Date(ref - SAME_NIGHT_MS).toISOString())
+        .lte("created_at", new Date(ref + SAME_NIGHT_MS).toISOString());
       if (cancelled) return;
-      setPhotos(
-        [...rows, ...mine]
-          .filter((r) => r.url)
-          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      setClusterIds(
+        Array.from(
+          new Set([thread.activityId, ...(data || []).map((r) => r.id)])
+        )
       );
     })();
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId, myActivityId]);
+  }, [thread.activityId, thread.venueObj?.id, thread.timestamp]);
+  // Cap applies per check-in — only count photos on the one I'd upload to.
+  const myPhotoCount = photos.filter(
+    (p) => p.activity_id === uploadTargetId
+  ).length;
 
-  // Reactions live on the target's OWN activity — a joined viewer's photo
-  // belongs to their check-in, so load both row sets and merge.
-  async function loadReactions() {
-    const rows = await fetchReactions(thread.activityId);
-    const mine =
-      myActivityId && myActivityId !== thread.activityId
-        ? await fetchReactions(myActivityId)
-        : [];
-    return [...rows, ...mine];
+  // All IDs content could hang off: the cluster plus the viewer's own
+  // check-in (which may sit outside a null-venueObj cluster).
+  function contentIds() {
+    return Array.from(
+      new Set([...clusterIds, ...(myActivityId ? [myActivityId] : [])])
+    );
   }
 
   useEffect(() => {
     let cancelled = false;
-    loadReactions().then((rows) => {
+    fetchCheckinPhotosMany(contentIds()).then((rows) => {
+      if (cancelled) return;
+      setPhotos(
+        rows
+          .filter((r) => r.url)
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterKey, myActivityId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchReactionsMany(contentIds()).then((rows) => {
       if (!cancelled) setReactions(rows);
     });
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId, myActivityId]);
+  }, [clusterKey, myActivityId]);
 
   async function react(emoji, photo = null) {
     if (reacting) return;
@@ -149,7 +178,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         userId,
         emoji,
       });
-      setReactions(await loadReactions());
+      setReactions(await fetchReactionsMany(contentIds()));
     } catch (e) {
       console.error("Reaction failed:", e);
       showToast?.("Couldn't react");
@@ -238,13 +267,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         showToast?.("Couldn't upload a photo");
       }
     }
-    const rows = await fetchCheckinPhotos(thread.activityId);
-    const mine =
-      uploadTargetId !== thread.activityId
-        ? await fetchCheckinPhotos(uploadTargetId)
-        : [];
+    const rows = await fetchCheckinPhotosMany(
+      Array.from(new Set([...contentIds(), uploadTargetId]))
+    );
     setPhotos(
-      [...rows, ...mine]
+      rows
         .filter((r) => r.url)
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     );
@@ -327,7 +354,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       const { data: rows } = await supabase
         .from("activity_comments")
         .select("id, user_id, body, created_at")
-        .eq("activity_id", thread.activityId)
+        .in("activity_id", contentIds()) // the shared night, not one twin
         .is("photo_id", null) // photo comments live in their lightbox thread
         .order("created_at", { ascending: true });
       let profById = {};
@@ -347,7 +374,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId]);
+  }, [clusterKey, myActivityId]);
 
   useEffect(() => {
     // Keep the newest comment in view as the list grows.

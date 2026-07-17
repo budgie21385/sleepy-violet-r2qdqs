@@ -11,10 +11,17 @@ export const REACTION_SET = ["🔥", "💀", "😭", "👀", "🫶", "🍻"];
 // All reactions for a check-in (both the check-in itself and its photos, one
 // query). Returns raw rows: { id, activity_id, photo_id, user_id, emoji }.
 export async function fetchReactions(activityId) {
+  return fetchReactionsMany([activityId]);
+}
+
+// Cluster variant — same-night twins share one card, so reactions load
+// across all of them (RLS trims what the viewer can't see).
+export async function fetchReactionsMany(activityIds) {
+  if (!activityIds || activityIds.length === 0) return [];
   const { data } = await supabase
     .from("activity_reactions")
     .select("id, activity_id, photo_id, user_id, emoji")
-    .eq("activity_id", activityId);
+    .in("activity_id", activityIds);
   return data || [];
 }
 
