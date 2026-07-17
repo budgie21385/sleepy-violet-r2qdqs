@@ -543,9 +543,10 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return nudges;
     })();
 
-    // ---- Comments on MY check-ins ("[Name] commented on your check-in") ----
+    // ---- Comments + reactions on MY check-ins ----
     const commentP = (async () => {
       let commentItems = [];
+      let reactionItems = [];
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: myActs } = await supabase
         .from("activities")
@@ -554,24 +555,42 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         .eq("kind", "checkin")
         .gte("created_at", weekAgo);
       if (myActs && myActs.length > 0) {
-        const { data: cRows } = await supabase
-          .from("activity_comments")
-          .select("id, activity_id, user_id, body, created_at")
-          .in("activity_id", myActs.map((a) => a.id))
-          .neq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .limit(20);
-        if (cRows && cRows.length > 0) {
+        const actIds = myActs.map((a) => a.id);
+        const [cRes, rRes] = await Promise.all([
+          supabase
+            .from("activity_comments")
+            .select("id, activity_id, user_id, body, created_at")
+            .in("activity_id", actIds)
+            .neq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(20),
+          supabase
+            .from("activity_reactions")
+            .select("id, activity_id, photo_id, user_id, emoji, created_at")
+            .in("activity_id", actIds)
+            .neq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(20),
+        ]);
+        const cRows = cRes.data || [];
+        const rRows = rRes.data || []; // table may predate SQL run → just empty
+        if (cRows.length > 0 || rRows.length > 0) {
           const actById = Object.fromEntries(myActs.map((a) => [a.id, a]));
-          const commenterIds = Array.from(new Set(cRows.map((c) => c.user_id)));
+          const personIds = Array.from(
+            new Set([...cRows, ...rRows].map((x) => x.user_id))
+          );
           const venueIds = Array.from(
-            new Set(cRows.map((c) => actById[c.activity_id]?.venue_id).filter(Boolean))
+            new Set(
+              [...cRows, ...rRows]
+                .map((x) => actById[x.activity_id]?.venue_id)
+                .filter(Boolean)
+            )
           );
           const [profsRes, venuesRes] = await Promise.all([
             supabase
               .from("profiles")
               .select("id, display_name, username, avatar_url")
-              .in("id", commenterIds),
+              .in("id", personIds),
             supabase.from("venues").select("*").in("id", venueIds),
           ]);
           const profById2 = Object.fromEntries(
@@ -599,9 +618,29 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               timestamp: c.created_at,
             });
           }
+          // Same rule for reactions: latest per check-in.
+          const seenRx = new Set();
+          for (const r of rRows) {
+            if (seenRx.has(r.activity_id)) continue;
+            seenRx.add(r.activity_id);
+            const act = actById[r.activity_id];
+            reactionItems.push({
+              kind: "checkin_reaction",
+              id: `rx_${r.id}`,
+              activityId: r.activity_id,
+              ownerId: userId,
+              profile: profById2[r.user_id] || null,
+              emoji: r.emoji,
+              onPhoto: !!r.photo_id,
+              venueName: vById[act?.venue_id]?.name || "your check-in",
+              venueObj: vById[act?.venue_id] || null,
+              checkinTimestamp: act?.created_at,
+              timestamp: r.created_at,
+            });
+          }
         }
       }
-      return commentItems;
+      return [commentItems, reactionItems];
     })();
 
     // ---- Session invites a friend sent me (not ones I've already joined) ----
@@ -653,7 +692,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       connectItems,
       checkinItems,
       tagNudgeItems,
-      commentItems,
+      [commentItems, reactionItems],
       inviteItems,
       photoNudgeItems,
       sessionNudgeItems,
@@ -679,6 +718,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...inviteItems,
       ...checkinItems,
       ...commentItems,
+      ...reactionItems,
       ...tagNudgeItems,
       ...photoNudgeItems,
       ...sessionNudgeItems,
@@ -1321,6 +1361,35 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           </button>
         </div>
       </div>
+    );
+  }
+
+  if (item.kind === "checkin_reaction") {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenThread?.({
+            activityId: item.activityId,
+            ownerId: item.ownerId,
+            ownerName: "You",
+            venueName: item.venueName,
+            venueObj: item.venueObj || null,
+            timestamp: item.checkinTimestamp || item.timestamp,
+          })
+        }
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <FriendAvatar profile={item.profile} small />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{name}</strong> reacted {item.emoji}{" "}
+            to your {item.onPhoto ? "photo" : "check-in"} at{" "}
+            <strong className="font-medium">{item.venueName}</strong>
+          </p>
+        </div>
+        <span className="text-lg shrink-0">{item.emoji}</span>
+      </button>
     );
   }
 

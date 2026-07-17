@@ -1054,8 +1054,9 @@ useEffect(() => {
         tagCount = count ?? 0;
       }
 
-      // New comments on MY check-ins since last seen.
+      // New comments + reactions on MY check-ins since last seen.
       let commentCount = 0;
+      let reactionCount = 0;
       {
         const { data: myActs } = await supabase
           .from("activities")
@@ -1064,13 +1065,22 @@ useEffect(() => {
           .eq("kind", "checkin");
         const myActIds = (myActs || []).map((a) => a.id);
         if (myActIds.length > 0) {
-          const { count } = await supabase
-            .from("activity_comments")
-            .select("id", { count: "exact", head: true })
-            .in("activity_id", myActIds)
-            .neq("user_id", uid)
-            .gt("created_at", lastSeen);
-          commentCount = count ?? 0;
+          const [cRes, rRes] = await Promise.all([
+            supabase
+              .from("activity_comments")
+              .select("id", { count: "exact", head: true })
+              .in("activity_id", myActIds)
+              .neq("user_id", uid)
+              .gt("created_at", lastSeen),
+            supabase
+              .from("activity_reactions")
+              .select("id", { count: "exact", head: true })
+              .in("activity_id", myActIds)
+              .neq("user_id", uid)
+              .gt("created_at", lastSeen),
+          ]);
+          commentCount = cRes.count ?? 0;
+          reactionCount = rRes.count ?? 0; // 0 until checkin_reactions.sql runs
         }
       }
 
@@ -1167,6 +1177,7 @@ useEffect(() => {
           inviteCount +
           checkinCount +
           commentCount +
+          reactionCount +
           tagCount +
           photoNudgeCount +
           sessionNudgeCount

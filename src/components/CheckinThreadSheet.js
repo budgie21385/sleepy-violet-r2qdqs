@@ -12,7 +12,50 @@ import {
   uploadCheckinPhoto,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
+import {
+  REACTION_SET,
+  fetchReactions,
+  summarizeReactions,
+  toggleReaction,
+} from "../lib/reactions";
 import { Camera } from "lucide-react";
+
+// One tap-bar: 🔥 💀 😭 👀 🫶 🍻 with counts; yours is highlighted. One
+// swappable reaction per person per target (see lib/reactions.js).
+function ReactionBar({ counts, mine, onTap, disabled }) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {REACTION_SET.map((e) => {
+        const n = counts[e] || 0;
+        const isMine = mine === e;
+        return (
+          <button
+            key={e}
+            type="button"
+            disabled={disabled}
+            onClick={() => onTap(e)}
+            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-sm active:scale-90 transition disabled:opacity-50 ${
+              isMine
+                ? "bg-[#edf2eb] border-[#455d3b]"
+                : "border-neutral-200 bg-white"
+            }`}
+          >
+            <span>{e}</span>
+            {n > 0 && (
+              <span
+                className={`text-[11px] font-medium ${
+                  isMine ? "text-[#455d3b]" : "text-neutral-500"
+                }`}
+              >
+                {n}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // The check-in's own view — a check-in is a first-class object (owner, moment,
 // label, companions, conversation), NOT a shortcut to the venue card. The
@@ -36,7 +79,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // thread's check-in ("add last night's photos" path); a joined viewer adds
   // to their own parallel check-in.
   const [photos, setPhotos] = useState([]);
-  const [lightbox, setLightbox] = useState(null); // signed url
+  // Lightbox holds the full photo ROW — it's a mini-thread now (photo +
+  // its own reactions + its own comments), not just a big image.
+  const [lightbox, setLightbox] = useState(null);
+  const [photoComments, setPhotoComments] = useState(null); // null = loading
+  const [photoBody, setPhotoBody] = useState("");
+  const [photoSending, setPhotoSending] = useState(false);
+  // One flat row set for the whole check-in (check-in level + every photo);
+  // summarizeReactions() slices per target.
+  const [reactions, setReactions] = useState([]);
+  const [reacting, setReacting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const listRef = useRef(null);
@@ -65,6 +117,110 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       cancelled = true;
     };
   }, [thread.activityId, myActivityId]);
+
+  // Reactions live on the target's OWN activity — a joined viewer's photo
+  // belongs to their check-in, so load both row sets and merge.
+  async function loadReactions() {
+    const rows = await fetchReactions(thread.activityId);
+    const mine =
+      myActivityId && myActivityId !== thread.activityId
+        ? await fetchReactions(myActivityId)
+        : [];
+    return [...rows, ...mine];
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    loadReactions().then((rows) => {
+      if (!cancelled) setReactions(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.activityId, myActivityId]);
+
+  async function react(emoji, photo = null) {
+    if (reacting) return;
+    setReacting(true);
+    try {
+      await toggleReaction({
+        activityId: photo ? photo.activity_id : thread.activityId,
+        photoId: photo ? photo.id : null,
+        userId,
+        emoji,
+      });
+      setReactions(await loadReactions());
+    } catch (e) {
+      console.error("Reaction failed:", e);
+      showToast?.("Couldn't react");
+    }
+    setReacting(false);
+  }
+
+  // Photo comments load when the lightbox opens (its own little thread).
+  useEffect(() => {
+    if (!lightbox) return;
+    let cancelled = false;
+    setPhotoComments(null);
+    setPhotoBody("");
+    (async () => {
+      const { data: rows } = await supabase
+        .from("activity_comments")
+        .select("id, user_id, body, created_at")
+        .eq("photo_id", lightbox.id)
+        .order("created_at", { ascending: true });
+      let profById = {};
+      const ids = Array.from(new Set((rows || []).map((r) => r.user_id)));
+      if (ids.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", ids);
+        profById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      }
+      if (cancelled) return;
+      setPhotoComments(
+        (rows || []).map((r) => ({ ...r, profile: profById[r.user_id] || null }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lightbox?.id]);
+
+  async function sendPhotoComment() {
+    const text = photoBody.trim();
+    if (!text || photoSending || !lightbox) return;
+    setPhotoSending(true);
+    // Photo comments hang off the photo's OWN activity (a joined viewer's
+    // photo belongs to their check-in) so visibility follows the uploader.
+    const { data: inserted, error } = await supabase
+      .from("activity_comments")
+      .insert({
+        activity_id: lightbox.activity_id,
+        photo_id: lightbox.id,
+        user_id: userId,
+        body: text,
+      })
+      .select("id, user_id, body, created_at")
+      .single();
+    setPhotoSending(false);
+    if (error) {
+      console.error("Photo comment failed:", error);
+      showToast?.("Couldn't post that");
+      return;
+    }
+    setPhotoBody("");
+    const { data: me } = await supabase
+      .from("profiles")
+      .select("id, display_name, username, avatar_url")
+      .eq("id", userId)
+      .maybeSingle();
+    setPhotoComments((prev) => [
+      ...(prev || []),
+      { ...inserted, profile: me || null },
+    ]);
+  }
 
   async function addPhotos(fileList) {
     if (!uploadTargetId) return;
@@ -172,6 +328,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .from("activity_comments")
         .select("id, user_id, body, created_at")
         .eq("activity_id", thread.activityId)
+        .is("photo_id", null) // photo comments live in their lightbox thread
         .order("created_at", { ascending: true });
       let profById = {};
       const ids = Array.from(new Set((rows || []).map((r) => r.user_id)));
@@ -307,7 +464,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setLightbox(p.url)}
+                  onClick={() => setLightbox(p)}
                   className="shrink-0 active:scale-95 transition"
                 >
                   <img
@@ -354,6 +511,15 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             </p>
           </div>
         )}
+        {/* Reactions on the check-in itself — one swappable per person. */}
+        <div className="px-5 pt-3">
+          <ReactionBar
+            counts={summarizeReactions(reactions, userId, null).counts}
+            mine={summarizeReactions(reactions, userId, null).mine}
+            disabled={reacting}
+            onTap={(e) => react(e, null)}
+          />
+        </div>
         <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-3">
           {comments === null && (
             <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
@@ -433,18 +599,79 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         </div>
       </div>
       {lightbox && (
-        <button
-          type="button"
-          aria-label="Close photo"
-          onClick={() => setLightbox(null)}
-          className="fixed inset-0 z-[3800] bg-black/85 flex items-center justify-center p-3"
-        >
-          <img
-            src={lightbox}
-            alt=""
-            className="max-h-full max-w-full rounded-2xl object-contain"
-          />
-        </button>
+        <div className="fixed inset-0 z-[3800] bg-black/85 flex flex-col">
+          {/* Tap the photo area to close; the panel below is its thread. */}
+          <button
+            type="button"
+            aria-label="Close photo"
+            onClick={() => setLightbox(null)}
+            className="flex-1 min-h-0 flex items-center justify-center p-3"
+          >
+            <img
+              src={lightbox.url}
+              alt=""
+              className="max-h-full max-w-full rounded-2xl object-contain"
+            />
+          </button>
+          <div className="shrink-0 max-h-[45%] flex flex-col bg-white rounded-t-3xl">
+            <div className="px-5 pt-3 pb-2">
+              <ReactionBar
+                counts={summarizeReactions(reactions, userId, lightbox.id).counts}
+                mine={summarizeReactions(reactions, userId, lightbox.id).mine}
+                disabled={reacting}
+                onTap={(e) => react(e, lightbox)}
+              />
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-2">
+              {photoComments === null && (
+                <p className="text-xs text-neutral-400 py-2">Loading…</p>
+              )}
+              {photoComments !== null && photoComments.length === 0 && (
+                <p className="text-xs text-neutral-400 py-2">
+                  No comments on this photo yet.
+                </p>
+              )}
+              <div className="space-y-2.5">
+                {(photoComments || []).map((c) => (
+                  <div key={c.id} className="flex items-start gap-2.5">
+                    <FriendAvatar profile={c.profile} small />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-neutral-500">
+                        <span className="font-medium text-neutral-800">
+                          {c.profile?.display_name || "Someone"}
+                        </span>{" "}
+                        · {timeAgoShort(c.created_at)}
+                      </p>
+                      <p className="text-sm text-neutral-900 break-words">
+                        {c.body}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-neutral-100 flex items-center gap-2">
+              {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
+              <input
+                value={photoBody}
+                onChange={(e) => setPhotoBody(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendPhotoComment()}
+                placeholder="Comment on this photo"
+                maxLength={500}
+                className="flex-1 rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
+              />
+              <button
+                type="button"
+                onClick={sendPhotoComment}
+                disabled={photoSending || !photoBody.trim()}
+                aria-label="Send"
+                className="w-10 h-10 shrink-0 rounded-full bg-[#455d3b] text-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

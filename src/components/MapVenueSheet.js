@@ -123,7 +123,16 @@ export function MapVenueSheet({
         .limit(50);
       // YOU cluster with your friends here — "You and Mark are here", not a
       // strip that pretends you're elsewhere.
-      const all = rows || [];
+      // Stable order: created_at desc, id ASC on ties — a tag-accept is
+      // backdated to the ORIGINAL's exact timestamp, and without the tie-break
+      // the bare backdated row could win and the thread "loses" its
+      // comments/photos (Mark hit this July 17).
+      const all = (rows || [])
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(b.created_at) - new Date(a.created_at) || a.id - b.id
+        );
       if (all.length === 0) {
         if (!cancelled) setStrip({ none: true });
         return;
@@ -148,7 +157,10 @@ export function MapVenueSheet({
         .in("id", needIds);
       const profById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
       let commentCount = 0;
-      const target = fresh[0] || distinct[0];
+      // Prefer YOUR OWN check-in as the thread target when you're in the
+      // cluster — it's the card with your camera tile and your conversation.
+      const ownFresh = fresh.find((r) => r.user_id === userId);
+      const target = ownFresh || fresh[0] || distinct[0];
       if (target) {
         const { count } = await supabase
           .from("activity_comments")
@@ -183,12 +195,16 @@ export function MapVenueSheet({
 
   function openStripThread() {
     if (!strip || strip.none || !onOpenThread) return;
-    const t = strip.live || strip.target;
+    // target (not live): it already prefers YOUR OWN check-in in the cluster,
+    // then the freshest with the original-first tie-break.
+    const t = strip.target || strip.live;
+    if (!t) return;
+    const isSelf = t.user_id === userId;
     onOpenThread({
       activityId: t.id,
       ownerId: t.user_id,
-      ownerName: t.profile?.display_name || "A friend",
-      ownerProfile: t.profile || null,
+      ownerName: isSelf ? "You" : t.profile?.display_name || "A friend",
+      ownerProfile: isSelf ? null : t.profile || null,
       venueName: venue.name,
       label: t.label || null,
       venueObj: venue, // enables the Join button (and venue link) in the thread
