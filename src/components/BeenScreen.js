@@ -300,16 +300,35 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
         </div>
       </div>
       {addOpen && (
-        <div className="fixed inset-0 z-[3000]">
+        // Floating card anchored HIGH: a bottom sheet dies on iOS here — the
+        // keyboard covers the search input and the tab bar/FAB (higher z)
+        // sliced through it (Mark's screenshot). Top-anchored card + z above
+        // the chrome = keyboard opens beneath, card stays whole.
+        <div className="fixed inset-0 z-[3400]">
           <button
             type="button"
             aria-label="Close"
             onClick={closeAdd}
-            className="absolute inset-0 bg-black/30"
+            className="absolute inset-0 bg-black/40"
           />
-          <div className="absolute left-0 right-0 bottom-0 max-h-[80%] overflow-y-auto bg-white rounded-t-3xl p-5">
-            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-200" />
-            <p className="text-sm font-semibold mb-1">Add a past night</p>
+          <div
+            className="absolute left-0 right-0 top-12 mx-auto max-w-sm bg-white rounded-3xl shadow-2xl overflow-y-auto p-5"
+            style={{
+              width: "calc(100% - 1.5rem)",
+              maxHeight: "calc(100% - 130px)",
+            }}
+          >
+            <div className="flex items-start justify-between mb-1">
+              <p className="text-sm font-semibold">Add a past night</p>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={closeAdd}
+                className="-mt-1 -mr-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
+              >
+                ✕
+              </button>
+            </div>
             <p className="text-[11px] text-neutral-500 mb-3">
               It lands in your Been list — add photos and videos after. If
               friends checked in that night, their moments show up too.

@@ -3,7 +3,9 @@
 // activity_comments RLS: the audience is the CHECK-IN OWNER's friends — a
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
-import { X, Send, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Send, ChevronLeft, ChevronRight, UserPlus } from "lucide-react";
+
+const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
@@ -68,6 +70,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [withNames, setWithNames] = useState([]); // tagged companions
+  // Owner's from-the-card tagging (Add a night / forgot in the moment).
+  const [tagOpen, setTagOpen] = useState(false);
+  const [tagFriends, setTagFriends] = useState(null); // null = not loaded
+  const [taggedIds, setTaggedIds] = useState(() => new Set());
+  const [tagQ, setTagQ] = useState("");
+  const [tagRefresh, setTagRefresh] = useState(0);
   // Whether the VIEWER already has a recent check-in at this venue —
   // null = still checking (render neither state to avoid a wrong flash).
   // myActivityId = that check-in's id: on a friend's card, YOUR uploads
@@ -333,7 +341,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   }, [isOwner, userId, thread.venueObj?.id, thread.timestamp]);
 
   // "with JD and Bianca" — tags on this check-in (pending + accepted render;
-  // removed never does).
+  // removed never does). taggedIds feeds the owner's add-friends picker.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -343,6 +351,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .eq("activity_id", thread.activityId)
         .neq("status", "removed");
       const ids = Array.from(new Set((tags || []).map((t) => t.tagged_user_id)));
+      if (!cancelled) setTaggedIds(new Set(ids));
       if (ids.length === 0) {
         if (!cancelled) setWithNames([]);
         return;
@@ -361,7 +370,68 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId]);
+  }, [thread.activityId, tagRefresh]);
+
+  // Owner can tag friends FROM the card — serves "+ Add a night" and any
+  // check-in where tagging was skipped in the moment. Same consent flow:
+  // the friend gets the nudge; accepting creates THEIR twin for that night,
+  // which the cluster merge folds back into this very card.
+  async function openTagPicker() {
+    setTagOpen((v) => !v);
+    if (tagFriends !== null) return;
+    const { data: fr } = await supabase
+      .from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+    const ids = Array.from(
+      new Set(
+        (fr || []).map((f) =>
+          f.requester_id === userId ? f.addressee_id : f.requester_id
+        )
+      )
+    );
+    if (ids.length === 0) {
+      setTagFriends([]);
+      return;
+    }
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("id, display_name, username, avatar_url")
+      .in("id", ids)
+      .order("display_name", { ascending: true });
+    setTagFriends(profs || []);
+  }
+
+  async function toggleTag(friendId) {
+    const isTagged = taggedIds.has(friendId);
+    setTaggedIds((prev) => {
+      const next = new Set(prev);
+      if (isTagged) next.delete(friendId);
+      else next.add(friendId);
+      return next;
+    });
+    if (isTagged) {
+      await supabase
+        .from("activity_tags")
+        .delete()
+        .eq("activity_id", thread.activityId)
+        .eq("tagged_user_id", friendId);
+    } else {
+      const { error } = await supabase
+        .from("activity_tags")
+        .insert({ activity_id: thread.activityId, tagged_user_id: friendId });
+      if (error) {
+        console.error("Tag failed:", error);
+        setTaggedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(friendId);
+          return next;
+        });
+      }
+    }
+    setTagRefresh((n) => n + 1); // re-derive the "with" line
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -457,12 +527,28 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 )}
                 {thread.label ? ` · ${thread.label}` : ""}
               </p>
-              {withNames.length > 0 && (
+              {(withNames.length > 0 || isOwner) && (
                 <p className="text-xs text-neutral-700">
-                  with{" "}
-                  {withNames.length === 1
-                    ? withNames[0]
-                    : `${withNames.slice(0, -1).join(", ")} and ${withNames[withNames.length - 1]}`}
+                  {withNames.length > 0 && (
+                    <>
+                      with{" "}
+                      {withNames.length === 1
+                        ? withNames[0]
+                        : `${withNames.slice(0, -1).join(", ")} and ${withNames[withNames.length - 1]}`}
+                    </>
+                  )}
+                  {isOwner && (
+                    <button
+                      type="button"
+                      onClick={openTagPicker}
+                      className={`inline-flex items-center gap-1 text-[#455d3b] font-medium ${
+                        withNames.length > 0 ? "ml-1.5" : ""
+                      }`}
+                    >
+                      <UserPlus size={12} />
+                      {withNames.length > 0 ? "add" : "with friends?"}
+                    </button>
+                  )}
                 </p>
               )}
               <p className="text-[11px] text-neutral-500">
@@ -484,6 +570,65 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </div>
         </div>
 
+        {/* Owner's tag picker — same consent chips as the check-in sheet;
+            they'll be asked before their friends see anything. */}
+        {tagOpen && isOwner && (
+          <div className="px-5 pt-3">
+            {tagFriends === null && (
+              <p className="text-xs text-neutral-400">Loading friends…</p>
+            )}
+            {tagFriends !== null && tagFriends.length === 0 && (
+              <p className="text-xs text-neutral-400">
+                No friends on Flanit yet.
+              </p>
+            )}
+            {tagFriends !== null && tagFriends.length > 0 && (
+              <>
+                {tagFriends.length > TAG_SEARCH_THRESHOLD && (
+                  <input
+                    value={tagQ}
+                    onChange={(e) => setTagQ(e.target.value)}
+                    placeholder="Search friends"
+                    className="mb-2 w-full rounded-full border border-neutral-200 px-4 py-2 text-base focus:outline-none focus:border-[#455d3b]"
+                  />
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {tagFriends
+                    .filter((f) => {
+                      const q = tagQ.trim().toLowerCase();
+                      return (
+                        !q ||
+                        (f.display_name || "").toLowerCase().includes(q) ||
+                        (f.username || "").toLowerCase().includes(q)
+                      );
+                    })
+                    .map((f) => {
+                      const on = taggedIds.has(f.id);
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => toggleTag(f.id)}
+                          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium active:scale-95 transition ${
+                            on
+                              ? "bg-[#455d3b] border-[#455d3b] text-white"
+                              : "border-neutral-200 text-neutral-700"
+                          }`}
+                        >
+                          <FriendAvatar profile={f} small />
+                          {(f.display_name || "?").split(" ")[0]}
+                          {on ? " ✓" : ""}
+                        </button>
+                      );
+                    })}
+                </div>
+                <p className="mt-1.5 text-[10px] text-neutral-400">
+                  They'll be asked before their friends see anything.
+                </p>
+              </>
+            )}
+          </div>
+        )}
         {/* Photo strip — the owner's photos plus, if the viewer joined this
             check-in, their own. The camera tile shows for whoever has a
             check-in to hang photos on (owner always; joined viewer via
