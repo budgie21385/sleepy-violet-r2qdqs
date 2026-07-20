@@ -9,7 +9,7 @@ import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { ConfettiBurst } from "./SessionResultsView";
 import {
-  uploadCheckinPhoto,
+  uploadCheckinMedia,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
 
@@ -33,18 +33,27 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
     );
     for (const file of files) {
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const preview = URL.createObjectURL(file);
-      setPhotos((prev) => [...prev, { key, preview, state: "uploading" }]);
-      uploadCheckinPhoto(userId, activity.id, file)
+      const isVideo = (file.type || "").startsWith("video/");
+      // <img> can't preview a video blob — those get a dark ▶ tile instead.
+      const preview = isVideo ? null : URL.createObjectURL(file);
+      setPhotos((prev) => [
+        ...prev,
+        { key, preview, isVideo, state: "uploading" },
+      ]);
+      uploadCheckinMedia(userId, activity.id, file)
         .then(() => {
           setPhotos((prev) =>
             prev.map((p) => (p.key === key ? { ...p, state: "done" } : p))
           );
         })
         .catch((e) => {
-          console.error("Photo upload failed:", e);
+          console.error("Media upload failed:", e);
           setPhotos((prev) => prev.filter((p) => p.key !== key));
-          showToast?.("Couldn't upload a photo");
+          showToast?.(
+            e?.code === "too_big"
+              ? "Videos can be up to 50MB"
+              : "Couldn't upload that"
+          );
         });
     }
   }
@@ -206,7 +215,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               multiple
               className="hidden"
               onChange={(e) => {
@@ -217,13 +226,23 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               {photos.map((p) => (
                 <div key={p.key} className="relative shrink-0">
-                  <img
-                    src={p.preview}
-                    alt=""
-                    className={`h-16 w-16 rounded-xl object-cover ${
-                      p.state === "uploading" ? "opacity-50" : ""
-                    }`}
-                  />
+                  {p.preview ? (
+                    <img
+                      src={p.preview}
+                      alt=""
+                      className={`h-16 w-16 rounded-xl object-cover ${
+                        p.state === "uploading" ? "opacity-50" : ""
+                      }`}
+                    />
+                  ) : (
+                    <span
+                      className={`h-16 w-16 rounded-xl bg-neutral-800 text-white flex items-center justify-center text-lg ${
+                        p.state === "uploading" ? "opacity-50" : ""
+                      }`}
+                    >
+                      ▶
+                    </span>
+                  )}
                   {p.state === "uploading" && (
                     <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-white">
                       …
@@ -245,7 +264,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
               )}
             </div>
             <p className="mt-1 px-1 text-[11px] text-neutral-400">
-              Stored in original quality — only your friends see them.
+              Photos &amp; videos, original quality — only your friends see them.
             </p>
           </div>
 

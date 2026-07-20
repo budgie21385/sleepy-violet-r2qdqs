@@ -3,13 +3,13 @@
 // activity_comments RLS: the audience is the CHECK-IN OWNER's friends — a
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
-import { X, Send } from "lucide-react";
+import { X, Send, ChevronLeft, ChevronRight } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
   fetchCheckinPhotosMany,
-  uploadCheckinPhoto,
+  uploadCheckinMedia,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
 import {
@@ -85,6 +85,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [photoComments, setPhotoComments] = useState(null); // null = loading
   const [photoBody, setPhotoBody] = useState("");
   const [photoSending, setPhotoSending] = useState(false);
+  const touchX = useRef(null); // lightbox swipe start
+  // Flip between the night's photos without leaving the lightbox — comments
+  // and reactions re-key off lightbox.id automatically.
+  const lightboxIdx = lightbox
+    ? photos.findIndex((p) => p.id === lightbox.id)
+    : -1;
+  function stepLightbox(dir) {
+    if (lightboxIdx < 0) return;
+    const next = photos[lightboxIdx + dir];
+    if (next) setLightbox(next);
+  }
   // One flat row set for the whole check-in (check-in level + every photo);
   // summarizeReactions() slices per target.
   const [reactions, setReactions] = useState([]);
@@ -261,10 +272,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setUploading(true);
     for (const file of files) {
       try {
-        await uploadCheckinPhoto(userId, uploadTargetId, file);
+        await uploadCheckinMedia(userId, uploadTargetId, file);
       } catch (e) {
-        console.error("Photo upload failed:", e);
-        showToast?.("Couldn't upload a photo");
+        console.error("Media upload failed:", e);
+        showToast?.(
+          e?.code === "too_big"
+            ? "Videos can be up to 50MB"
+            : "Couldn't upload that"
+        );
       }
     }
     const rows = await fetchCheckinPhotosMany(
@@ -478,7 +493,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               multiple
               className="hidden"
               onChange={(e) => {
@@ -492,13 +507,20 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   key={p.id}
                   type="button"
                   onClick={() => setLightbox(p)}
-                  className="shrink-0 active:scale-95 transition"
+                  className="relative shrink-0 active:scale-95 transition"
                 >
                   <img
                     src={p.url}
                     alt=""
                     className="h-24 w-24 rounded-xl object-cover"
                   />
+                  {p.kind === "video" && (
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <span className="w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-sm">
+                        ▶
+                      </span>
+                    </span>
+                  )}
                 </button>
               ))}
               {uploadTargetId && myPhotoCount < MAX_PHOTOS_PER_CHECKIN && (
@@ -637,12 +659,36 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             className="absolute inset-0 bg-black/85"
           />
           <div className="relative w-full max-w-sm max-h-[90%] flex flex-col bg-white rounded-3xl overflow-hidden shadow-2xl">
-            <div className="relative shrink-0 bg-black">
-              <img
-                src={lightbox.url}
-                alt=""
-                className="w-full max-h-[50vh] object-contain"
-              />
+            <div
+              className="relative shrink-0 bg-black"
+              onTouchStart={(e) => {
+                touchX.current = e.touches[0]?.clientX ?? null;
+              }}
+              onTouchEnd={(e) => {
+                if (touchX.current === null) return;
+                const dx =
+                  (e.changedTouches[0]?.clientX ?? touchX.current) -
+                  touchX.current;
+                touchX.current = null;
+                if (Math.abs(dx) > 40) stepLightbox(dx < 0 ? 1 : -1);
+              }}
+            >
+              {lightbox.kind === "video" && lightbox.videoUrl ? (
+                <video
+                  src={lightbox.videoUrl}
+                  poster={lightbox.url || undefined}
+                  controls
+                  playsInline
+                  autoPlay
+                  className="w-full max-h-[50vh] object-contain"
+                />
+              ) : (
+                <img
+                  src={lightbox.url}
+                  alt=""
+                  className="w-full max-h-[50vh] object-contain"
+                />
+              )}
               <button
                 type="button"
                 aria-label="Close photo"
@@ -651,6 +697,33 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               >
                 <X size={16} />
               </button>
+              {photos.length > 1 && (
+                <>
+                  <span className="absolute top-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
+                    {lightboxIdx + 1}/{photos.length}
+                  </span>
+                  {lightboxIdx > 0 && (
+                    <button
+                      type="button"
+                      aria-label="Previous photo"
+                      onClick={() => stepLightbox(-1)}
+                      className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                  )}
+                  {lightboxIdx < photos.length - 1 && (
+                    <button
+                      type="button"
+                      aria-label="Next photo"
+                      onClick={() => stepLightbox(1)}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  )}
+                </>
+              )}
             </div>
             <div className="px-4 pt-3 pb-1">
               <ReactionBar
