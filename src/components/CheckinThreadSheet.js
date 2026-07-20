@@ -108,7 +108,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // summarizeReactions() slices per target.
   const [reactions, setReactions] = useState([]);
   const [reacting, setReacting] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [pending, setPending] = useState([]); // in-flight uploads: {key, preview, isVideo}
   const fileInputRef = useRef(null);
   const listRef = useRef(null);
   const isOwner = thread.ownerId === userId;
@@ -270,35 +270,44 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     ]);
   }
 
-  async function addPhotos(fileList) {
+  // Fire-and-forget: tiles appear instantly, bytes move in the background
+  // (a 50MB video on a phone uplink takes what it takes — the card just
+  // shouldn't make you watch). Uploads run in parallel and keep going while
+  // you comment/react; each finisher swaps its pending tile for the real one.
+  function addPhotos(fileList) {
     if (!uploadTargetId) return;
     const files = Array.from(fileList || []).slice(
       0,
-      MAX_PHOTOS_PER_CHECKIN - myPhotoCount
+      Math.max(0, MAX_PHOTOS_PER_CHECKIN - myPhotoCount - pending.length)
     );
-    if (files.length === 0) return;
-    setUploading(true);
     for (const file of files) {
-      try {
-        await uploadCheckinMedia(userId, uploadTargetId, file);
-      } catch (e) {
-        console.error("Media upload failed:", e);
-        showToast?.(
-          e?.code === "too_big"
-            ? "Videos can be up to 50MB"
-            : "Couldn't upload that"
-        );
-      }
+      const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const isVideo = (file.type || "").startsWith("video/");
+      const preview = isVideo ? null : URL.createObjectURL(file);
+      setPending((prev) => [...prev, { key, preview, isVideo }]);
+      uploadCheckinMedia(userId, uploadTargetId, file)
+        .then(async () => {
+          const rows = await fetchCheckinPhotosMany(
+            Array.from(new Set([...contentIds(), uploadTargetId]))
+          );
+          setPhotos(
+            rows
+              .filter((r) => r.url)
+              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+          );
+        })
+        .catch((e) => {
+          console.error("Media upload failed:", e);
+          showToast?.(
+            e?.code === "too_big"
+              ? "Videos can be up to 50MB"
+              : "Couldn't upload that"
+          );
+        })
+        .finally(() => {
+          setPending((prev) => prev.filter((p) => p.key !== key));
+        });
     }
-    const rows = await fetchCheckinPhotosMany(
-      Array.from(new Set([...contentIds(), uploadTargetId]))
-    );
-    setPhotos(
-      rows
-        .filter((r) => r.url)
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    );
-    setUploading(false);
   }
 
   const joinEligible =
@@ -668,19 +677,41 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   )}
                 </button>
               ))}
-              {uploadTargetId && myPhotoCount < MAX_PHOTOS_PER_CHECKIN && (
-                <button
-                  type="button"
-                  disabled={uploading}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-24 w-24 shrink-0 rounded-xl border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-1 text-neutral-500 active:scale-95 transition disabled:opacity-50"
-                >
-                  <Camera size={20} />
-                  <span className="text-[10px] font-medium">
-                    {uploading ? "Uploading…" : myPhotoCount === 0 ? "Add photos" : "More"}
+              {pending.map((p) => (
+                <div key={p.key} className="relative shrink-0">
+                  {p.preview ? (
+                    <img
+                      src={p.preview}
+                      alt=""
+                      className="h-24 w-24 rounded-xl object-cover opacity-60"
+                    />
+                  ) : (
+                    <span className="h-24 w-24 rounded-xl bg-neutral-800/80 text-white flex items-center justify-center text-lg">
+                      ▶
+                    </span>
+                  )}
+                  <span className="absolute inset-0 flex items-center justify-center">
+                    <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white">
+                      Uploading…
+                    </span>
                   </span>
-                </button>
-              )}
+                </div>
+              ))}
+              {uploadTargetId &&
+                myPhotoCount + pending.length < MAX_PHOTOS_PER_CHECKIN && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-24 w-24 shrink-0 rounded-xl border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-1 text-neutral-500 active:scale-95 transition"
+                  >
+                    <Camera size={20} />
+                    <span className="text-[10px] font-medium">
+                      {myPhotoCount + pending.length === 0
+                        ? "Add photos"
+                        : "More"}
+                    </span>
+                  </button>
+                )}
             </div>
           </div>
         )}

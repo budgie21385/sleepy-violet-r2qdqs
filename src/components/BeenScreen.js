@@ -304,7 +304,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
         // keyboard covers the search input and the tab bar/FAB (higher z)
         // sliced through it (Mark's screenshot). Top-anchored card + z above
         // the chrome = keyboard opens beneath, card stays whole.
-        <div className="fixed inset-0 z-[3400]">
+        <div className="fixed inset-0 z-[4000]">
           <button
             type="button"
             aria-label="Close"
@@ -387,12 +387,14 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
                 <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
                   Which night?
                 </label>
+                {/* appearance-none + explicit bg: iOS restyles date inputs
+                    into a gray centered pill otherwise. */}
                 <input
                   type="date"
                   value={addDate}
                   max={todayStr}
                   onChange={(e) => setAddDate(e.target.value)}
-                  className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
+                  className="w-full appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
                 />
                 <button
                   type="button"
