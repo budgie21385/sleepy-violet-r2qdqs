@@ -230,13 +230,18 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     };
   }, [clusterKey, myActivityId]);
 
-  async function react(emoji, photo = null) {
+  async function react(emoji, photo = null, comment = null) {
     if (reacting) return;
     setReacting(true);
     try {
       await toggleReaction({
-        activityId: photo ? photo.activity_id : thread.activityId,
+        activityId: comment
+          ? comment.activity_id || thread.activityId
+          : photo
+          ? photo.activity_id
+          : thread.activityId,
         photoId: photo ? photo.id : null,
+        commentId: comment ? comment.id : null,
         userId,
         emoji,
       });
@@ -246,6 +251,55 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       showToast?.("Couldn't react");
     }
     setReacting(false);
+  }
+
+  // Per-comment reactions: existing emoji render as tiny count chips; the
+  // "React" toggle opens the six-emoji row for THAT comment (one at a time).
+  const [openReactFor, setOpenReactFor] = useState(null);
+  function commentReactionRow(c) {
+    const { counts, mine } = summarizeReactions(reactions, userId, null, c.id);
+    const entries = Object.entries(counts);
+    return (
+      <div className="mt-1 flex items-center gap-1 flex-wrap">
+        {entries.map(([e, n]) => (
+          <button
+            key={e}
+            type="button"
+            disabled={reacting}
+            onClick={() => react(e, null, c)}
+            className={`flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[11px] active:scale-90 transition disabled:opacity-50 ${
+              mine === e
+                ? "bg-[#edf2eb] border-[#455d3b] text-[#455d3b]"
+                : "border-neutral-200 text-neutral-600"
+            }`}
+          >
+            {e} {n}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setOpenReactFor(openReactFor === c.id ? null : c.id)}
+          className="text-[11px] text-neutral-400 px-1"
+        >
+          {openReactFor === c.id ? "close" : entries.length === 0 ? "react" : "+"}
+        </button>
+        {openReactFor === c.id &&
+          REACTION_SET.map((e) => (
+            <button
+              key={`pick_${e}`}
+              type="button"
+              disabled={reacting}
+              onClick={() => {
+                react(e, null, c);
+                setOpenReactFor(null);
+              }}
+              className="text-sm active:scale-90 transition disabled:opacity-50"
+            >
+              {e}
+            </button>
+          ))}
+      </div>
+    );
   }
 
   // Resolve uploader profiles for any media rows we haven't seen yet.
@@ -302,7 +356,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     (async () => {
       const { data: rows } = await supabase
         .from("activity_comments")
-        .select("id, user_id, body, created_at")
+        .select("id, activity_id, user_id, body, created_at")
         .eq("photo_id", lightbox.id)
         .order("created_at", { ascending: true });
       let profById = {};
@@ -338,7 +392,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         user_id: userId,
         body: text,
       })
-      .select("id, user_id, body, created_at")
+      .select("id, activity_id, user_id, body, created_at")
       .single();
     setPhotoSending(false);
     if (error) {
@@ -553,7 +607,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     (async () => {
       const { data: rows } = await supabase
         .from("activity_comments")
-        .select("id, user_id, body, created_at")
+        .select("id, activity_id, user_id, body, created_at")
         .in("activity_id", contentIds()) // the shared night, not one twin
         .is("photo_id", null) // photo comments live in their lightbox thread
         .order("created_at", { ascending: true });
@@ -588,7 +642,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     const { data: inserted, error } = await supabase
       .from("activity_comments")
       .insert({ activity_id: thread.activityId, user_id: userId, body: text })
-      .select("id, user_id, body, created_at")
+      .select("id, activity_id, user_id, body, created_at")
       .single();
     setSending(false);
     if (error) {
@@ -826,12 +880,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       </span>
                     </span>
                   )}
-                  {p.user_id !== userId && (
-                    // Someone else's moment in the shared night — badge the author.
-                    <span className="absolute bottom-1 left-1 rounded-full ring-2 ring-white">
-                      <FriendAvatar profile={mediaProfiles[p.user_id]} small />
-                    </span>
-                  )}
+                  {/* Every tile carries its author (yours included — makes
+                      the shared strip legible and self-testable). */}
+                  <span className="absolute bottom-1 left-1 rounded-full ring-2 ring-white">
+                    <FriendAvatar profile={mediaProfiles[p.user_id]} small />
+                  </span>
                 </button>
               ))}
               {pending.map((p) => (
@@ -960,6 +1013,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     · {timeAgoShort(c.created_at)}
                   </p>
                   <p className="text-sm text-neutral-900 break-words">{c.body}</p>
+                  {commentReactionRow(c)}
                 </div>
               </div>
             ))}
@@ -1145,6 +1199,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       <p className="text-sm text-neutral-900 break-words">
                         {c.body}
                       </p>
+                      {commentReactionRow(c)}
                     </div>
                   </div>
                 ))}
