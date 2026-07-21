@@ -70,6 +70,36 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const [withNames, setWithNames] = useState([]); // tagged companions
+  // Owner can edit the "what's on" title from the card (past nights included).
+  const [labelValue, setLabelValue] = useState(thread.label || "");
+  const [labelEdit, setLabelEdit] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [labelSaving, setLabelSaving] = useState(false);
+
+  useEffect(() => {
+    // Re-sync if the same mounted card switches to another check-in.
+    setLabelValue(thread.label || "");
+    setLabelEdit(false);
+  }, [thread.activityId, thread.label]);
+
+  async function saveLabel() {
+    if (labelSaving) return;
+    const text = labelDraft.trim().slice(0, 80);
+    setLabelSaving(true);
+    const { error } = await supabase
+      .from("activities")
+      .update({ label: text || null })
+      .eq("id", thread.activityId);
+    setLabelSaving(false);
+    if (error) {
+      console.error("Label update failed:", error);
+      showToast?.("Couldn't save that");
+      return;
+    }
+    setLabelValue(text);
+    setLabelEdit(false);
+  }
+
   // Owner's from-the-card tagging (Add a night / forgot in the moment).
   const [tagOpen, setTagOpen] = useState(false);
   const [tagFriends, setTagFriends] = useState(null); // null = not loaded
@@ -534,8 +564,50 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 ) : (
                   thread.venueName
                 )}
-                {thread.label ? ` · ${thread.label}` : ""}
+                {isOwner ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLabelDraft(labelValue);
+                      setLabelEdit((v) => !v);
+                    }}
+                    className={
+                      labelValue
+                        ? ""
+                        : "text-[#455d3b] text-xs font-medium"
+                    }
+                  >
+                    {labelValue ? ` · ${labelValue}` : " · add a title"}
+                  </button>
+                ) : labelValue ? (
+                  ` · ${labelValue}`
+                ) : (
+                  ""
+                )}
               </p>
+              {labelEdit && isOwner && (
+                <div className="mt-1.5 flex items-center gap-2 rounded-full border border-neutral-200 pl-3 pr-1 py-1">
+                  {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
+                  <input
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && saveLabel()}
+                    placeholder="What was on?"
+                    maxLength={80}
+                    autoFocus
+                    className="flex-1 min-w-0 bg-transparent text-base focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Save title"
+                    disabled={labelSaving}
+                    onClick={saveLabel}
+                    className="w-7 h-7 shrink-0 rounded-full bg-[#455d3b] text-white flex items-center justify-center text-xs disabled:opacity-50 active:scale-95 transition"
+                  >
+                    ✓
+                  </button>
+                </div>
+              )}
               {(withNames.length > 0 || isOwner) && (
                 <p className="text-xs text-neutral-700">
                   {withNames.length > 0 && (
