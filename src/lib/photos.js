@@ -44,8 +44,34 @@ async function makeWebDerivative(file) {
 }
 
 // Grab a frame as a JPEG thumbnail — strips and lightboxes stay image-fast
-// even for videos. Seeks slightly in (frame 0 is often black).
+// even for videos. Wrapped in a 6s watchdog: iOS occasionally never fires
+// the seek event, which used to hang the WHOLE upload before a single byte
+// moved. On timeout/failure a plain dark thumbnail ships instead.
 async function makeVideoThumb(file) {
+  try {
+    return await Promise.race([
+      grabVideoFrame(file),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("thumb timeout")), 6000)
+      ),
+    ]);
+  } catch (e) {
+    console.warn("Video thumb fallback:", e?.message);
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 180;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#2a2a2a";
+    ctx.fillRect(0, 0, 320, 180);
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.8)
+    );
+    if (!blob) throw new Error("fallback thumb failed");
+    return blob;
+  }
+}
+
+async function grabVideoFrame(file) {
   const url = URL.createObjectURL(file);
   try {
     const video = document.createElement("video");
@@ -133,39 +159,68 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
 // backoff, and RESUMES where it left off after a suspension — a locked phone
 // or app switch no longer restarts a 50MB transfer from zero (Mark's video
 // died exactly this way; single PUTs don't survive it).
-async function uploadResumable(path, file, contentType) {
+async function uploadResumable(path, file, contentType, onProgress) {
+  // FLANIT-UPLOAD logs: temporary diagnostics for the stuck-video hunt
+  // (July 18) — strip once video uploads are verified in the field.
+  const log = (...a) => console.log("FLANIT-UPLOAD", ...a);
+  log("tus: importing client");
   const mod = await import("tus-js-client");
   const Upload = mod.Upload || mod.default?.Upload;
+  if (!Upload) throw new Error("tus-js-client not available");
   const { data: sess } = await supabase.auth.getSession();
   const token = sess?.session?.access_token;
   if (!token) throw new Error("No session for upload");
+  log("tus: starting", { path, size: file.size, type: contentType });
   await new Promise((resolve, reject) => {
     const upload = new Upload(file, {
       endpoint: `${process.env.REACT_APP_SUPABASE_URL}/storage/v1/upload/resumable`,
       retryDelays: [0, 2000, 5000, 10000, 20000],
       chunkSize: 6 * 1024 * 1024, // Supabase requires 6MB multiples
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "x-upsert": "false" },
       metadata: {
         bucketName: BUCKET,
         objectName: path,
         contentType: contentType || "application/octet-stream",
         cacheControl: "3600",
       },
-      onError: reject,
-      onSuccess: resolve,
+      onShouldRetry: (err) => {
+        log("tus: retrying after error", err?.message || err);
+        return true;
+      },
+      onProgress: (sent, total) => {
+        log("tus: progress", sent, "/", total);
+        if (onProgress && total > 0)
+          onProgress(Math.min(99, Math.round((sent / total) * 100)));
+      },
+      onError: (err) => {
+        log("tus: FAILED", err?.message || err);
+        reject(err);
+      },
+      onSuccess: () => {
+        log("tus: done", path);
+        resolve();
+      },
     });
-    // Resume a previous attempt of the same file if one exists.
-    upload.findPreviousUploads().then((prev) => {
-      if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0]);
-      upload.start();
-    });
+    // Resume a previous attempt of the same file if one exists. A rejected
+    // lookup used to dangle this promise forever — now it just starts fresh.
+    upload
+      .findPreviousUploads()
+      .then((prev) => {
+        if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0]);
+        upload.start();
+        log("tus: request sent");
+      })
+      .catch(() => {
+        upload.start();
+        log("tus: request sent (no resume lookup)");
+      });
   });
 }
 
 // Upload a video: JPEG thumbnail to web_path (what strips render), the
 // untouched video to orig_path (resumable), kind='video'. Throws
 // {code:'too_big'} over the cap so callers can toast a friendly limit.
-export async function uploadCheckinVideo(userId, activityId, file) {
+export async function uploadCheckinVideo(userId, activityId, file, onProgress) {
   if ((file.size || 0) > MAX_VIDEO_BYTES) {
     const err = new Error("Video over the 50MB limit");
     err.code = "too_big";
@@ -176,15 +231,17 @@ export async function uploadCheckinVideo(userId, activityId, file) {
   const origPath = `${base}_orig.${extOf(file)}`;
   const webPath = `${base}_web.jpg`;
 
+  console.log("FLANIT-UPLOAD video: making thumb", file.name, file.size);
   const thumbBlob = await makeVideoThumb(file);
 
+  console.log("FLANIT-UPLOAD video: uploading thumb");
   const { error: webErr } = await supabase.storage
     .from(BUCKET)
     .upload(webPath, thumbBlob, { contentType: "image/jpeg" });
   if (webErr) throw webErr;
 
   try {
-    await uploadResumable(origPath, file, file.type || "video/mp4");
+    await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
   } catch (origErr) {
     await supabase.storage.from(BUCKET).remove([webPath]);
     throw origErr;
@@ -210,9 +267,11 @@ export async function uploadCheckinVideo(userId, activityId, file) {
 }
 
 // One entry point for the file inputs — routes by MIME type.
-export function uploadCheckinMedia(userId, activityId, file) {
+// onProgress (0-100) currently only fires for videos (TUS reports progress;
+// plain photo PUTs don't).
+export function uploadCheckinMedia(userId, activityId, file, onProgress) {
   return (file.type || "").startsWith("video/")
-    ? uploadCheckinVideo(userId, activityId, file)
+    ? uploadCheckinVideo(userId, activityId, file, onProgress)
     : uploadCheckinPhoto(userId, activityId, file);
 }
 
@@ -253,10 +312,20 @@ export function updateUploadPreview(key, preview) {
 }
 
 // Local preview frame for a video file (object URL) — shows in pending tiles
-// well before the actual bytes finish uploading.
+// well before the actual bytes finish uploading. Uses the raw grab (no gray
+// fallback): if the frame can't be read the tile just keeps its ▶.
 export async function makeVideoPreviewUrl(file) {
-  const blob = await makeVideoThumb(file);
+  const blob = await grabVideoFrame(file);
   return URL.createObjectURL(blob);
+}
+
+// Live progress for the pending tiles ("Uploading 43%").
+export function updateUploadProgress(key, progress) {
+  const e = inflightUploads.get(key);
+  if (e) {
+    e.progress = progress;
+    notifyUploadListeners();
+  }
 }
 
 export function getInflightFor(activityIds) {

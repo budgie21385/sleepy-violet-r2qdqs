@@ -36,6 +36,17 @@
 	<meta name="twitter:description" content="Swipe, match and decide where to go — together.">
 	<meta name="twitter:image" content="https://flanit.co/og-default.png">
 	<script src="https://cdn.tailwindcss.com"></script>
+	<!-- On-phone debug console: open flanit.co/?flanitdebug=1 on any device to
+	     get an in-page console (Eruda) — the only way to read iPhone logs
+	     without a Mac. Does nothing unless the param is present. -->
+	<script>
+		if (window.location.search.indexOf("flanitdebug") !== -1) {
+			var erudaScript = document.createElement("script");
+			erudaScript.src = "https://cdn.jsdelivr.net/npm/eruda";
+			erudaScript.onload = function () { window.eruda && window.eruda.init(); };
+			document.head.appendChild(erudaScript);
+		}
+	</script>
 </head>
 
 <body>
