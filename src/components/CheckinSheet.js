@@ -6,12 +6,14 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Check, MapPin, Camera } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { sendPush } from "../lib/push";
 import { FriendAvatar } from "./FriendAvatar";
 import { ConfettiBurst } from "./SessionResultsView";
 import {
   uploadCheckinMedia,
   trackUpload,
   updateUploadPreview,
+  updateUploadProgress,
   makeVideoPreviewUrl,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
@@ -43,7 +45,12 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
         ...prev,
         { key, preview, isVideo, state: "uploading" },
       ]);
-      const promise = uploadCheckinMedia(userId, activity.id, file)
+      const promise = uploadCheckinMedia(userId, activity.id, file, (pct) => {
+        updateUploadProgress(key, pct);
+        setPhotos((prev) =>
+          prev.map((p) => (p.key === key ? { ...p, progress: pct } : p))
+        );
+      })
         .then(() => {
           setPhotos((prev) =>
             prev.map((p) => (p.key === key ? { ...p, state: "done" } : p))
@@ -153,6 +160,12 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
           next.delete(friendId);
           return next;
         });
+      } else {
+        sendPush(
+          friendId,
+          "You've been checked in",
+          `${venue.name} — accept to add the night to your Been list`
+        );
       }
     }
   }
@@ -268,7 +281,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
                   )}
                   {p.state === "uploading" && (
                     <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-white">
-                      …
+                      {p.progress != null ? `${p.progress}%` : "…"}
                     </span>
                   )}
                 </div>

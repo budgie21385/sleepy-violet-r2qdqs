@@ -8,6 +8,7 @@
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect } from "react";
 import { X, UserPlus, Check, MapPin, MessageCircle, Camera } from "lucide-react";
+import { pushState, enablePush, sendPush } from "../lib/push";
 
 // Priority tiers for the Activity list (Mark, July 18): items that deal
 // with the person directly outrank ambient news regardless of age.
@@ -45,6 +46,15 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [thread, setThread] = useState(null); // open comment thread sheet
   const [visibleCount, setVisibleCount] = useState(10); // "Show more" paging
+  // Push enable prompt: shown until granted/dismissed. iOS needs the app
+  // installed first — that state points at /install instead.
+  const [pushPrompt, setPushPrompt] = useState(() => {
+    try {
+      if (localStorage.getItem("flanit_push_prompt_dismissed")) return null;
+    } catch {}
+    const s = pushState();
+    return s === "default" || s === "need-install" ? s : null;
+  });
   const [lastSeen] = useState(() => {
     const stored = localStorage.getItem("flanit_drawer_last_seen");
     return stored ? new Date(stored) : new Date(0);
@@ -804,6 +814,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     const { error } = await supabase
       .from("friendships")
       .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    if (!error) {
+      sendPush(otherId, "New friend request", "Someone wants to add you on Flanit");
+    }
     setActing(null);
     if (error) {
       console.error("Drawer add friend failed:", error);
@@ -859,6 +872,11 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           responded_at: new Date().toISOString(),
         });
       }
+      sendPush(
+        item.otherId,
+        "Tag accepted 🎉",
+        `Your night at ${item.venueName} just got company`
+      );
     }
     setActing(null);
     if (error) {
@@ -985,6 +1003,63 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </button>
         )}
       </div>
+
+      {pushPrompt && (
+        <div className="w-full rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-3 flex items-center gap-3 mb-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white text-base">
+            🔔
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-[#2f3f29]">
+              Turn on notifications
+            </p>
+            <p className="text-[11px] text-[#455d3b]">
+              {pushPrompt === "need-install"
+                ? "Add Flanit to your home screen first — then friends' reactions and check-ins reach you"
+                : "Know when friends react, comment or check you in"}
+            </p>
+          </div>
+          {pushPrompt === "need-install" ? (
+            <a
+              href="/install"
+              className="shrink-0 rounded-full bg-[#455d3b] text-white text-xs font-medium px-3 py-1.5"
+            >
+              How
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={async () => {
+                const r = await enablePush(userId);
+                if (r === "granted") {
+                  setPushPrompt(null);
+                  showToast?.("Notifications on 🔔");
+                } else if (r === "denied") {
+                  setPushPrompt(null);
+                } else {
+                  showToast?.("Couldn't turn those on");
+                }
+              }}
+              className="shrink-0 rounded-full bg-[#455d3b] text-white text-xs font-medium px-3 py-1.5"
+            >
+              Turn on
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => {
+              setPushPrompt(null);
+              try {
+                localStorage.setItem("flanit_push_prompt_dismissed", "1");
+              } catch {}
+            }}
+            className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-neutral-400 hover:bg-white"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {profileIncomplete && (
         <button

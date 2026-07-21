@@ -29,6 +29,7 @@ import {
   toggleReaction,
 } from "../lib/reactions";
 import { Camera } from "lucide-react";
+import { sendPush } from "../lib/push";
 
 // One tap-bar: 🔥 💀 😭 👀 🫶 🍻 with counts; yours is highlighted. One
 // swappable reaction per person per target (see lib/reactions.js).
@@ -247,6 +248,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         emoji,
       });
       setReactions(await fetchReactionsMany(contentIds()));
+      // Notify whoever owns the thing that got the emoji.
+      const target = comment
+        ? comment.user_id
+        : photo
+        ? photo.user_id
+        : thread.ownerId;
+      sendPush(
+        target,
+        `${emoji} on your ${comment ? "comment" : photo ? "photo" : "check-in"}`,
+        `Someone reacted ${emoji} at ${thread.venueName}`
+      );
     } catch (e) {
       console.error("Reaction failed:", e);
       showToast?.("Couldn't react");
@@ -411,6 +423,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       ...(prev || []),
       { ...inserted, profile: me || null },
     ]);
+    sendPush(
+      lightbox.user_id,
+      "New comment on your photo",
+      `${(me?.display_name || "Someone").split(" ")[0]}: ${text.slice(0, 80)}`
+    );
   }
 
   const pending = getInflightFor(
@@ -607,6 +624,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           next.delete(friendId);
           return next;
         });
+      } else {
+        sendPush(
+          friendId,
+          "You've been checked in",
+          `${thread.venueName} — accept to add the night to your Been list`
+        );
       }
     }
     setTagRefresh((n) => n + 1); // re-derive the "with" line
@@ -668,6 +691,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       .eq("id", userId)
       .maybeSingle();
     setComments((prev) => [...(prev || []), { ...inserted, profile: me || null }]);
+    sendPush(
+      thread.ownerId,
+      "New comment",
+      `${(me?.display_name || "Someone").split(" ")[0]}: ${text.slice(0, 80)}`
+    );
   }
 
   // PORTAL to body: rendered inside a parent overlay (e.g. Been at z-2500)

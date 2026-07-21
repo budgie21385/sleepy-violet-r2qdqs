@@ -15,6 +15,12 @@ const root = createRoot(rootElement);
 const publicVenue = window.location.pathname.match(/^\/v\/(\d+)/);
 const installPage = /^\/install\/?$/.test(window.location.pathname);
 
+// Keep the push service worker alive across visits (push-only SW — it never
+// intercepts fetches, so it can't serve stale bundles).
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
 root.render(
   <StrictMode>
     {publicVenue ? (
