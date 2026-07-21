@@ -73,20 +73,42 @@ async function makeVideoThumb(file) {
 
 async function grabVideoFrame(file) {
   const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
   try {
-    const video = document.createElement("video");
     video.preload = "auto";
     video.playsInline = true;
     video.muted = true;
     video.src = url;
+    // iOS Safari: waiting on loadedmetadata + seeked HANGS (the seek event
+    // never fires — Mark's phone log: "thumb timeout"). The reliable recipe:
+    // wait for a DECODED frame (loadeddata), nudge the decoder with
+    // play-then-pause (allowed: muted + playsInline), and treat the seek as
+    // best-effort with its own short timeout.
     await new Promise((resolve, reject) => {
-      video.onloadedmetadata = resolve;
+      video.onloadeddata = resolve;
       video.onerror = () => reject(new Error("video decode failed"));
+      video.load();
     });
+    try {
+      await video.play();
+      video.pause();
+    } catch {
+      /* decode nudge only — a refusal is fine */
+    }
     await new Promise((resolve) => {
-      video.onseeked = resolve;
-      video.currentTime = Math.min(0.5, (video.duration || 1) / 2);
+      const t = setTimeout(resolve, 1200); // seek is a nice-to-have
+      video.onseeked = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      try {
+        video.currentTime = Math.min(0.5, (video.duration || 1) / 2);
+      } catch {
+        clearTimeout(t);
+        resolve();
+      }
     });
+    if (!video.videoWidth) throw new Error("no decoded frame");
     const scale = Math.min(
       1,
       WEB_MAX_DIM / Math.max(video.videoWidth || 1, video.videoHeight || 1)
@@ -103,6 +125,8 @@ async function grabVideoFrame(file) {
     if (!blob) throw new Error("canvas.toBlob failed");
     return blob;
   } finally {
+    video.removeAttribute("src");
+    video.load(); // release the decoder before revoking (iOS holds it)
     URL.revokeObjectURL(url);
   }
 }
