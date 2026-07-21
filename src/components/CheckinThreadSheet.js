@@ -125,6 +125,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // thread's check-in ("add last night's photos" path); a joined viewer adds
   // to their own parallel check-in.
   const [photos, setPhotos] = useState([]);
+  // Uploader profiles for attribution — the strip is the whole night's
+  // media, so every tile/lightbox names its author.
+  const [mediaProfiles, setMediaProfiles] = useState({});
   // Lightbox holds the full photo ROW — it's a mini-thread now (photo +
   // its own reactions + its own comments), not just a big image.
   const [lightbox, setLightbox] = useState(null);
@@ -244,6 +247,30 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     }
     setReacting(false);
   }
+
+  // Resolve uploader profiles for any media rows we haven't seen yet.
+  useEffect(() => {
+    const ids = Array.from(new Set(photos.map((p) => p.user_id))).filter(
+      (id) => id && !mediaProfiles[id]
+    );
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", ids);
+      if (!cancelled && data?.length) {
+        setMediaProfiles((prev) => ({
+          ...prev,
+          ...Object.fromEntries(data.map((p) => [p.id, p])),
+        }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [photos]);
 
   // Delete your OWN media (bytes count toward YOUR credit — so you can
   // always take them back). Two-tap: arm, then confirm.
@@ -799,6 +826,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       </span>
                     </span>
                   )}
+                  {p.user_id !== userId && (
+                    // Someone else's moment in the shared night — badge the author.
+                    <span className="absolute bottom-1 left-1 rounded-full ring-2 ring-white">
+                      <FriendAvatar profile={mediaProfiles[p.user_id]} small />
+                    </span>
+                  )}
                 </button>
               ))}
               {pending.map((p) => (
@@ -1032,33 +1065,62 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </>
               )}
             </div>
-            <div className="px-4 pt-3 pb-1 flex items-start gap-2">
-              <div className="flex-1 min-w-0">
-                <ReactionBar
-                  counts={summarizeReactions(reactions, userId, lightbox.id).counts}
-                  mine={summarizeReactions(reactions, userId, lightbox.id).mine}
-                  disabled={reacting}
-                  onTap={(e) => react(e, lightbox)}
-                />
-              </div>
-              {lightbox.user_id === userId && (
+            <div className="px-4 pt-3 pb-1">
+              <div className="flex items-center gap-2 mb-2">
                 <button
                   type="button"
-                  disabled={deleting}
-                  onClick={() => (deleteArm ? removeMedia() : setDeleteArm(true))}
-                  className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium active:scale-95 transition disabled:opacity-50 ${
-                    deleteArm
-                      ? "border-red-500 bg-red-500 text-white"
-                      : "border-neutral-200 text-neutral-500"
-                  }`}
+                  onClick={() =>
+                    lightbox.user_id !== userId &&
+                    onOpenProfile?.(lightbox.user_id)
+                  }
+                  className="flex items-center gap-2 flex-1 min-w-0 text-left"
                 >
-                  {deleting
-                    ? "Deleting…"
-                    : deleteArm
-                    ? "Really delete?"
-                    : "Delete"}
+                  <FriendAvatar
+                    profile={mediaProfiles[lightbox.user_id]}
+                    small
+                  />
+                  <span className="truncate text-xs text-neutral-700">
+                    <span className="font-medium">
+                      {lightbox.user_id === userId
+                        ? "Your"
+                        : `${
+                            (
+                              mediaProfiles[lightbox.user_id]?.display_name ||
+                              "Someone"
+                            ).split(" ")[0]
+                          }'s`}
+                    </span>{" "}
+                    {lightbox.kind === "video" ? "video" : "photo"} ·{" "}
+                    {timeAgoShort(lightbox.created_at)}
+                  </span>
                 </button>
-              )}
+                {lightbox.user_id === userId && (
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() =>
+                      deleteArm ? removeMedia() : setDeleteArm(true)
+                    }
+                    className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium active:scale-95 transition disabled:opacity-50 ${
+                      deleteArm
+                        ? "border-red-500 bg-red-500 text-white"
+                        : "border-neutral-200 text-neutral-500"
+                    }`}
+                  >
+                    {deleting
+                      ? "Deleting…"
+                      : deleteArm
+                      ? "Really delete?"
+                      : "Delete"}
+                  </button>
+                )}
+              </div>
+              <ReactionBar
+                counts={summarizeReactions(reactions, userId, lightbox.id).counts}
+                mine={summarizeReactions(reactions, userId, lightbox.id).mine}
+                disabled={reacting}
+                onTap={(e) => react(e, lightbox)}
+              />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
               {photoComments === null && (
