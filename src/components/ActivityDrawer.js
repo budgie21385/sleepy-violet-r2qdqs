@@ -1310,8 +1310,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           </div>
         </button>
         <p className="mb-2.5 px-0.5 text-[11px] text-neutral-500">
-          You appear on {name}'s check-in to their friends. Accept and it's on
-          your Been list too — with your photos and videos of the night.
+          Accept and it's on your Been list too — add your photos and videos
+          of the night. Decline takes your name off {name}'s check-in.
         </p>
         <div className="flex gap-2">
           <button
@@ -1320,7 +1320,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             onClick={onAcceptTag}
             className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
           >
-            {fresh ? "I'm here too" : "Add photos & memories"}
+            {fresh ? "Accept — I'm here" : "Accept"}
           </button>
           <button
             type="button"
@@ -1328,7 +1328,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             onClick={onRemoveTag}
             className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
           >
-            Remove me
+            Decline
           </button>
         </div>
       </div>
