@@ -31,7 +31,7 @@ export function CheckinHistoryRow({ c }) {
   );
 }
 
-export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack }) {
+export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast }) {
   const [rows, setRows] = useState(null); // null = loading
   const [venueById, setVenueById] = useState(() => new Map());
   const [withByAct, setWithByAct] = useState(() => new Map()); // activityId → first names
@@ -416,6 +416,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
         <CheckinThreadSheet
           thread={thread}
           userId={userId}
+          showToast={showToast}
           onClose={() => setThread(null)}
           onOpenVenue={(v) => {
             // Thread stays open underneath; the venue card stacks above it.

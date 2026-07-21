@@ -4005,6 +4005,7 @@ function ProfileTab({
           onUnsave={onUnsave}
           onHide={onHide}
           onBack={() => setShowBeen(false)}
+          showToast={showToast}
         />
       )}
       <div className="w-full max-w-sm">
