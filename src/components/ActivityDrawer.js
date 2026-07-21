@@ -388,14 +388,14 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 .in("id", taggerIds)
             : { data: [] },
           venueIds.length
-            ? supabase.from("venues").select("id, name").in("id", venueIds)
+            ? supabase.from("venues").select("*").in("id", venueIds)
             : { data: [] },
         ]);
         const tProfById = Object.fromEntries(
           (profsRes.data || []).map((p) => [p.id, p])
         );
-        const vNameById2 = Object.fromEntries(
-          (venuesRes.data || []).map((v) => [v.id, v.name])
+        const vById2 = Object.fromEntries(
+          (venuesRes.data || []).map((v) => [v.id, v])
         );
         tagNudgeItems = tagRows
           .filter((t) => actById[t.activity_id])
@@ -409,7 +409,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               otherId: act.user_id,
               profile: tProfById[act.user_id] || null,
               venueId: act.venue_id,
-              venueName: vNameById2[act.venue_id] || "a spot",
+              venueName: vById2[act.venue_id]?.name || "a spot",
+              venueObj: vById2[act.venue_id] || null, // accept → card opens wired
               label: act.label || null,
               checkinTimestamp: act.created_at,
               timestamp: t.created_at,
@@ -795,6 +796,19 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return;
     }
     await load();
+    // Land them ON their new check-in with the camera tile waiting —
+    // "Mark checked you in here — add photos" should end in adding photos.
+    if (act?.id) {
+      setThread({
+        activityId: act.id,
+        ownerId: userId,
+        ownerName: "You",
+        venueName: item.venueName,
+        label: item.label || null,
+        venueObj: item.venueObj || null,
+        timestamp: item.checkinTimestamp,
+      });
+    }
   }
 
   // "Did you go?" → Yes: backdated check-in at the decided venue (lands in
@@ -1203,8 +1217,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           </div>
         </button>
         <p className="mb-2.5 px-0.5 text-[11px] text-neutral-500">
-          You appear on {name}'s check-in to their friends. Check in too and
-          yours will see it.
+          You appear on {name}'s check-in to their friends. Accept and it's on
+          your Been list too — with your photos and videos of the night.
         </p>
         <div className="flex gap-2">
           <button
@@ -1213,7 +1227,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             onClick={onAcceptTag}
             className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
           >
-            {fresh ? "I'm here too" : "Add to my history"}
+            {fresh ? "I'm here too" : "Add photos & memories"}
           </button>
           <button
             type="button"
