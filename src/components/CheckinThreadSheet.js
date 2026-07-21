@@ -112,6 +112,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [tagOpen, setTagOpen] = useState(false);
   const [tagFriends, setTagFriends] = useState(null); // null = not loaded
   const [taggedIds, setTaggedIds] = useState(() => new Set());
+  const [tagStatusById, setTagStatusById] = useState({}); // uid → pending|accepted
   const [tagQ, setTagQ] = useState("");
   const [tagRefresh, setTagRefresh] = useState(0);
   // Whether the VIEWER already has a recent check-in at this venue —
@@ -519,8 +520,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .select("tagged_user_id, status")
         .eq("activity_id", thread.activityId)
         .neq("status", "removed");
-      const ids = Array.from(new Set((tags || []).map((t) => t.tagged_user_id)));
-      if (!cancelled) setTaggedIds(new Set(ids));
+      const statusById = Object.fromEntries(
+        (tags || []).map((t) => [t.tagged_user_id, t.status])
+      );
+      const ids = Object.keys(statusById);
+      if (!cancelled) {
+        setTaggedIds(new Set(ids));
+        setTagStatusById(statusById);
+      }
       if (ids.length === 0) {
         if (!cancelled) setWithNames([]);
         return;
@@ -532,8 +539,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       if (cancelled) return;
       setWithNames(
         (profs || [])
-          .map((p) => (p.display_name || "").split(" ")[0])
-          .filter(Boolean)
+          .map((p) => ({
+            name: (p.display_name || "").split(" ")[0],
+            pending: statusById[p.id] === "pending",
+          }))
+          .filter((w) => w.name)
       );
     })();
     return () => {
@@ -746,9 +756,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   {withNames.length > 0 && (
                     <>
                       with{" "}
-                      {withNames.length === 1
-                        ? withNames[0]
-                        : `${withNames.slice(0, -1).join(", ")} and ${withNames[withNames.length - 1]}`}
+                      {(() => {
+                        // Owner sees who hasn't accepted yet — "(invited)".
+                        // Everyone else just sees names (no public flagging).
+                        const names = withNames.map(
+                          (w) =>
+                            w.name + (isOwner && w.pending ? " (invited)" : "")
+                        );
+                        return names.length === 1
+                          ? names[0]
+                          : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+                      })()}
                     </>
                   )}
                   {isOwner && (
@@ -818,20 +836,25 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     })
                     .map((f) => {
                       const on = taggedIds.has(f.id);
+                      const accepted = tagStatusById[f.id] === "accepted";
+                      // Solid + ✓ = they accepted; outlined "invited" =
+                      // tag sent, waiting on them; neutral = untagged.
                       return (
                         <button
                           key={f.id}
                           type="button"
                           onClick={() => toggleTag(f.id)}
                           className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium active:scale-95 transition ${
-                            on
+                            on && accepted
                               ? "bg-[#455d3b] border-[#455d3b] text-white"
+                              : on
+                              ? "bg-white border-[#455d3b] text-[#455d3b]"
                               : "border-neutral-200 text-neutral-700"
                           }`}
                         >
                           <FriendAvatar profile={f} small />
                           {(f.display_name || "?").split(" ")[0]}
-                          {on ? " ✓" : ""}
+                          {on ? (accepted ? " ✓" : " · invited") : ""}
                         </button>
                       );
                     })}
