@@ -51,6 +51,7 @@ export default async function handler(req, res) {
     .eq("user_id", targetUserId);
 
   let sent = 0;
+  const errors = []; // surfaced in the response — silent sends are undebuggable
   for (const s of subs || []) {
     try {
       await webpush.sendNotification(
@@ -63,11 +64,16 @@ export default async function handler(req, res) {
       );
       sent++;
     } catch (e) {
+      errors.push({
+        endpoint: s.endpoint.slice(0, 48),
+        statusCode: e.statusCode || null,
+        message: (e.body || e.message || "").toString().slice(0, 160),
+      });
       // Push service says this subscription is dead — clean it up.
       if (e.statusCode === 404 || e.statusCode === 410) {
         await admin.from("push_subscriptions").delete().eq("endpoint", s.endpoint);
       }
     }
   }
-  return res.status(200).json({ sent });
+  return res.status(200).json({ sent, subscriptions: (subs || []).length, errors });
 }
