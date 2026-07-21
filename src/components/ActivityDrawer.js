@@ -9,6 +9,19 @@
 import { useState, useEffect } from "react";
 import { X, UserPlus, Check, MapPin, MessageCircle, Camera } from "lucide-react";
 
+// Priority tiers for the Activity list (Mark, July 18): items that deal
+// with the person directly outrank ambient news regardless of age.
+const KIND_WEIGHT = {
+  tag_nudge: 0, // someone checked you in — answer them
+  request_received: 0, // friend request — answer them
+  session_invite: 1,
+  session_nudge: 1,
+  photo_nudge: 1,
+};
+function itemWeight(i) {
+  return KIND_WEIGHT[i.kind] ?? 2;
+}
+
 // Local midnight of the Monday strictly AFTER the given time — the session
 // "Did you go?" nudge fires then (Mark: following Monday, no matter what).
 function followingMonday(ts) {
@@ -772,7 +785,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...photoNudgeItems,
       ...sessionNudgeItems,
       ...friendNewsItems,
-    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    ]
+      // Weight before recency (Mark, July 18): items that DEAL WITH the
+      // person — a pending tag, a friend request — outrank ambient news no
+      // matter their age. Tiers: 0 = act-on-me, 1 = invitations/own nudges,
+      // 2 = everything else; newest-first inside a tier.
+      .sort(
+        (a, b) =>
+          itemWeight(a) - itemWeight(b) ||
+          new Date(b.timestamp) - new Date(a.timestamp)
+      );
     drawerCache = { uid: userId, items: all };
     setItems(all);
   }
@@ -932,9 +954,13 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   // Show the first 10 (NEW first), "Show more" reveals the rest — trims
   // render work on long histories. (Query cost is unchanged; the item
   // blocks still run — the cache is what makes reopen instant.)
-  const allNew = (items || []).filter((i) => new Date(i.timestamp) > lastSeen);
+  // Tier-0 items (pending tags, friend requests) sit in the TOP section
+  // until dealt with — "seen" doesn't dismiss something awaiting an answer.
+  const allNew = (items || []).filter(
+    (i) => itemWeight(i) === 0 || new Date(i.timestamp) > lastSeen
+  );
   const allEarlier = (items || []).filter(
-    (i) => new Date(i.timestamp) <= lastSeen
+    (i) => itemWeight(i) !== 0 && new Date(i.timestamp) <= lastSeen
   );
   const newItems = allNew.slice(0, visibleCount);
   const earlierItems = allEarlier.slice(
