@@ -3,6 +3,7 @@
 // activity_comments RLS: the audience is the CHECK-IN OWNER's friends — a
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X, Send, ChevronLeft, ChevronRight, UserPlus } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
@@ -12,6 +13,11 @@ import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,
+  trackUpload,
+  getInflightFor,
+  subscribeUploads,
+  updateUploadPreview,
+  makeVideoPreviewUrl,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
 import {
@@ -138,7 +144,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // summarizeReactions() slices per target.
   const [reactions, setReactions] = useState([]);
   const [reacting, setReacting] = useState(false);
-  const [pending, setPending] = useState([]); // in-flight uploads: {key, preview, isVideo}
+  // In-flight tiles come from the MODULE-LEVEL store (lib/photos), not local
+  // state — so closing and reopening the card still shows "Uploading…" for
+  // anything mid-flight, and finishing uploads refresh any mounted card.
   const fileInputRef = useRef(null);
   const listRef = useRef(null);
   const isOwner = thread.ownerId === userId;
@@ -300,10 +308,34 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     ]);
   }
 
+  const pending = getInflightFor(
+    Array.from(new Set([...clusterIds, ...(myActivityId ? [myActivityId] : []), thread.activityId]))
+  );
+
+  // Any upload starting/finishing anywhere re-renders this card and, on
+  // finishes, re-pulls the strip — covers cards remounted mid-upload.
+  useEffect(() => {
+    let cancelled = false;
+    const unsub = subscribeUploads(async () => {
+      if (cancelled) return;
+      const rows = await fetchCheckinPhotosMany(contentIds());
+      if (!cancelled) {
+        setPhotos(
+          rows
+            .filter((r) => r.url)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [clusterKey, myActivityId]);
+
   // Fire-and-forget: tiles appear instantly, bytes move in the background
   // (a 50MB video on a phone uplink takes what it takes — the card just
-  // shouldn't make you watch). Uploads run in parallel and keep going while
-  // you comment/react; each finisher swaps its pending tile for the real one.
+  // shouldn't make you watch). The store keeps tiles alive across close/reopen.
   function addPhotos(fileList) {
     if (!uploadTargetId) return;
     const files = Array.from(fileList || []).slice(
@@ -314,29 +346,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const isVideo = (file.type || "").startsWith("video/");
       const preview = isVideo ? null : URL.createObjectURL(file);
-      setPending((prev) => [...prev, { key, preview, isVideo }]);
-      uploadCheckinMedia(userId, uploadTargetId, file)
-        .then(async () => {
-          const rows = await fetchCheckinPhotosMany(
-            Array.from(new Set([...contentIds(), uploadTargetId]))
-          );
-          setPhotos(
-            rows
-              .filter((r) => r.url)
-              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-          );
-        })
-        .catch((e) => {
+      const promise = uploadCheckinMedia(userId, uploadTargetId, file).catch(
+        (e) => {
           console.error("Media upload failed:", e);
           showToast?.(
             e?.code === "too_big"
               ? "Videos can be up to 50MB"
               : "Couldn't upload that"
           );
-        })
-        .finally(() => {
-          setPending((prev) => prev.filter((p) => p.key !== key));
-        });
+        }
+      );
+      trackUpload({ key, activityId: uploadTargetId, isVideo, preview }, promise);
+      if (isVideo) {
+        // Frame grab lands in ~a second — long before the bytes do.
+        makeVideoPreviewUrl(file)
+          .then((url) => updateUploadPreview(key, url))
+          .catch(() => {});
+      }
     }
   }
 
@@ -530,7 +556,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setComments((prev) => [...(prev || []), { ...inserted, profile: me || null }]);
   }
 
-  return (
+  // PORTAL to body: rendered inside a parent overlay (e.g. Been at z-2500)
+  // this card's z-3600 would only count within that parent's stacking
+  // context — root-level chrome like the +FAB (z-3060) would draw over it.
+  return createPortal(
     <div className="fixed inset-0 z-[3600]">
       <button
         type="button"
@@ -758,7 +787,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       className="h-24 w-24 rounded-xl object-cover opacity-60"
                     />
                   ) : (
-                    <span className="h-24 w-24 rounded-xl bg-neutral-800/80 text-white flex items-center justify-center text-lg">
+                    <span className="flex h-24 w-24 rounded-xl bg-neutral-800/80 text-white items-center justify-center text-lg">
+                      {p.isVideo ? "▶" : "…"}
+                    </span>
+                  )}
+                  {p.isVideo && p.preview && (
+                    <span className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/50 text-white flex items-center justify-center text-[10px]">
                       ▶
                     </span>
                   )}
@@ -1032,6 +1066,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

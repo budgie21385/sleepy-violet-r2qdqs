@@ -129,9 +129,42 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
   return row;
 }
 
+// Resumable (TUS) upload for big files: goes up in 6MB chunks, retries with
+// backoff, and RESUMES where it left off after a suspension — a locked phone
+// or app switch no longer restarts a 50MB transfer from zero (Mark's video
+// died exactly this way; single PUTs don't survive it).
+async function uploadResumable(path, file, contentType) {
+  const mod = await import("tus-js-client");
+  const Upload = mod.Upload || mod.default?.Upload;
+  const { data: sess } = await supabase.auth.getSession();
+  const token = sess?.session?.access_token;
+  if (!token) throw new Error("No session for upload");
+  await new Promise((resolve, reject) => {
+    const upload = new Upload(file, {
+      endpoint: `${process.env.REACT_APP_SUPABASE_URL}/storage/v1/upload/resumable`,
+      retryDelays: [0, 2000, 5000, 10000, 20000],
+      chunkSize: 6 * 1024 * 1024, // Supabase requires 6MB multiples
+      headers: { authorization: `Bearer ${token}` },
+      metadata: {
+        bucketName: BUCKET,
+        objectName: path,
+        contentType: contentType || "application/octet-stream",
+        cacheControl: "3600",
+      },
+      onError: reject,
+      onSuccess: resolve,
+    });
+    // Resume a previous attempt of the same file if one exists.
+    upload.findPreviousUploads().then((prev) => {
+      if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0]);
+      upload.start();
+    });
+  });
+}
+
 // Upload a video: JPEG thumbnail to web_path (what strips render), the
-// untouched video to orig_path, kind='video'. Throws {code:'too_big'} over
-// the cap so callers can toast a friendly limit.
+// untouched video to orig_path (resumable), kind='video'. Throws
+// {code:'too_big'} over the cap so callers can toast a friendly limit.
 export async function uploadCheckinVideo(userId, activityId, file) {
   if ((file.size || 0) > MAX_VIDEO_BYTES) {
     const err = new Error("Video over the 50MB limit");
@@ -150,10 +183,9 @@ export async function uploadCheckinVideo(userId, activityId, file) {
     .upload(webPath, thumbBlob, { contentType: "image/jpeg" });
   if (webErr) throw webErr;
 
-  const { error: origErr } = await supabase.storage
-    .from(BUCKET)
-    .upload(origPath, file, { contentType: file.type || "video/mp4" });
-  if (origErr) {
+  try {
+    await uploadResumable(origPath, file, file.type || "video/mp4");
+  } catch (origErr) {
     await supabase.storage.from(BUCKET).remove([webPath]);
     throw origErr;
   }
@@ -182,6 +214,61 @@ export function uploadCheckinMedia(userId, activityId, file) {
   return (file.type || "").startsWith("video/")
     ? uploadCheckinVideo(userId, activityId, file)
     : uploadCheckinPhoto(userId, activityId, file);
+}
+
+// ---- In-flight upload store (module scope) ----
+// Uploads outlive the card that started them (SPA — the page stays open),
+// but component-local "Uploading…" tiles died on unmount, so a closed and
+// reopened card showed nothing until the upload finished (Mark's report).
+// This registry keeps pending entries + notifies subscribers on every
+// start/finish, so ANY mounted card can render the right tiles.
+const inflightUploads = new Map(); // key -> {key, activityId, isVideo, preview}
+const uploadListeners = new Set();
+function notifyUploadListeners() {
+  uploadListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch {}
+  });
+}
+
+// Register an upload + its promise; auto-removes and re-notifies when done.
+export function trackUpload(entry, promise) {
+  inflightUploads.set(entry.key, entry);
+  notifyUploadListeners();
+  promise.finally(() => {
+    inflightUploads.delete(entry.key);
+    notifyUploadListeners();
+  });
+}
+
+// A pending tile's preview can arrive AFTER enqueue (video thumbnails are
+// generated async) — patch the entry and re-notify so tiles upgrade live.
+export function updateUploadPreview(key, preview) {
+  const e = inflightUploads.get(key);
+  if (e) {
+    e.preview = preview;
+    notifyUploadListeners();
+  }
+}
+
+// Local preview frame for a video file (object URL) — shows in pending tiles
+// well before the actual bytes finish uploading.
+export async function makeVideoPreviewUrl(file) {
+  const blob = await makeVideoThumb(file);
+  return URL.createObjectURL(blob);
+}
+
+export function getInflightFor(activityIds) {
+  const ids = new Set(activityIds || []);
+  return Array.from(inflightUploads.values()).filter((e) =>
+    ids.has(e.activityId)
+  );
+}
+
+export function subscribeUploads(cb) {
+  uploadListeners.add(cb);
+  return () => uploadListeners.delete(cb);
 }
 
 // Photos for a check-in, with signed display URLs. Returns

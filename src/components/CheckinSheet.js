@@ -10,6 +10,9 @@ import { FriendAvatar } from "./FriendAvatar";
 import { ConfettiBurst } from "./SessionResultsView";
 import {
   uploadCheckinMedia,
+  trackUpload,
+  updateUploadPreview,
+  makeVideoPreviewUrl,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
 
@@ -40,7 +43,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
         ...prev,
         { key, preview, isVideo, state: "uploading" },
       ]);
-      uploadCheckinMedia(userId, activity.id, file)
+      const promise = uploadCheckinMedia(userId, activity.id, file)
         .then(() => {
           setPhotos((prev) =>
             prev.map((p) => (p.key === key ? { ...p, state: "done" } : p))
@@ -55,6 +58,21 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
               : "Couldn't upload that"
           );
         });
+      // Register in the module-level store: if the sheet closes mid-upload,
+      // the check-in card still shows the "Uploading…" tile.
+      trackUpload({ key, activityId: activity.id, isVideo, preview }, promise);
+      if (isVideo) {
+        // Real preview frame lands in ~a second — upgrade the dark ▶ tile
+        // here and in any card watching the store.
+        makeVideoPreviewUrl(file)
+          .then((url) => {
+            updateUploadPreview(key, url);
+            setPhotos((prev) =>
+              prev.map((p) => (p.key === key ? { ...p, preview: url } : p))
+            );
+          })
+          .catch(() => {});
+      }
     }
   }
   // Celebration fires on DONE (after label + friends are in), not on open —
@@ -240,6 +258,11 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
                         p.state === "uploading" ? "opacity-50" : ""
                       }`}
                     >
+                      ▶
+                    </span>
+                  )}
+                  {p.isVideo && p.preview && (
+                    <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center text-[9px]">
                       ▶
                     </span>
                   )}

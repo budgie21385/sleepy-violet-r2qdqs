@@ -3,6 +3,7 @@
 // object: label, companions, thread) — the venue card is one tap deeper via
 // the venue name inside the thread. Extracted from App.js (July 13, 2026).
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { MapVenueSheet } from "./MapVenueSheet";
@@ -299,11 +300,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
           })}
         </div>
       </div>
-      {addOpen && (
-        // Floating card anchored HIGH: a bottom sheet dies on iOS here — the
-        // keyboard covers the search input and the tab bar/FAB (higher z)
-        // sliced through it (Mark's screenshot). Top-anchored card + z above
-        // the chrome = keyboard opens beneath, card stays whole.
+      {addOpen &&
+        // PORTALED to body: inside BeenScreen's fixed z-2500 container this
+        // overlay's z only counted locally, so the root-level +FAB (z-3060)
+        // still drew over it (Mark's report). Floating card anchored HIGH so
+        // the iOS keyboard opens beneath the search input.
+        createPortal(
         <div className="fixed inset-0 z-[4000]">
           <button
             type="button"
@@ -407,7 +409,8 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack 
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       {thread && (
         <CheckinThreadSheet
