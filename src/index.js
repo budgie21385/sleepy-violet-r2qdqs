@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { PublicVenuePage } from "./components/PublicVenuePage";
 import { InstallScreen } from "./components/InstallScreen";
+import { UpdatePill } from "./components/UpdatePill";
 
 const rootElement = document.getElementById("root");
 const root = createRoot(rootElement);
@@ -23,6 +24,8 @@ if ("serviceWorker" in navigator) {
 
 root.render(
   <StrictMode>
+    {/* Renders on every surface — a stale bundle announces itself. */}
+    <UpdatePill />
     {publicVenue ? (
       <PublicVenuePage venueId={publicVenue[1]} />
     ) : installPage ? (

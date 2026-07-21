@@ -5,8 +5,14 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { Camera, Check } from "lucide-react";
+import { pushState, enablePush } from "../lib/push";
 
 export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
+  // Two steps (Mark, July 21): profile → install/notifications. The alerts
+  // step is the growth keystone — every nudge we send only lands outside the
+  // app if this gets said yes to. Skipped when already granted/unsupported.
+  const [step, setStep] = useState("profile");
+  const [enabling, setEnabling] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
   const [username, setUsername] = useState(profile?.username || "");
   const [status, setStatus] = useState({ state: "idle" });
@@ -83,6 +89,13 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
     !!trimmedUsername && !usernameValid && status.state !== "idle";
   const canDone = !saving && !uploading && !usernameBlocking;
 
+  // After the profile step: show the alerts step only when it can do good.
+  function finishOrAlerts() {
+    const s = pushState();
+    if (s === "default" || s === "need-install") setStep("alerts");
+    else onDone();
+  }
+
   async function handleDone() {
     setError("");
     const updates = {};
@@ -92,7 +105,7 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
     if (trimmedUsername && usernameValid) updates.username = trimmedUsername;
     if (avatarUrl) updates.avatar_url = avatarUrl;
     if (Object.keys(updates).length === 0) {
-      onDone();
+      finishOrAlerts();
       return;
     }
     setSaving(true);
@@ -108,7 +121,7 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
       return;
     }
     if (setProfile) setProfile(data);
-    onDone();
+    finishOrAlerts();
   }
 
   const hint = (() => {
@@ -129,6 +142,63 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
         return null;
     }
   })();
+
+  if (step === "alerts") {
+    const needInstall = pushState() === "need-install";
+    return (
+      <div className="fixed inset-0 z-[4000] bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+            <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#edf2eb] text-3xl">
+              🔔
+            </span>
+            <h1 className="mt-4 text-2xl font-semibold tracking-tight">
+              Don't miss the night
+            </h1>
+            <p className="mt-1.5 text-sm text-neutral-600">
+              When friends check in, react or check you in — it lands on your
+              lock screen.
+            </p>
+            {needInstall ? (
+              <>
+                <p className="mt-4 text-xs text-neutral-500">
+                  On iPhone, notifications need Flanit on your home screen
+                  first — takes ten seconds.
+                </p>
+                <a
+                  href="/install"
+                  className="mt-4 block w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                >
+                  Add to home screen
+                </a>
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={enabling}
+                onClick={async () => {
+                  setEnabling(true);
+                  await enablePush(userId);
+                  setEnabling(false);
+                  onDone();
+                }}
+                className="mt-5 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-60"
+              >
+                {enabling ? "One sec…" : "Turn on notifications"}
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onDone}
+            className="mt-3 w-full text-center text-sm text-neutral-500"
+          >
+            Not now
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[4000] bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
@@ -215,7 +285,7 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
         </div>
         <button
           type="button"
-          onClick={onDone}
+          onClick={finishOrAlerts}
           className="mt-3 w-full text-center text-sm text-neutral-500"
         >
           Skip for now
