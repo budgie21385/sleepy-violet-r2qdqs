@@ -1169,6 +1169,22 @@ useEffect(() => {
         }
       }
 
+      // Friends' new friendships since last seen (RPC absent → silent 0).
+      let friendNewsCount = 0;
+      {
+        const { data: fnRows } = await supabase.rpc(
+          "friends_new_friendships",
+          { p_since: lastSeen }
+        );
+        if (fnRows?.length) {
+          const seenPair = new Set();
+          for (const r of fnRows) {
+            seenPair.add([r.friend_id, r.other_id].sort().join("_"));
+          }
+          friendNewsCount = seenPair.size;
+        }
+      }
+
       if (cancelled) return;
       setUnreadCount(
         (reqRes.count ?? 0) +
@@ -1180,7 +1196,8 @@ useEffect(() => {
           reactionCount +
           tagCount +
           photoNudgeCount +
-          sessionNudgeCount
+          sessionNudgeCount +
+          friendNewsCount
       );
     })();
     return () => {

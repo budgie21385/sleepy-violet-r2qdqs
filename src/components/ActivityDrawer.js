@@ -31,6 +31,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   ); // null = loading
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [thread, setThread] = useState(null); // open comment thread sheet
+  const [visibleCount, setVisibleCount] = useState(10); // "Show more" paging
   const [lastSeen] = useState(() => {
     const stored = localStorage.getItem("flanit_drawer_last_seen");
     return stored ? new Date(stored) : new Date(0);
@@ -544,6 +545,51 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return nudges;
     })();
 
+    // ---- "[Friend] added [Name] as a friend" — social-graph news via the
+    // friends_new_friendships SECURITY DEFINER RPC (friendships RLS is
+    // party-only). 7-day window; errors (RPC not yet run) fail silent.
+    const friendNewsP = (async () => {
+      const newsItems = [];
+      const since = new Date(
+        Date.now() - 7 * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const { data: rows, error } = await supabase.rpc(
+        "friends_new_friendships",
+        { p_since: since }
+      );
+      if (error || !rows || rows.length === 0) return newsItems;
+      // Both-sides-my-friend pairs come back twice — dedupe by pair.
+      const seenPair = new Set();
+      const clean = rows
+        .filter((r) => {
+          const k = [r.friend_id, r.other_id].sort().join("_");
+          if (seenPair.has(k)) return false;
+          seenPair.add(k);
+          return true;
+        })
+        .slice(0, 15);
+      const ids = Array.from(
+        new Set(clean.flatMap((r) => [r.friend_id, r.other_id]))
+      );
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", ids);
+      const pById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      for (const r of clean) {
+        newsItems.push({
+          kind: "friend_new_friend",
+          id: `fnf_${[r.friend_id, r.other_id].sort().join("_")}`,
+          friendId: r.friend_id,
+          otherId: r.other_id,
+          friendProfile: pById[r.friend_id] || null,
+          otherProfile: pById[r.other_id] || null,
+          timestamp: r.responded_at,
+        });
+      }
+      return newsItems;
+    })();
+
     // ---- Comments + reactions on MY check-ins ----
     const commentP = (async () => {
       let commentItems = [];
@@ -697,6 +743,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       inviteItems,
       photoNudgeItems,
       sessionNudgeItems,
+      friendNewsItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -708,6 +755,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       inviteP,
       photoNudgeP,
       sessionNudgeP,
+      friendNewsP,
     ]);
 
     const all = [
@@ -723,6 +771,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...tagNudgeItems,
       ...photoNudgeItems,
       ...sessionNudgeItems,
+      ...friendNewsItems,
     ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     drawerCache = { uid: userId, items: all };
     setItems(all);
@@ -880,12 +929,20 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     await load();
   }
 
-  const newItems = (items || []).filter(
-    (i) => new Date(i.timestamp) > lastSeen
-  );
-  const earlierItems = (items || []).filter(
+  // Show the first 10 (NEW first), "Show more" reveals the rest — trims
+  // render work on long histories. (Query cost is unchanged; the item
+  // blocks still run — the cache is what makes reopen instant.)
+  const allNew = (items || []).filter((i) => new Date(i.timestamp) > lastSeen);
+  const allEarlier = (items || []).filter(
     (i) => new Date(i.timestamp) <= lastSeen
   );
+  const newItems = allNew.slice(0, visibleCount);
+  const earlierItems = allEarlier.slice(
+    0,
+    Math.max(0, visibleCount - newItems.length)
+  );
+  const hiddenCount =
+    allNew.length + allEarlier.length - newItems.length - earlierItems.length;
 
   const body = (
     <>
@@ -1000,6 +1057,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             ))}
           </div>
         </>
+      )}
+
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount((c) => c + 20)}
+          className="mt-3 w-full rounded-full border border-neutral-200 bg-white py-2.5 text-xs font-medium text-neutral-600 active:scale-[0.99] transition"
+        >
+          Show {hiddenCount} more
+        </button>
       )}
 
       {thread && (
@@ -1328,6 +1395,34 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-[11px] text-neutral-500 truncate">“{item.body}”</p>
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
+      </button>
+    );
+  }
+
+  if (item.kind === "friend_new_friend") {
+    const friendName =
+      (item.friendProfile?.display_name || "A friend").split(" ")[0];
+    const otherName =
+      (item.otherProfile?.display_name || "someone").split(" ")[0];
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenProfile?.(item.otherId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="flex shrink-0 -space-x-2">
+          <FriendAvatar profile={item.friendProfile} small />
+          <FriendAvatar profile={item.otherProfile} small />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{friendName}</strong> added{" "}
+            <strong className="font-medium">{otherName}</strong> as a friend
+          </p>
+          <p className="text-[11px] text-neutral-500">
+            Tap to see {otherName}'s profile
+          </p>
+        </div>
       </button>
     );
   }
