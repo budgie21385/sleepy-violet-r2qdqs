@@ -135,28 +135,6 @@ export function InstallScreen() {
             >
               Install
             </button>
-            {showSteps && isIOS() && (
-              <ol className="mt-4 space-y-2 text-left text-sm text-neutral-600 list-decimal list-inside">
-                <li>
-                  Tap the <span className="font-medium">Share</span> button{" "}
-                  <span aria-hidden>⎋</span> in Safari's toolbar
-                </li>
-                <li>
-                  Scroll and choose{" "}
-                  <span className="font-medium">Add to Home Screen</span>
-                </li>
-                <li>Open Flanit from your home screen</li>
-              </ol>
-            )}
-            {showSteps && !isIOS() && (
-              <ol className="mt-4 space-y-2 text-left text-sm text-neutral-600 list-decimal list-inside">
-                <li>Tap the ⋮ menu in Chrome</li>
-                <li>
-                  Choose <span className="font-medium">Add to Home screen</span>
-                </li>
-                <li>Open Flanit from your home screen</li>
-              </ol>
-            )}
           </div>
         )}
 
@@ -167,6 +145,96 @@ export function InstallScreen() {
           or keep using flanit.co in the browser
         </a>
       </div>
+
+      {/* Instruction steps as a bottom sheet over the dimmed page (the
+          sayi.do treatment) — the card stays put underneath. */}
+      {showSteps && (
+        <div className="fixed inset-0 z-50">
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setShowSteps(false)}
+            className="absolute inset-0 bg-black/40"
+          />
+          <div className="absolute left-0 right-0 bottom-0 rounded-t-3xl bg-white p-6 pb-10 shadow-2xl">
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-neutral-200" />
+            <h2 className="text-xl font-semibold tracking-tight">
+              Install on your {isIOS() ? "iPhone" : "phone"}
+            </h2>
+            <div className="mt-4 flex items-center gap-3 rounded-2xl border border-neutral-200 p-3">
+              <img
+                src="/icon-192.png"
+                alt=""
+                className="h-11 w-11 rounded-xl"
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">Flanit</p>
+                <p className="text-xs text-neutral-500">https://flanit.co</p>
+              </div>
+            </div>
+            {isIOS() ? (
+              <ol className="mt-5 space-y-3.5 text-[15px] text-neutral-800">
+                <li className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-neutral-500">1.</span>
+                  <span>
+                    Tap{" "}
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-neutral-300 align-middle">
+                      ⎋
+                    </span>{" "}
+                    in the browser menu
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-neutral-500">2.</span>
+                  <span>
+                    Tap on <strong className="font-semibold">Add to Home Screen</strong>{" "}
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-neutral-300 align-middle">
+                      +
+                    </span>
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-neutral-500">3.</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    Look for the{" "}
+                    <img
+                      src="/icon-192.png"
+                      alt="Flanit icon"
+                      className="inline h-6 w-6 rounded-md"
+                    />{" "}
+                    icon on your home screen
+                  </span>
+                </li>
+              </ol>
+            ) : (
+              <ol className="mt-5 space-y-3.5 text-[15px] text-neutral-800">
+                <li className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-neutral-500">1.</span>
+                  <span>Tap the ⋮ menu in Chrome</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-neutral-500">2.</span>
+                  <span>
+                    Tap <strong className="font-semibold">Add to Home screen</strong>
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="w-5 shrink-0 text-neutral-500">3.</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    Look for the{" "}
+                    <img
+                      src="/icon-192.png"
+                      alt="Flanit icon"
+                      className="inline h-6 w-6 rounded-md"
+                    />{" "}
+                    icon on your home screen
+                  </span>
+                </li>
+              </ol>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
