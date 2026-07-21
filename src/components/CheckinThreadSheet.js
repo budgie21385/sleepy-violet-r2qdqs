@@ -13,10 +13,12 @@ import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,
+  deleteCheckinPhoto,
   trackUpload,
   getInflightFor,
   subscribeUploads,
   updateUploadPreview,
+  updateUploadProgress,
   makeVideoPreviewUrl,
   MAX_PHOTOS_PER_CHECKIN,
 } from "../lib/photos";
@@ -243,12 +245,33 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setReacting(false);
   }
 
+  // Delete your OWN media (bytes count toward YOUR credit — so you can
+  // always take them back). Two-tap: arm, then confirm.
+  const [deleteArm, setDeleteArm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function removeMedia() {
+    if (!lightbox || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteCheckinPhoto(lightbox);
+      setPhotos((prev) => prev.filter((p) => p.id !== lightbox.id));
+      setLightbox(null);
+    } catch (e) {
+      console.error("Delete failed:", e);
+      showToast?.("Couldn't delete that");
+    }
+    setDeleting(false);
+    setDeleteArm(false);
+  }
+
   // Photo comments load when the lightbox opens (its own little thread).
   useEffect(() => {
     if (!lightbox) return;
     let cancelled = false;
     setPhotoComments(null);
     setPhotoBody("");
+    setDeleteArm(false);
     (async () => {
       const { data: rows } = await supabase
         .from("activity_comments")
@@ -346,16 +369,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const isVideo = (file.type || "").startsWith("video/");
       const preview = isVideo ? null : URL.createObjectURL(file);
-      const promise = uploadCheckinMedia(userId, uploadTargetId, file).catch(
-        (e) => {
-          console.error("Media upload failed:", e);
-          showToast?.(
-            e?.code === "too_big"
-              ? "Videos can be up to 50MB"
-              : "Couldn't upload that"
-          );
-        }
-      );
+      const promise = uploadCheckinMedia(userId, uploadTargetId, file, (pct) =>
+        updateUploadProgress(key, pct)
+      ).catch((e) => {
+        console.error("Media upload failed:", e);
+        showToast?.(
+          e?.code === "too_big"
+            ? "Videos can be up to 50MB"
+            : "Couldn't upload that"
+        );
+      });
       trackUpload({ key, activityId: uploadTargetId, isVideo, preview }, promise);
       if (isVideo) {
         // Frame grab lands in ~a second — long before the bytes do.
@@ -798,7 +821,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   )}
                   <span className="absolute inset-0 flex items-center justify-center">
                     <span className="rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white">
-                      Uploading…
+                      {p.progress != null
+                        ? `Uploading ${p.progress}%`
+                        : "Uploading…"}
                     </span>
                   </span>
                 </div>
@@ -1007,13 +1032,33 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </>
               )}
             </div>
-            <div className="px-4 pt-3 pb-1">
-              <ReactionBar
-                counts={summarizeReactions(reactions, userId, lightbox.id).counts}
-                mine={summarizeReactions(reactions, userId, lightbox.id).mine}
-                disabled={reacting}
-                onTap={(e) => react(e, lightbox)}
-              />
+            <div className="px-4 pt-3 pb-1 flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <ReactionBar
+                  counts={summarizeReactions(reactions, userId, lightbox.id).counts}
+                  mine={summarizeReactions(reactions, userId, lightbox.id).mine}
+                  disabled={reacting}
+                  onTap={(e) => react(e, lightbox)}
+                />
+              </div>
+              {lightbox.user_id === userId && (
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => (deleteArm ? removeMedia() : setDeleteArm(true))}
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium active:scale-95 transition disabled:opacity-50 ${
+                    deleteArm
+                      ? "border-red-500 bg-red-500 text-white"
+                      : "border-neutral-200 text-neutral-500"
+                  }`}
+                >
+                  {deleting
+                    ? "Deleting…"
+                    : deleteArm
+                    ? "Really delete?"
+                    : "Delete"}
+                </button>
+              )}
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
               {photoComments === null && (
