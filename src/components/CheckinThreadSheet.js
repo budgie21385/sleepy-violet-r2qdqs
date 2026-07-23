@@ -617,7 +617,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       const { error } = await supabase
         .from("activity_tags")
         .insert({ activity_id: thread.activityId, tagged_user_id: friendId });
-      if (error) {
+      if (error && error.code === "23505") {
+        // They already self-requested (joined) — your tag is the second
+        // consent. Complete it, no nudges either way.
+        await supabase
+          .from("activity_tags")
+          .update({ status: "accepted", responded_at: new Date().toISOString() })
+          .eq("activity_id", thread.activityId)
+          .eq("tagged_user_id", friendId);
+        sendPush(friendId, "You're on the check-in 🎉", `Added at ${thread.venueName}`);
+      } else if (error) {
         console.error("Tag failed:", error);
         setTaggedIds((prev) => {
           const next = new Set(prev);
@@ -993,12 +1002,46 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 // check-in into THIS night (July 23 model).
                 const act = await onCheckIn(thread.venueObj, thread.activityId);
                 if (act) {
-                  // Ask the owner to put you on their with-line — a
-                  // SELF-REQUESTED tag they accept or decline. Until accepted
-                  // it renders nowhere (their card, their consent).
-                  supabase
+                  // If the owner ALREADY tagged you (nudge unseen), your join
+                  // is the second consent — auto-accept, no questions asked.
+                  // Otherwise: a SELF-REQUESTED tag the owner accepts or
+                  // declines; until accepted it renders nowhere.
+                  const { data: existingTag } = await supabase
                     .from("activity_tags")
-                    .upsert(
+                    .select("id, status, requested_by")
+                    .eq("activity_id", thread.activityId)
+                    .eq("tagged_user_id", userId)
+                    .maybeSingle();
+                  if (existingTag && existingTag.requested_by !== userId) {
+                    if (existingTag.status !== "accepted") {
+                      await supabase
+                        .from("activity_tags")
+                        .update({
+                          status: "accepted",
+                          responded_at: new Date().toISOString(),
+                        })
+                        .eq("id", existingTag.id);
+                    }
+                    // Reciprocal: your shard says "with [owner]" too.
+                    await supabase.from("activity_tags").upsert(
+                      {
+                        activity_id: act.id,
+                        tagged_user_id: thread.ownerId,
+                        status: "accepted",
+                        responded_at: new Date().toISOString(),
+                      },
+                      {
+                        onConflict: "activity_id,tagged_user_id",
+                        ignoreDuplicates: true,
+                      }
+                    );
+                    sendPush(
+                      thread.ownerId,
+                      "You're together 🎉",
+                      `They joined your night at ${thread.venueName}`
+                    );
+                  } else if (!existingTag) {
+                    await supabase.from("activity_tags").upsert(
                       {
                         activity_id: thread.activityId,
                         tagged_user_id: userId,
@@ -1009,14 +1052,13 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                         onConflict: "activity_id,tagged_user_id",
                         ignoreDuplicates: true,
                       }
-                    )
-                    .then(() => {
-                      sendPush(
-                        thread.ownerId,
-                        "Someone's here too",
-                        `They joined your night at ${thread.venueName} — add them to your check-in?`
-                      );
-                    });
+                    );
+                    sendPush(
+                      thread.ownerId,
+                      "Someone's here too",
+                      `They joined your night at ${thread.venueName} — add them to your check-in?`
+                    );
+                  }
                 }
               }}
               className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition"

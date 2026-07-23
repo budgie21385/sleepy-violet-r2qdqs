@@ -153,7 +153,15 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
       const { error } = await supabase
         .from("activity_tags")
         .insert({ activity_id: activity.id, tagged_user_id: friendId });
-      if (error) {
+      if (error && error.code === "23505") {
+        // They already self-requested (joined) — your tag completes it.
+        await supabase
+          .from("activity_tags")
+          .update({ status: "accepted", responded_at: new Date().toISOString() })
+          .eq("activity_id", activity.id)
+          .eq("tagged_user_id", friendId);
+        sendPush(friendId, "You're on the check-in 🎉", `Added at ${venue.name}`);
+      } else if (error) {
         console.error("Tag failed:", error);
         setTaggedIds((prev) => {
           const next = new Set(prev);
