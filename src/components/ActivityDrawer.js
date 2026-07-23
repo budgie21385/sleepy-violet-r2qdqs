@@ -1350,7 +1350,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             load(); // refresh comment counts / items after the conversation
           }}
           onOpenProfile={(uid) => {
-            setThread(null); // sheet sits above the profile screen
+            // Lookup renders ABOVE the card — keep the card open so Back
+            // returns exactly here. Close only for self (Profile tab).
+            if (uid === userId) setThread(null);
             onOpenProfile?.(uid);
           }}
           onOpenVenue={(v) => {

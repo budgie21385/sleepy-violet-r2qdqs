@@ -1687,6 +1687,18 @@ useEffect(() => {
   // Thin UI wrapper around lib/checkins.performCheckIn — returns the activity
   // row (fresh or already) so the card's pill can flip; null on failure.
   // Fresh check-ins open the CheckinSheet (confetti, label, tags).
+  // One profile router (July 23): self → your Profile tab, anyone else →
+  // the lookup screen (which sits ABOVE cards, so nothing needs closing).
+  function openProfile(uid) {
+    if (!uid) return;
+    if (uid === session?.user?.id) {
+      setLookupUserId(null);
+      setTab("profile");
+      return;
+    }
+    setLookupUserId(uid);
+  }
+
   async function handleCheckIn(venue, joinedFrom = null) {
     const uid = session?.user?.id;
     if (!uid) {
@@ -3461,7 +3473,7 @@ if (authLoading || guestLoading) {
           showImport={showImport}
           setShowImport={setShowImport}
           showToast={showToast}
-          onOpenProfile={(uid) => setLookupUserId(uid)}
+          onOpenProfile={openProfile}
           onFindFriends={() => setShowFindFriends(true)}
         />
       )}
@@ -3469,7 +3481,7 @@ if (authLoading || guestLoading) {
         <ActivityDrawer
           asTab
           userId={session?.user?.id}
-          onOpenProfile={(uid) => setLookupUserId(uid)}
+          onOpenProfile={openProfile}
           onOpenSession={(sid) => setNotifSessionId(sid)}
           onOpenVenue={(v) => setCardVenue(v)}
           onCheckIn={handleCheckIn}
@@ -3575,12 +3587,10 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onClose={() => setThreadCheckin(null)}
           onOpenProfile={(uid) => {
-            setThreadCheckin(null); // sheet sits above the profile screen
-            if (uid && uid === session?.user?.id) {
-              setTab("profile"); // self → your own Profile tab
-              return;
-            }
-            setLookupUserId(uid);
+            // Lookup sits ABOVE the card now — only close for self (Profile
+            // tab lives beneath everything).
+            if (uid && uid === session?.user?.id) setThreadCheckin(null);
+            openProfile(uid);
           }}
           onOpenVenue={(v) => {
             // Keep the check-in card open underneath — the venue card stacks
@@ -4212,10 +4222,12 @@ function ProfileTab({
           onBack={() => setShowBeen(false)}
           showToast={showToast}
           onOpenProfile={(uid) => {
-            console.log("FLANIT-PROFILE App/Been handler", uid, "self:", session?.user?.id);
-            setShowBeen(false); // Been (z-2500) would cover the profile screen
-            // Self → closing Been lands you on your own Profile tab already.
-            if (uid && uid === session?.user?.id) return;
+            // Lookup renders ABOVE Been now — only close for self (your
+            // Profile tab is what's underneath Been).
+            if (uid && uid === session?.user?.id) {
+              setShowBeen(false);
+              return;
+            }
             onOpenProfile?.(uid); // ProfileTab's prop → lookup screen at root
           }}
         />

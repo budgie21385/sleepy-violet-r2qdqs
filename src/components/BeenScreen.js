@@ -37,6 +37,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   const [withByAct, setWithByAct] = useState(() => new Map()); // activityId → first names
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [thread, setThread] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0); // refetch after leave/changes
   // "+ Add a night" — backdated check-in for a night you didn't check in.
   // The cluster merge does the magic afterwards: if friends checked in that
   // night, your backdated card shows their photos/comments too.
@@ -208,7 +209,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, reloadTick]);
 
   function when(ts) {
     const d = new Date(ts);
@@ -422,9 +423,13 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           thread={thread}
           userId={userId}
           showToast={showToast}
-          onClose={() => setThread(null)}
+          onClose={() => {
+            setThread(null);
+            setReloadTick((n) => n + 1); // rows may have changed (leave, tags)
+          }}
           onOpenProfile={(uid) => {
-            setThread(null); // the card would sit above the profile screen
+            // Lookup renders above the card — keep it open unless self.
+            if (uid === userId) setThread(null);
             onOpenProfile?.(uid);
           }}
           onOpenVenue={(v) => {

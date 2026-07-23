@@ -145,11 +145,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setLeaving(true);
     try {
       const myShardId = isOwner ? thread.activityId : myActivityId;
-      await supabase
+      const { error: tagErr } = await supabase
         .from("activity_tags")
         .update({ status: "removed", responded_at: new Date().toISOString() })
         .in("activity_id", clusterIds)
         .eq("tagged_user_id", userId);
+      if (tagErr) console.error("Leave: tag removal failed:", tagErr);
       if (myShardId) {
         // Storage first (raw row deletes would orphan the files).
         const mine = photos.filter(
@@ -165,7 +166,13 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           .from("activities")
           .update({ joined_from: null })
           .eq("joined_from", myShardId);
-        await supabase.from("activities").delete().eq("id", myShardId);
+        // Supabase returns errors, it doesn't throw — CHECK them, or a
+        // refused delete toasts success while nothing happened.
+        const { error: delErr } = await supabase
+          .from("activities")
+          .delete()
+          .eq("id", myShardId);
+        if (delErr) throw delErr;
       }
       showToast?.("You've left this check-in");
       onClose();
@@ -951,10 +958,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     <button
                       key={p.id}
                       type="button"
-                      onClick={() => {
-                        console.log("FLANIT-PROFILE header tap", p.id, p.display_name, "handler:", !!onOpenProfile);
-                        onOpenProfile?.(p.id);
-                      }}
+                      onClick={() => onOpenProfile?.(p.id)}
                       className="active:scale-95 transition"
                     >
                       <FriendAvatar profile={p} small />
