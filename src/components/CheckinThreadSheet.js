@@ -161,18 +161,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             await deleteCheckinPhoto(m);
           } catch {}
         }
-        // Detach any shards that joined THROUGH yours before deleting.
-        await supabase
-          .from("activities")
-          .update({ joined_from: null })
-          .eq("joined_from", myShardId);
-        // Supabase returns errors, it doesn't throw — CHECK them, or a
-        // refused delete toasts success while nothing happened.
-        const { error: delErr } = await supabase
+        // Joined-through shards detach automatically (joined_from is
+        // ON DELETE SET NULL — leave_night.sql). And crucially: an
+        // RLS-filtered delete returns SUCCESS WITH ZERO ROWS, so we must
+        // count what actually died, not just check for errors.
+        const { data: deleted, error: delErr } = await supabase
           .from("activities")
           .delete()
-          .eq("id", myShardId);
+          .eq("id", myShardId)
+          .select("id");
         if (delErr) throw delErr;
+        if (!deleted || deleted.length === 0) {
+          throw new Error("delete removed 0 rows — RLS policy refused it");
+        }
       }
       showToast?.("You've left this check-in");
       onClose();
