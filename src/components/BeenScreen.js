@@ -31,7 +31,7 @@ export function CheckinHistoryRow({ c }) {
   );
 }
 
-export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast }) {
+export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile }) {
   const [rows, setRows] = useState(null); // null = loading
   const [venueById, setVenueById] = useState(() => new Map());
   const [withByAct, setWithByAct] = useState(() => new Map()); // activityId → first names
@@ -423,6 +423,10 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           userId={userId}
           showToast={showToast}
           onClose={() => setThread(null)}
+          onOpenProfile={(uid) => {
+            setThread(null); // the card would sit above the profile screen
+            onOpenProfile?.(uid);
+          }}
           onOpenVenue={(v) => {
             // Thread stays open underneath; the venue card stacks above it.
             setSelectedVenue(v);

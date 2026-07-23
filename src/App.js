@@ -4207,6 +4207,10 @@ function ProfileTab({
           onHide={onHide}
           onBack={() => setShowBeen(false)}
           showToast={showToast}
+          onOpenProfile={(uid) => {
+            setShowBeen(false); // Been (z-2500) would cover the profile screen
+            setLookupUserId(uid);
+          }}
         />
       )}
       <div className="w-full max-w-sm">
