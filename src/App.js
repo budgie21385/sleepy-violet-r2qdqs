@@ -50,6 +50,7 @@ import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
 import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { prefetchVenueDetails } from "./lib/venueDetails";
+import { sendPush } from "./lib/push";
 import { QRCodeSVG } from "qrcode.react";
 import { Turnstile } from "@marsidev/react-turnstile";
 
@@ -816,8 +817,28 @@ useEffect(() => {
           .update({ submitted_at: new Date().toISOString() })
           .eq("session_id", guestSessionId)
           .eq("user_id", session.user.id)
-          .then(({ error }) => {
-            if (error) console.error("Failed to set submitted_at:", error);
+          .then(async ({ error }) => {
+            if (error) {
+              console.error("Failed to set submitted_at:", error);
+              return;
+            }
+            // Was that the LAST one in? Nudge the host to pick (Mark's
+            // simplified flow: host waits, gets told, then chooses).
+            const hostId = guestSessionData?.host_user_id;
+            const { data: parts } = await supabase
+              .from("session_participants")
+              .select("user_id, submitted_at")
+              .eq("session_id", guestSessionId);
+            const others = (parts || []).filter((p) => p.user_id !== hostId);
+            const allIn =
+              others.length > 0 && others.every((p) => p.submitted_at);
+            if (allIn && hostId) {
+              sendPush(
+                hostId,
+                "Everyone's in 🎉",
+                "All picks are submitted — choose tonight's spot"
+              );
+            }
           });
       }
     }
@@ -2046,6 +2067,38 @@ loadAreas();
     (venue) => !currentUserSwipedIds.includes(venue.id)
   );
 
+  // Host waiting state (Mark, July 23): finishing YOUR swipes isn't the end
+  // of the session. Poll whether all non-host participants have submitted —
+  // until then the end screen is a simple "we'll let you know" card.
+  const [allPartsSubmitted, setAllPartsSubmitted] = useState(false);
+  useEffect(() => {
+    if (screen !== "matches" || matchMode !== "concurrent" || !currentSessionId) {
+      setAllPartsSubmitted(false);
+      return;
+    }
+    let stop = false;
+    async function checkAllIn() {
+      const { data: parts } = await supabase
+        .from("session_participants")
+        .select("user_id, submitted_at")
+        .eq("session_id", currentSessionId);
+      const others = (parts || []).filter(
+        (p) => p.user_id !== session?.user?.id
+      );
+      if (!stop) {
+        setAllPartsSubmitted(
+          others.length > 0 && others.every((p) => p.submitted_at)
+        );
+      }
+    }
+    checkAllIn();
+    const iv = setInterval(checkAllIn, 5000);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+    };
+  }, [screen, matchMode, currentSessionId, session?.user?.id]);
+
   // Warm the heavy tail for the current + next couple of swipe cards so the
   // deck never shows a skeleton mid-swipe.
   useEffect(() => {
@@ -2736,43 +2789,39 @@ if (authLoading || guestLoading) {
         );
       }
 
-      // ---------- Revealed view (signed-in or dev-overridden) ----------
+      // ---------- Done state (signed-in guest, Mark's July 23 simplify) ----
+      // No match reveal, no decide references — picks are in, the decision
+      // arrives as a push/Activity item when the host chooses.
       return (
-        <div className="fixed inset-0 bg-[#fdf6f0] text-[#111111] flex flex-col pb-16">
-          <div className="bg-white border-b border-neutral-100 px-4 py-5 text-center">
-            <p className="text-sm text-neutral-500">
-              Game over, {guestName.trim() || "friend"}
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-              {matchCount === 0
-                ? "No mutual matches"
-                : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
+        <div className="fixed inset-0 bg-[#fdf6f0] text-[#111111] flex flex-col pb-16 overflow-y-auto">
+          <div className="w-full max-w-sm mx-auto px-4 pt-14 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+              <Check size={28} />
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Your picks are in
             </h1>
+            <p className="mt-2 text-sm text-neutral-600">
+              We'll nudge you the moment {hostName} locks in the spot.
+            </p>
+            <div className="mt-6 text-left">
+              {/* Add-host-as-friend CTA — high-intent moment, hides itself if
+                  already friends or pending in either direction. */}
+              <AddHostFriendCard
+                hostUserId={guestSessionData?.host_user_id}
+                hostName={hostName}
+                viewerUserId={session?.user?.id}
+                showToast={showToast}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => goToMainApp("map")}
+              className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+            >
+              Explore Flanit
+            </button>
           </div>
-          {/* Add-host-as-friend CTA — high-intent moment, hides itself if
-              already friends or pending in either direction. */}
-          <AddHostFriendCard
-            hostUserId={guestSessionData?.host_user_id}
-            hostName={hostName}
-            viewerUserId={session?.user?.id}
-            showToast={showToast}
-          />
-          <SessionResultsView
-            participants={sessionParticipants}
-            sessionId={guestSessionId}
-            sessionMatches={sessionMatches}
-            myLikedIds={guestLikes}
-            venues={venues}
-            userId={session?.user?.id}
-            hostUserId={guestSessionData?.host_user_id}
-            savedIds={savedVenueIds}
-            onSave={saveVenue}
-            onUnsave={unsaveVenue}
-            onHide={hideVenue}
-            onOpenProfile={(uid) => setLookupUserId(uid)}
-            showConfetti={matchCount > 0}
-            showToast={showToast}
-          />
           <BottomTabBar tab={null} setTab={goToMainApp} />
         </div>
       );
@@ -3238,6 +3287,39 @@ if (authLoading || guestLoading) {
             setCurrentSessionId(null);
             setPicked(null);
             setCardIndex(0);
+          }
+
+          // Mark's simplified end state (July 23): until everyone's picks are
+          // in, no match reveal, no decide controls — a calm waiting card.
+          // The last submitter's device pushes "Everyone's in"; coming back
+          // here (or staying — the 5s poll flips it live) shows the results.
+          if (matchMode === "concurrent" && !allPartsSubmitted) {
+            return (
+              <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex items-center justify-center p-6 pb-24">
+                <div className="w-full max-w-sm text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+                    <Check size={28} />
+                  </div>
+                  <h1 className="text-2xl font-semibold tracking-tight">
+                    Your picks are in
+                  </h1>
+                  <p className="mt-2 text-sm text-neutral-600">
+                    Waiting on the others — we'll nudge you when everyone's
+                    done, then you choose the spot.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDoneSession}
+                    className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                  >
+                    Done for now
+                  </button>
+                  <p className="mt-3 text-xs text-neutral-400">
+                    This session lives under Profile → Sessions
+                  </p>
+                </div>
+              </div>
+            );
           }
 
           return (

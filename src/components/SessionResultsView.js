@@ -4,6 +4,7 @@
 // Includes a one-shot confetti burst on the match reveal. Extracted from App.js.
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../supabaseClient";
+import { sendPush } from "../lib/push";
 import { Check } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
@@ -129,6 +130,14 @@ export function SessionResultsView({
     }
     setDecidedVenueId(venueId);
     showToast?.("Locked it in");
+    // Tell everyone where they're going — lock-screen push per participant
+    // (the guest end state promises exactly this nudge).
+    const vName = venueById.get(venueId)?.name || "the spot";
+    for (const p of participants || []) {
+      if (p.user_id && p.user_id !== userId) {
+        sendPush(p.user_id, `${vName} it is 🎉`, "The plan is locked — see you there");
+      }
+    }
     // Pop the venue card so the picker (and viewers) see the spot + can share it.
     const v = venueById.get(venueId);
     if (v) setDetailVenue(v);
