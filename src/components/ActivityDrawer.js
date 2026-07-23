@@ -24,12 +24,29 @@ function itemWeight(i) {
 }
 
 // Local midnight of the Monday strictly AFTER the given time — the session
-// "Did you go?" nudge fires then (Mark: following Monday, no matter what).
+// "Did you go?" nudge fires then for evening outings (Mark: following
+// Monday covers the weekend).
 function followingMonday(ts) {
   const d = new Date(ts);
   const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   m.setDate(m.getDate() + (((8 - m.getDay()) % 7) || 7));
   return m;
+}
+
+// Daytime outings (cafés) get asked the SAME afternoon (Mark, July 21:
+// "if it's a coffee thing prompt in the afternoon") — 3pm local, or two
+// hours later if the plan was already made after 3.
+function afternoonAfter(ts) {
+  const d = new Date(ts);
+  const three = new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    15,
+    0,
+    0
+  ).getTime();
+  return ts < three ? three : ts + 2 * 60 * 60 * 1000;
 }
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
@@ -514,12 +531,12 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         .not("decided_venue_id", "is", null);
       const now = Date.now();
       const WEEK = 7 * 24 * 60 * 60 * 1000;
+      // Loose prefilter — the real window depends on the VENUE TYPE (café =
+      // same afternoon, else following Monday), decided per candidate below.
       const candidates = (sess || []).filter((s) => {
         if (doneSet.has(s.id)) return false;
         const ref = new Date(s.event_at || s.updated_at).getTime();
-        if (ref > now) return false; // outing hasn't happened yet
-        const start = followingMonday(ref).getTime();
-        return now >= start && now < start + WEEK;
+        return ref <= now && now - ref < 16 * 24 * 60 * 60 * 1000;
       });
       if (candidates.length === 0) return nudges;
       // If they checked in near the outing, we already know they went.
@@ -553,6 +570,12 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           venueObj = v;
           venueName = v.name || venueName;
         }
+        // Café = same-afternoon ask; everything else waits for Monday.
+        const start =
+          v?.type === "cafe"
+            ? afternoonAfter(ref)
+            : followingMonday(ref).getTime();
+        if (now < start || now >= start + WEEK) continue;
         nudges.push({
           kind: "session_nudge",
           id: `sn_${s.id}`,
@@ -562,7 +585,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           venueObj,
           sessionName: s.name || null,
           refTimestamp: s.event_at || s.updated_at,
-          timestamp: followingMonday(ref).toISOString(), // NEW on Monday
+          timestamp: new Date(start).toISOString(), // NEW when the ask opens
         });
       }
       return nudges;
@@ -844,17 +867,38 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   // never a false live "is at" pin.
   async function acceptTag(item) {
     setActing(item.tagId);
-    const { data: act, error } = await supabase
+    // DUPE GUARD (Mark + Renasha field test, July 21): "I'm here too" then
+    // Accept created TWO check-ins — join guarded, accept didn't. If a
+    // same-night check-in at this venue already exists, accepting just LINKS
+    // it (tag accepted + reciprocal) instead of minting a twin.
+    const ts = new Date(item.checkinTimestamp).getTime();
+    const W = 12 * 60 * 60 * 1000;
+    const { data: existing } = await supabase
       .from("activities")
-      .insert({
-        user_id: userId,
-        kind: "checkin",
-        venue_id: item.venueId,
-        label: item.label || null,
-        created_at: item.checkinTimestamp,
-      })
       .select("id")
-      .single();
+      .eq("user_id", userId)
+      .eq("venue_id", item.venueId)
+      .eq("kind", "checkin")
+      .gte("created_at", new Date(ts - W).toISOString())
+      .lte("created_at", new Date(ts + W).toISOString())
+      .limit(1);
+    let act = existing?.[0] || null;
+    let error = null;
+    if (!act) {
+      const ins = await supabase
+        .from("activities")
+        .insert({
+          user_id: userId,
+          kind: "checkin",
+          venue_id: item.venueId,
+          label: item.label || null,
+          created_at: item.checkinTimestamp,
+        })
+        .select("id")
+        .single();
+      act = ins.data;
+      error = ins.error;
+    }
     if (!error) {
       await supabase
         .from("activity_tags")
@@ -865,12 +909,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       // tapped to tag you, you tapped to accept — both agreed to the
       // association. Inserted pre-accepted so it never nudges them back.
       if (act?.id) {
-        await supabase.from("activity_tags").insert({
-          activity_id: act.id,
-          tagged_user_id: item.otherId,
-          status: "accepted",
-          responded_at: new Date().toISOString(),
-        });
+        // Upsert-ignore: the reciprocal may already exist (re-accepts,
+        // linked-existing-check-in path).
+        await supabase.from("activity_tags").upsert(
+          {
+            activity_id: act.id,
+            tagged_user_id: item.otherId,
+            status: "accepted",
+            responded_at: new Date().toISOString(),
+          },
+          { onConflict: "activity_id,tagged_user_id", ignoreDuplicates: true }
+        );
       }
       sendPush(
         item.otherId,

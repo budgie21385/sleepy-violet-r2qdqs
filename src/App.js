@@ -1118,6 +1118,20 @@ useEffect(() => {
           m.setDate(m.getDate() + (((8 - m.getDay()) % 7) || 7));
           return m.getTime();
         };
+        // Cafés ask the same afternoon; everything else the following Monday
+        // (mirrors ActivityDrawer's outing-aware nudge).
+        const afternoonAfter = (ts) => {
+          const d = new Date(ts);
+          const three = new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate(),
+            15,
+            0,
+            0
+          ).getTime();
+          return ts < three ? three : ts + 2 * 60 * 60 * 1000;
+        };
         let doneIds = [];
         try {
           doneIds = JSON.parse(
@@ -1139,11 +1153,30 @@ useEffect(() => {
             .not("decided_venue_id", "is", null);
           const now = Date.now();
           const WEEK = 7 * 24 * 60 * 60 * 1000;
-          const cands = (sess || []).filter((s) => {
+          const pre = (sess || []).filter((s) => {
             if (doneSet.has(s.id)) return false;
             const ref = new Date(s.event_at || s.updated_at).getTime();
-            if (ref > now) return false;
-            const start = followingMonday(ref);
+            return ref <= now && now - ref < 16 * 24 * 60 * 60 * 1000;
+          });
+          let typeById = {};
+          if (pre.length > 0) {
+            const { data: vTypes } = await supabase
+              .from("venues")
+              .select("id, type")
+              .in(
+                "id",
+                Array.from(new Set(pre.map((s) => s.decided_venue_id)))
+              );
+            typeById = Object.fromEntries(
+              (vTypes || []).map((v) => [v.id, v.type])
+            );
+          }
+          const cands = pre.filter((s) => {
+            const ref = new Date(s.event_at || s.updated_at).getTime();
+            const start =
+              typeById[s.decided_venue_id] === "cafe"
+                ? afternoonAfter(ref)
+                : followingMonday(ref);
             return now >= start && now < start + WEEK;
           });
           if (cands.length > 0) {
