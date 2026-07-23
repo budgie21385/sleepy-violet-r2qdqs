@@ -7,6 +7,21 @@ import { createPortal } from "react-dom";
 import { X, Send, ChevronLeft, ChevronRight, UserPlus } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
+const GRID_CAP = 9; // photos shown before "show more"
+const AVATAR_CAP = 5; // faces shown before "+N"
+
+// "3h" while fresh, then dates (Mark, July 23: "flips to date").
+function whenLine(ts) {
+  const ms = Date.now() - new Date(ts).getTime();
+  if (ms < 24 * 60 * 60 * 1000) return timeAgoShort(ts);
+  const d = new Date(ts);
+  if (ms < 48 * 60 * 60 * 1000) return "yesterday";
+  return d.toLocaleDateString("en-AU", {
+    day: "numeric",
+    month: "short",
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+  });
+}
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS } from "../lib/checkins";
@@ -110,10 +125,57 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   }
 
   // Owner's from-the-card tagging (Add a night / forgot in the moment).
-  const [tagOpen, setTagOpen] = useState(false);
   const [tagFriends, setTagFriends] = useState(null); // null = not loaded
   const [taggedIds, setTaggedIds] = useState(() => new Set());
   const [tagStatusById, setTagStatusById] = useState({}); // uid → pending|accepted
+  // Card views (July 23 redesign): card | comments (expanded) | people.
+  const [view, setView] = useState("card");
+  const [photosExpanded, setPhotosExpanded] = useState(false);
+  const [nightPeople, setNightPeople] = useState([]); // profiles in the night
+  const [friendState, setFriendState] = useState({}); // uid → friend|pending|none
+  const [leaveArm, setLeaveArm] = useState(false); // two-tap "remove myself"
+  const [leaving, setLeaving] = useState(false);
+
+  // Remove yourself from the night: delete YOUR shard (check-in + media +
+  // its Been entry) and strip your name off every other shard's with-line.
+  // Other people's shards stay untouched; if you were the root, theirs
+  // detach into their own nights.
+  async function leaveNight() {
+    if (leaving) return;
+    setLeaving(true);
+    try {
+      const myShardId = isOwner ? thread.activityId : myActivityId;
+      await supabase
+        .from("activity_tags")
+        .update({ status: "removed", responded_at: new Date().toISOString() })
+        .in("activity_id", clusterIds)
+        .eq("tagged_user_id", userId);
+      if (myShardId) {
+        // Storage first (raw row deletes would orphan the files).
+        const mine = photos.filter(
+          (p) => p.user_id === userId && p.activity_id === myShardId
+        );
+        for (const m of mine) {
+          try {
+            await deleteCheckinPhoto(m);
+          } catch {}
+        }
+        // Detach any shards that joined THROUGH yours before deleting.
+        await supabase
+          .from("activities")
+          .update({ joined_from: null })
+          .eq("joined_from", myShardId);
+        await supabase.from("activities").delete().eq("id", myShardId);
+      }
+      showToast?.("You've left this check-in");
+      onClose();
+    } catch (e) {
+      console.error("Leave night failed:", e);
+      showToast?.("Couldn't do that");
+    }
+    setLeaving(false);
+    setLeaveArm(false);
+  }
   const [tagQ, setTagQ] = useState("");
   const [tagRefresh, setTagRefresh] = useState(0);
   // Whether the VIEWER already has a recent check-in at this venue —
@@ -345,6 +407,76 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     };
   }, [photos]);
 
+  // Everyone in the night: shard owners + accepted tags → the avatar row
+  // and the people view ("Others in the album" = friend discovery).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [actsRes, tagsRes] = await Promise.all([
+        supabase.from("activities").select("user_id").in("id", clusterIds),
+        supabase
+          .from("activity_tags")
+          .select("tagged_user_id")
+          .in("activity_id", clusterIds)
+          .eq("status", "accepted"),
+      ]);
+      const ids = new Set([
+        ...(actsRes.data || []).map((a) => a.user_id),
+        ...(tagsRes.data || []).map((t) => t.tagged_user_id),
+      ]);
+      if (thread.ownerId) ids.add(thread.ownerId);
+      const arr = Array.from(ids);
+      if (arr.length === 0) {
+        if (!cancelled) setNightPeople([]);
+        return;
+      }
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", arr);
+      if (!cancelled) setNightPeople(profs || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterKey]);
+
+  // Friendship status per night-person — powers the Add friend buttons.
+  useEffect(() => {
+    if (view !== "people" || nightPeople.length === 0 || !userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: rows } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id, status")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      if (cancelled) return;
+      const map = {};
+      for (const r of rows || []) {
+        const other = r.requester_id === userId ? r.addressee_id : r.requester_id;
+        if (r.status === "accepted") map[other] = "friend";
+        else if (r.status === "pending" && !map[other]) map[other] = "pending";
+      }
+      setFriendState(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, nightPeople.length, userId]);
+
+  async function addFriendFromAlbum(otherId) {
+    setFriendState((prev) => ({ ...prev, [otherId]: "pending" }));
+    const { error } = await supabase
+      .from("friendships")
+      .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    if (error && error.code !== "23505") {
+      setFriendState((prev) => ({ ...prev, [otherId]: "none" }));
+      showToast?.("Couldn't send that");
+      return;
+    }
+    sendPush(otherId, "New friend request", "Someone from your night wants to add you");
+  }
+
   // Delete your OWN media (bytes count toward YOUR credit — so you can
   // always take them back). Two-tap: arm, then confirm.
   const [deleteArm, setDeleteArm] = useState(false);
@@ -573,7 +705,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // the friend gets the nudge; accepting creates THEIR twin for that night,
   // which the cluster merge folds back into this very card.
   async function openTagPicker() {
-    setTagOpen((v) => !v);
+    setView((v) => (v === "add" ? "card" : "add"));
     if (tagFriends !== null) return;
     const { data: fr } = await supabase
       .from("friendships")
@@ -725,49 +857,46 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         style={{
           bottom: 80,
           width: "calc(100% - 1.5rem)",
-          maxHeight: "calc(100% - 100px)",
+          // FIXED height (Mark: like the venue card) — the card must not
+          // resize as views/content change.
+          height: "calc(100% - 100px)",
         }}
       >
-        <div className="px-5 pt-4 pb-2 border-b border-neutral-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">
-                {thread.ownerName} at{" "}
-                {thread.venueObj && onOpenVenue ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpenVenue(thread.venueObj)}
-                    className="underline decoration-[#455d3b]/40 underline-offset-2"
-                  >
-                    {thread.venueName}
-                  </button>
-                ) : (
-                  thread.venueName
-                )}
-                {isOwner ? (
+        <div className="px-5 pt-3 pb-2.5 border-b border-neutral-100">
+          <div className="flex items-start justify-between">
+            <div className="min-w-0 flex-1">
+              {/* Title as the headline (Mark's mock): the label leads; a
+                  bare card shows the owner's tiny "add a title" instead. */}
+              {labelValue ? (
+                <button
+                  type="button"
+                  disabled={!isOwner}
+                  onClick={() => {
+                    setLabelDraft(labelValue);
+                    setLabelEdit((v) => !v);
+                  }}
+                  className="block w-full text-left text-lg font-semibold tracking-tight leading-snug truncate"
+                >
+                  {labelValue}
+                </button>
+              ) : (
+                isOwner && (
                   <button
                     type="button"
                     onClick={() => {
-                      setLabelDraft(labelValue);
+                      setLabelDraft("");
                       setLabelEdit((v) => !v);
                     }}
-                    className={
-                      labelValue
-                        ? ""
-                        : "text-[#455d3b] text-xs font-medium"
-                    }
+                    className="text-[11px] font-medium text-[#455d3b]"
                   >
-                    {labelValue ? ` · ${labelValue}` : " · add a title"}
+                    add a title
                   </button>
-                ) : labelValue ? (
-                  ` · ${labelValue}`
-                ) : (
-                  ""
-                )}
-              </p>
+                )
+              )}
+              {/* Title editor lives in the TITLE's slot (Mark: not under the
+                  names/venue). */}
               {labelEdit && isOwner && (
-                <div className="mt-1.5 flex items-center gap-2 rounded-full border border-neutral-200 pl-3 pr-1 py-1">
-                  {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
+                <div className="mb-1 mt-0.5 flex items-center gap-2 rounded-full border border-neutral-200 pl-3 pr-1 py-1">
                   <input
                     value={labelDraft}
                     onChange={(e) => setLabelDraft(e.target.value)}
@@ -788,44 +917,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   </button>
                 </div>
               )}
-              {(withNames.length > 0 || isOwner) && (
-                <p className="text-xs text-neutral-700">
-                  {withNames.length > 0 && (
-                    <>
-                      with{" "}
-                      {(() => {
-                        // Owner sees who hasn't accepted yet — "(invited)".
-                        // Everyone else just sees names (no public flagging).
-                        const names = withNames.map(
-                          (w) =>
-                            w.name + (isOwner && w.pending ? " (invited)" : "")
-                        );
-                        return names.length === 1
-                          ? names[0]
-                          : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-                      })()}
-                    </>
-                  )}
-                  {isOwner && (
-                    <button
-                      type="button"
-                      onClick={openTagPicker}
-                      className={`inline-flex items-center gap-1 text-[#455d3b] font-medium ${
-                        withNames.length > 0 ? "ml-1.5" : ""
-                      }`}
-                    >
-                      <UserPlus size={12} />
-                      {withNames.length > 0 ? "add" : "with friends?"}
-                    </button>
-                  )}
-                </p>
-              )}
-              <p className="text-[11px] text-neutral-500">
-                {timeAgoShort(thread.timestamp)} · only{" "}
-                {thread.ownerName === "You"
-                  ? "your"
-                  : `${thread.ownerName}'s`}{" "}
-                friends see this
+              <p className="text-sm font-semibold truncate">
+                {thread.ownerName} at{" "}
+                {thread.venueObj && onOpenVenue ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenVenue(thread.venueObj)}
+                    className="underline decoration-[#455d3b]/40 underline-offset-2"
+                  >
+                    {thread.venueName}
+                  </button>
+                ) : (
+                  thread.venueName
+                )}
               </p>
             </div>
             <button
@@ -837,12 +941,75 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               <X size={16} />
             </button>
           </div>
+          {/* Avatar row spans the FULL header width so "add more" sits flush
+              with the card's right edge (Mark's alignment note). */}
+          <div>
+              {/* Avatar row — the night's people; +N overflows to View all. */}
+              {nightPeople.length > 0 && (
+                <div className="mt-1.5 flex items-center gap-1">
+                  {nightPeople.slice(0, AVATAR_CAP).map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        p.id === userId ? null : onOpenProfile?.(p.id)
+                      }
+                      className="active:scale-95 transition"
+                    >
+                      <FriendAvatar profile={p} small />
+                    </button>
+                  ))}
+                  {nightPeople.length > AVATAR_CAP && (
+                    <button
+                      type="button"
+                      onClick={() => setView("people")}
+                      className="ml-0.5 flex h-7 min-w-7 items-center justify-center rounded-full bg-[#edf2eb] px-1.5 text-[11px] font-medium text-[#455d3b]"
+                    >
+                      +{nightPeople.length - AVATAR_CAP}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setView(view === "people" ? "card" : "people")}
+                    className="ml-1 text-[11px] font-medium text-neutral-400"
+                  >
+                    View all
+                  </button>
+                  {isOwner && (
+                    <button
+                      type="button"
+                      onClick={openTagPicker}
+                      className="ml-auto mr-0.5 inline-flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1 text-xs font-medium text-[#455d3b] active:scale-95 transition"
+                    >
+                      <UserPlus size={13} /> add more
+                    </button>
+                  )}
+                </div>
+              )}
+              <p className="text-[11px] text-neutral-500">
+                {whenLine(thread.timestamp)} · only{" "}
+                {thread.ownerName === "You"
+                  ? "your"
+                  : `${thread.ownerName}'s`}{" "}
+                friends see this
+              </p>
+          </div>
         </div>
 
-        {/* Owner's tag picker — same consent chips as the check-in sheet;
-            they'll be asked before their friends see anything. */}
-        {tagOpen && isOwner && (
-          <div className="px-5 pt-3">
+        {/* Add-people view (Mark's mock): friends as ROWS with Add buttons,
+            not a chip cloud. Collect link section lands here in Stage 2. */}
+        {view === "add" && isOwner && (
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            <button
+              type="button"
+              onClick={() => setView("card")}
+              className="mb-3 text-xs font-medium text-[#455d3b]"
+            >
+              ‹ Back to the night
+            </button>
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+              Friends on Flanit
+            </p>
             {tagFriends === null && (
               <p className="text-xs text-neutral-400">Loading friends…</p>
             )}
@@ -858,10 +1025,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     value={tagQ}
                     onChange={(e) => setTagQ(e.target.value)}
                     placeholder="Search friends"
-                    className="mb-2 w-full rounded-full border border-neutral-200 px-4 py-2 text-base focus:outline-none focus:border-[#455d3b]"
+                    className="mb-3 w-full rounded-full border border-neutral-200 px-4 py-2 text-base focus:outline-none focus:border-[#455d3b]"
                   />
                 )}
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-2.5">
                   {tagFriends
                     .filter((f) => {
                       const q = tagQ.trim().toLowerCase();
@@ -874,25 +1041,26 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     .map((f) => {
                       const on = taggedIds.has(f.id);
                       const accepted = tagStatusById[f.id] === "accepted";
-                      // Solid + ✓ = they accepted; outlined "invited" =
-                      // tag sent, waiting on them; neutral = untagged.
                       return (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => toggleTag(f.id)}
-                          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium active:scale-95 transition ${
-                            on && accepted
-                              ? "bg-[#455d3b] border-[#455d3b] text-white"
-                              : on
-                              ? "bg-white border-[#455d3b] text-[#455d3b]"
-                              : "border-neutral-200 text-neutral-700"
-                          }`}
-                        >
+                        <div key={f.id} className="flex items-center gap-3">
                           <FriendAvatar profile={f} small />
-                          {(f.display_name || "?").split(" ")[0]}
-                          {on ? (accepted ? " ✓" : " · invited") : ""}
-                        </button>
+                          <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                            {f.display_name || "Someone"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleTag(f.id)}
+                            className={`shrink-0 rounded-full text-xs font-medium px-3 py-1.5 active:scale-95 transition ${
+                              on && accepted
+                                ? "bg-[#455d3b] text-white"
+                                : on
+                                ? "border border-[#455d3b] text-[#455d3b]"
+                                : "bg-[#455d3b] text-white"
+                            }`}
+                          >
+                            {on ? (accepted ? "Added ✓" : "Invited") : "Add"}
+                          </button>
+                        </div>
                       );
                     })}
                 </div>
@@ -903,35 +1071,39 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             )}
           </div>
         )}
-        {/* Photo strip — the owner's photos plus, if the viewer joined this
-            check-in, their own. The camera tile shows for whoever has a
-            check-in to hang photos on (owner always; joined viewer via
-            their own parallel check-in). */}
-        {(photos.length > 0 || uploadTargetId) && (
-          <div className="px-5 pt-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,video/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addPhotos(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {photos.map((p) => (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            addPhotos(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        {/* Photo GRID (July 23 redesign) — 3-up album, capped with a
+            "+N more" tile; a small strip in the expanded-comments view. */}
+        {view === "card" && (photos.length > 0 || uploadTargetId) && (
+          <div className="px-4 pt-3">
+            <div className="grid grid-cols-3 gap-1.5">
+              {(photosExpanded
+                ? photos
+                : photos.slice(
+                    0,
+                    photos.length > GRID_CAP ? GRID_CAP - 1 : GRID_CAP
+                  )
+              ).map((p) => (
                 <button
                   key={p.id}
                   type="button"
                   onClick={() => setLightbox(p)}
-                  className="relative shrink-0 active:scale-95 transition"
+                  className="relative aspect-square active:scale-95 transition"
                 >
                   <img
                     src={p.url}
                     alt=""
-                    className="h-24 w-24 rounded-xl object-cover"
+                    className="h-full w-full rounded-lg object-cover"
                   />
                   {p.kind === "video" && (
                     <span className="absolute inset-0 flex items-center justify-center">
@@ -940,29 +1112,38 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       </span>
                     </span>
                   )}
-                  {/* Every tile carries its author (yours included — makes
-                      the shared strip legible and self-testable). */}
                   <span className="absolute bottom-1 left-1 rounded-full ring-2 ring-white">
                     <FriendAvatar profile={mediaProfiles[p.user_id]} small />
                   </span>
                 </button>
               ))}
+              {!photosExpanded && photos.length > GRID_CAP && (
+                <button
+                  type="button"
+                  onClick={() => setPhotosExpanded(true)}
+                  className="relative aspect-square rounded-lg overflow-hidden active:scale-95 transition"
+                >
+                  <img
+                    src={photos[GRID_CAP - 1].url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-white text-sm font-medium">
+                    +{photos.length - (GRID_CAP - 1)} more
+                  </span>
+                </button>
+              )}
               {pending.map((p) => (
-                <div key={p.key} className="relative shrink-0">
+                <div key={p.key} className="relative aspect-square">
                   {p.preview ? (
                     <img
                       src={p.preview}
                       alt=""
-                      className="h-24 w-24 rounded-xl object-cover opacity-60"
+                      className="h-full w-full rounded-lg object-cover opacity-60"
                     />
                   ) : (
-                    <span className="flex h-24 w-24 rounded-xl bg-neutral-800/80 text-white items-center justify-center text-lg">
+                    <span className="flex h-full w-full rounded-lg bg-neutral-800/80 text-white items-center justify-center text-lg">
                       {p.isVideo ? "▶" : "…"}
-                    </span>
-                  )}
-                  {p.isVideo && p.preview && (
-                    <span className="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-black/50 text-white flex items-center justify-center text-[10px]">
-                      ▶
                     </span>
                   )}
                   <span className="absolute inset-0 flex items-center justify-center">
@@ -979,7 +1160,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="h-24 w-24 shrink-0 rounded-xl border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-1 text-neutral-500 active:scale-95 transition"
+                    className="aspect-square rounded-lg border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-1 text-neutral-500 active:scale-95 transition"
                   >
                     <Camera size={20} />
                     <span className="text-[10px] font-medium">
@@ -992,7 +1173,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             </div>
           </div>
         )}
-        {joinEligible && joined === false && (
+        {view === "card" && joinEligible && joined === false && (
           <div className="px-5 pt-3">
             <button
               type="button"
@@ -1067,7 +1248,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             </button>
           </div>
         )}
-        {joinEligible && joined === true && (
+        {view === "card" && joinEligible && joined === true && (
           <div className="px-5 pt-3">
             <p className="w-full rounded-full bg-[#edf2eb] border border-[#cdd9c6] py-2.5 text-center text-sm font-medium text-[#455d3b]">
               You're here too ✓
@@ -1075,6 +1256,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </div>
         )}
         {/* Reactions on the check-in itself — one swappable per person. */}
+        {view === "card" && (
         <div className="px-5 pt-3">
           <ReactionBar
             counts={summarizeReactions(reactions, userId, null).counts}
@@ -1083,6 +1265,139 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             onTap={(e) => react(e, null)}
           />
         </div>
+        )}
+        {/* People view — the album's cast, split into your friends and
+            "others in the album" with Add friend (graph growth, per mock). */}
+        {view === "people" && (
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            <button
+              type="button"
+              onClick={() => setView("card")}
+              className="mb-3 text-xs font-medium text-[#455d3b]"
+            >
+              ‹ Back to the night
+            </button>
+            {(() => {
+              const others = nightPeople.filter(
+                (p) => p.id !== userId && friendState[p.id] !== "friend"
+              );
+              const friendsHere = nightPeople.filter(
+                (p) => p.id === userId || friendState[p.id] === "friend"
+              );
+              return (
+                <>
+                  {friendsHere.length > 0 && (
+                    <>
+                      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                        Your friends
+                      </p>
+                      <div className="space-y-2 mb-4">
+                        {friendsHere.map((p) => (
+                          <div key={p.id} className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                p.id !== userId && onOpenProfile?.(p.id)
+                              }
+                              className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                            >
+                              <FriendAvatar profile={p} small />
+                              <span className="truncate text-sm text-neutral-800">
+                                {p.display_name || "Someone"}
+                                {p.id === userId ? " (you)" : ""}
+                              </span>
+                            </button>
+                            {p.id === userId && (
+                              <button
+                                type="button"
+                                disabled={leaving}
+                                onClick={() =>
+                                  leaveArm ? leaveNight() : setLeaveArm(true)
+                                }
+                                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium active:scale-95 transition disabled:opacity-50 ${
+                                  leaveArm
+                                    ? "border-red-500 bg-red-500 text-white"
+                                    : "border-neutral-200 text-neutral-500"
+                                }`}
+                              >
+                                {leaving
+                                  ? "Leaving…"
+                                  : leaveArm
+                                  ? "Really leave?"
+                                  : "Remove"}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {others.length > 0 && (
+                    <>
+                      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                        Others in the album
+                      </p>
+                      <div className="space-y-2">
+                        {others.map((p) => (
+                          <div key={p.id} className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => onOpenProfile?.(p.id)}
+                              className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                            >
+                              <FriendAvatar profile={p} small />
+                              <span className="truncate text-sm text-neutral-800">
+                                {p.display_name || "Someone"}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={friendState[p.id] === "pending"}
+                              onClick={() => addFriendFromAlbum(p.id)}
+                              className="shrink-0 rounded-full bg-[#455d3b] text-white text-xs font-medium px-3 py-1.5 disabled:opacity-50"
+                            >
+                              {friendState[p.id] === "pending"
+                                ? "Requested"
+                                : "Add friend"}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
+        {view === "comments" && photos.length > 0 && (
+          <div className="px-4 pt-3">
+            <button
+              type="button"
+              onClick={() => setView("card")}
+              className="mb-2 text-xs font-medium text-[#455d3b]"
+            >
+              ‹ Back to the night
+            </button>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {photos.map((p) => (
+                <button
+                  key={`mini_${p.id}`}
+                  type="button"
+                  onClick={() => setLightbox(p)}
+                  className="shrink-0"
+                >
+                  <img
+                    src={p.url}
+                    alt=""
+                    className="h-14 w-14 rounded-lg object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {(view === "card" || view === "comments") && (
         <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-3">
           {comments === null && (
             <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
@@ -1112,7 +1427,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             </div>
           )}
           <div className="space-y-3">
-            {(comments || []).map((c) => (
+            {(view === "comments"
+              ? comments || []
+              : (comments || []).slice(-2)
+            ).map((c) => (
               <div key={c.id} className="flex items-start gap-2.5">
                 <button
                   type="button"
@@ -1139,8 +1457,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               </div>
             ))}
           </div>
+          {view === "card" && (comments || []).length > 2 && (
+            <button
+              type="button"
+              onClick={() => setView("comments")}
+              className="mt-3 w-full text-center text-xs font-medium text-[#455d3b]"
+            >
+              See more comments ({comments.length})
+            </button>
+          )}
         </div>
+        )}
 
+        {(view === "card" || view === "comments") && (
         <div className="px-4 py-3 border-t border-neutral-100 flex items-center gap-2">
           {/* text-base: sub-16px inputs make iOS Safari auto-zoom on focus. */}
           <input
@@ -1161,6 +1490,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             <Send size={16} />
           </button>
         </div>
+        )}
       </div>
       {lightbox && (
         // One floating card — the photo with its reactions + comments
