@@ -951,7 +951,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     <button
                       key={p.id}
                       type="button"
-                      onClick={() => onOpenProfile?.(p.id)}
+                      onClick={() => {
+                        console.log("FLANIT-PROFILE header tap", p.id, p.display_name, "handler:", !!onOpenProfile);
+                        onOpenProfile?.(p.id);
+                      }}
                       className="active:scale-95 transition"
                     >
                       <FriendAvatar profile={p} small />

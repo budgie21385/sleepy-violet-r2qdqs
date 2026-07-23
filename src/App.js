@@ -4212,6 +4212,7 @@ function ProfileTab({
           onBack={() => setShowBeen(false)}
           showToast={showToast}
           onOpenProfile={(uid) => {
+            console.log("FLANIT-PROFILE App/Been handler", uid, "self:", session?.user?.id);
             setShowBeen(false); // Been (z-2500) would cover the profile screen
             if (uid && uid === session?.user?.id) {
               setTab("profile"); // self → your own Profile tab
