@@ -3576,6 +3576,10 @@ if (authLoading || guestLoading) {
           onClose={() => setThreadCheckin(null)}
           onOpenProfile={(uid) => {
             setThreadCheckin(null); // sheet sits above the profile screen
+            if (uid && uid === session?.user?.id) {
+              setTab("profile"); // self → your own Profile tab
+              return;
+            }
             setLookupUserId(uid);
           }}
           onOpenVenue={(v) => {
@@ -4209,6 +4213,10 @@ function ProfileTab({
           showToast={showToast}
           onOpenProfile={(uid) => {
             setShowBeen(false); // Been (z-2500) would cover the profile screen
+            if (uid && uid === session?.user?.id) {
+              setTab("profile"); // self → your own Profile tab
+              return;
+            }
             setLookupUserId(uid);
           }}
         />
@@ -5932,7 +5940,9 @@ function ProfileLookupScreen({
     (profile?.display_name || profile?.username || "?").trim()[0]?.toUpperCase() || "?";
 
   return (
-    <div className="fixed inset-0 z-[3500] bg-[#fdf6f0] overflow-y-auto pb-24">
+    // z-3900: ABOVE check-in cards (3600) and lightbox (3800) — profile taps
+    // from any card must land on top, not underneath (Mark's bug report).
+    <div className="fixed inset-0 z-[3900] bg-[#fdf6f0] overflow-y-auto pb-24">
       <div className="max-w-sm mx-auto p-4">
         <button
           type="button"

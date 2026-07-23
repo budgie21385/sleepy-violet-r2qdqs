@@ -951,9 +951,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     <button
                       key={p.id}
                       type="button"
-                      onClick={() =>
-                        p.id === userId ? null : onOpenProfile?.(p.id)
-                      }
+                      onClick={() => onOpenProfile?.(p.id)}
                       className="active:scale-95 transition"
                     >
                       <FriendAvatar profile={p} small />
@@ -1296,9 +1294,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                           <div key={p.id} className="flex items-center gap-3">
                             <button
                               type="button"
-                              onClick={() =>
-                                p.id !== userId && onOpenProfile?.(p.id)
-                              }
+                              onClick={() => onOpenProfile?.(p.id)}
                               className="flex items-center gap-3 flex-1 min-w-0 text-left"
                             >
                               <FriendAvatar profile={p} small />
@@ -1574,10 +1570,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               <div className="flex items-center gap-2 mb-2">
                 <button
                   type="button"
-                  onClick={() =>
-                    lightbox.user_id !== userId &&
-                    onOpenProfile?.(lightbox.user_id)
-                  }
+                  onClick={() => onOpenProfile?.(lightbox.user_id)}
                   className="flex items-center gap-2 flex-1 min-w-0 text-left"
                 >
                   <FriendAvatar
