@@ -24,22 +24,39 @@ export function timeAgoShort(ts) {
 //   { activity, already: false }  — fresh check-in created
 //   { activity, already: true }   — recent check-in at this venue already exists
 // Throws on database failure — the caller decides how to surface it.
-export async function performCheckIn(userId, venueId) {
+// joinedFrom: the check-in being JOINED ("I'm here too") — the night-graph
+// edge (July 23). A join links your shard into their night; a plain check-in
+// starts a night of its own. If a recent check-in already exists but has no
+// edge yet, the join adopts it into the night.
+export async function performCheckIn(userId, venueId, joinedFrom = null) {
   const since = new Date(Date.now() - DUPE_MS).toISOString();
   const { data: recent } = await supabase
     .from("activities")
-    .select("id, created_at")
+    .select("id, created_at, joined_from")
     .eq("user_id", userId)
     .eq("venue_id", venueId)
     .eq("kind", "checkin")
     .gte("created_at", since)
     .limit(1);
   if (recent && recent.length > 0) {
-    return { activity: recent[0], already: true };
+    const existing = recent[0];
+    if (joinedFrom && !existing.joined_from && existing.id !== joinedFrom) {
+      await supabase
+        .from("activities")
+        .update({ joined_from: joinedFrom })
+        .eq("id", existing.id);
+      existing.joined_from = joinedFrom;
+    }
+    return { activity: existing, already: true };
   }
   const { data: inserted, error } = await supabase
     .from("activities")
-    .insert({ user_id: userId, kind: "checkin", venue_id: venueId })
+    .insert({
+      user_id: userId,
+      kind: "checkin",
+      venue_id: venueId,
+      joined_from: joinedFrom,
+    })
     .select("id, created_at")
     .single();
   if (error) throw error;

@@ -1076,9 +1076,10 @@ useEffect(() => {
         tagCount = count ?? 0;
       }
 
-      // New comments + reactions on MY check-ins since last seen.
+      // New comments + reactions + join requests on MY check-ins.
       let commentCount = 0;
       let reactionCount = 0;
+      let joinReqCount = 0;
       {
         const { data: myActs } = await supabase
           .from("activities")
@@ -1087,7 +1088,7 @@ useEffect(() => {
           .eq("kind", "checkin");
         const myActIds = (myActs || []).map((a) => a.id);
         if (myActIds.length > 0) {
-          const [cRes, rRes] = await Promise.all([
+          const [cRes, rRes, jRes] = await Promise.all([
             supabase
               .from("activity_comments")
               .select("id", { count: "exact", head: true })
@@ -1100,9 +1101,19 @@ useEffect(() => {
               .in("activity_id", myActIds)
               .neq("user_id", uid)
               .gt("created_at", lastSeen),
+            // Pending join requests (self-requested tags) — actionable, so
+            // counted regardless of last-seen.
+            supabase
+              .from("activity_tags")
+              .select("tagged_user_id, requested_by")
+              .in("activity_id", myActIds)
+              .eq("status", "pending"),
           ]);
           commentCount = cRes.count ?? 0;
           reactionCount = rRes.count ?? 0; // 0 until checkin_reactions.sql runs
+          joinReqCount = (jRes.data || []).filter(
+            (t) => t.requested_by && t.requested_by === t.tagged_user_id
+          ).length;
         }
       }
 
@@ -1249,6 +1260,7 @@ useEffect(() => {
           checkinCount +
           commentCount +
           reactionCount +
+          joinReqCount +
           tagCount +
           photoNudgeCount +
           sessionNudgeCount +
@@ -1675,14 +1687,14 @@ useEffect(() => {
   // Thin UI wrapper around lib/checkins.performCheckIn — returns the activity
   // row (fresh or already) so the card's pill can flip; null on failure.
   // Fresh check-ins open the CheckinSheet (confetti, label, tags).
-  async function handleCheckIn(venue) {
+  async function handleCheckIn(venue, joinedFrom = null) {
     const uid = session?.user?.id;
     if (!uid) {
       showToast("Sign in to check in");
       return null;
     }
     try {
-      const { activity, already } = await performCheckIn(uid, venue.id);
+      const { activity, already } = await performCheckIn(uid, venue.id, joinedFrom);
       if (!already) setCheckinSheet({ venue, activity });
       return activity;
     } catch (e) {

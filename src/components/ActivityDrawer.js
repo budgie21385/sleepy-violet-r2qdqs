@@ -15,6 +15,7 @@ import { pushState, enablePush, sendPush } from "../lib/push";
 const KIND_WEIGHT = {
   tag_nudge: 0, // someone checked you in — answer them
   request_received: 0, // friend request — answer them
+  join_request: 0, // someone joined your night — answer them
   session_invite: 1,
   session_nudge: 1,
   photo_nudge: 1,
@@ -359,11 +360,16 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         // render on the tagger's item; removed never does).
         const withByActivity = {};
         {
-          const { data: tRows } = await supabase
+          const { data: rawTRows } = await supabase
             .from("activity_tags")
-            .select("activity_id, tagged_user_id, status")
+            .select("activity_id, tagged_user_id, status, requested_by")
             .in("activity_id", checkinRows.map((r) => r.id))
             .neq("status", "removed");
+          // Pending self-requests (join asks) stay invisible until accepted.
+          const tRows = (rawTRows || []).filter(
+            (t) =>
+              !(t.status === "pending" && t.requested_by === t.tagged_user_id)
+          );
           const taggedIds = Array.from(
             new Set((tRows || []).map((t) => t.tagged_user_id))
           );
@@ -401,13 +407,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     // ---- Tag nudges: "[Name] checked you in at [venue]" (pending only) ----
     const tagNudgeP = (async () => {
       let tagNudgeItems = [];
-      const { data: tagRows } = await supabase
+      const { data: rawTagRows } = await supabase
         .from("activity_tags")
-        .select("id, activity_id, created_at")
+        .select("id, activity_id, created_at, requested_by")
         .eq("tagged_user_id", userId)
         .eq("status", "pending")
         .order("created_at", { ascending: false })
         .limit(10);
+      // Exclude my own join requests — those are the OWNER's to answer.
+      const tagRows = (rawTagRows || []).filter(
+        (t) => t.requested_by !== userId
+      );
       if (tagRows && tagRows.length > 0) {
         const actIds = tagRows.map((t) => t.activity_id);
         const { data: acts } = await supabase
@@ -459,6 +469,67 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           });
       }
       return tagNudgeItems;
+    })();
+
+    // ---- Join requests: "[X] is here too — add them to your check-in?" ----
+    // Self-requested tags on MY check-ins (requested_by = tagged user),
+    // awaiting MY accept (their name renders nowhere until then).
+    const joinReqP = (async () => {
+      const reqItems = [];
+      const { data: myActs } = await supabase
+        .from("activities")
+        .select("id, venue_id")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .gte(
+          "created_at",
+          new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
+        );
+      if (!myActs || myActs.length === 0) return reqItems;
+      const { data: reqs } = await supabase
+        .from("activity_tags")
+        .select("id, activity_id, tagged_user_id, requested_by, created_at, status")
+        .in("activity_id", myActs.map((a) => a.id))
+        .eq("status", "pending");
+      const selfReqs = (reqs || []).filter(
+        (t) => t.requested_by === t.tagged_user_id
+      );
+      if (selfReqs.length === 0) return reqItems;
+      const actById = Object.fromEntries(myActs.map((a) => [a.id, a]));
+      const uids = Array.from(new Set(selfReqs.map((t) => t.tagged_user_id)));
+      const venueIds = Array.from(
+        new Set(
+          selfReqs
+            .map((t) => actById[t.activity_id]?.venue_id)
+            .filter(Boolean)
+        )
+      );
+      const [profsRes, vensRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", uids),
+        venueIds.length
+          ? supabase.from("venues").select("id, name").in("id", venueIds)
+          : { data: [] },
+      ]);
+      const pById = Object.fromEntries((profsRes.data || []).map((p) => [p.id, p]));
+      const vNameById = Object.fromEntries(
+        (vensRes.data || []).map((v) => [v.id, v.name])
+      );
+      for (const t of selfReqs) {
+        reqItems.push({
+          kind: "join_request",
+          id: `jr_${t.id}`,
+          tagId: t.id,
+          activityId: t.activity_id,
+          otherId: t.tagged_user_id,
+          profile: pById[t.tagged_user_id] || null,
+          venueName: vNameById[actById[t.activity_id]?.venue_id] || "your night",
+          timestamp: t.created_at,
+        });
+      }
+      return reqItems;
     })();
 
     // ---- Morning-after photo nudge: MY photoless check-ins, 12–36h old ----
@@ -790,6 +861,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       photoNudgeItems,
       sessionNudgeItems,
       friendNewsItems,
+      joinReqItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -802,6 +874,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       photoNudgeP,
       sessionNudgeP,
       friendNewsP,
+      joinReqP,
     ]);
 
     const all = [
@@ -818,6 +891,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...photoNudgeItems,
       ...sessionNudgeItems,
       ...friendNewsItems,
+      ...joinReqItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -875,7 +949,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     const W = 12 * 60 * 60 * 1000;
     const { data: existing } = await supabase
       .from("activities")
-      .select("id")
+      .select("id, joined_from")
       .eq("user_id", userId)
       .eq("venue_id", item.venueId)
       .eq("kind", "checkin")
@@ -884,7 +958,15 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       .limit(1);
     let act = existing?.[0] || null;
     let error = null;
-    if (!act) {
+    if (act) {
+      // Adopt the existing check-in into the tagger's night (edge only).
+      if (!act.joined_from && act.id !== item.activityId) {
+        await supabase
+          .from("activities")
+          .update({ joined_from: item.activityId })
+          .eq("id", act.id);
+      }
+    } else {
       const ins = await supabase
         .from("activities")
         .insert({
@@ -893,6 +975,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           venue_id: item.venueId,
           label: item.label || null,
           created_at: item.checkinTimestamp,
+          joined_from: item.activityId, // the night-graph edge
         })
         .select("id")
         .single();
@@ -985,6 +1068,40 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   function sessionNudgeNo(item) {
     markNudgeDone(item.sessionId);
     setItems((prev) => (prev || []).filter((i) => i.id !== item.id));
+  }
+
+  // Join requests: the OWNER answers. Accept → their name joins your
+  // with-line; decline → the request disappears (their shard stays in the
+  // night either way — the edge was their consent, the name is yours).
+  async function acceptJoinReq(item) {
+    setActing(item.tagId);
+    const { error } = await supabase
+      .from("activity_tags")
+      .update({ status: "accepted", responded_at: new Date().toISOString() })
+      .eq("id", item.tagId);
+    setActing(null);
+    if (error) {
+      console.error("Join request accept failed:", error);
+      showToast?.("Couldn't add them");
+      return;
+    }
+    sendPush(item.otherId, "You're on the check-in 🎉", `Added at ${item.venueName}`);
+    await load();
+  }
+
+  async function declineJoinReq(item) {
+    setActing(item.tagId);
+    const { error } = await supabase
+      .from("activity_tags")
+      .delete()
+      .eq("id", item.tagId);
+    setActing(null);
+    if (error) {
+      console.error("Join request decline failed:", error);
+      showToast?.("Couldn't update");
+      return;
+    }
+    await load();
   }
 
   // Remove: strips your name off the tagger's check-in too.
@@ -1166,6 +1283,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onRemoveTag={() => removeTag(item)}
                 onSessionNudgeYes={() => sessionNudgeYes(item)}
                 onSessionNudgeNo={() => sessionNudgeNo(item)}
+                onAcceptJoinReq={() => acceptJoinReq(item)}
+                onDeclineJoinReq={() => declineJoinReq(item)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
@@ -1199,6 +1318,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onRemoveTag={() => removeTag(item)}
                 onSessionNudgeYes={() => sessionNudgeYes(item)}
                 onSessionNudgeNo={() => sessionNudgeNo(item)}
+                onAcceptJoinReq={() => acceptJoinReq(item)}
+                onDeclineJoinReq={() => declineJoinReq(item)}
                 onOpenProfile={onOpenProfile}
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
@@ -1268,7 +1389,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -1546,6 +1667,47 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
       </button>
+    );
+  }
+
+  if (item.kind === "join_request") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <button
+          type="button"
+          onClick={() => onOpenProfile?.(item.otherId)}
+          className="w-full flex items-center gap-3 text-left mb-2.5"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong> is here too at{" "}
+              <strong className="font-medium">{item.venueName}</strong>
+            </p>
+            <p className="text-[11px] text-neutral-500">
+              Add them to your check-in? Your friends will see you're together.
+            </p>
+          </div>
+        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onAcceptJoinReq}
+            className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Add them
+          </button>
+          <button
+            type="button"
+            disabled={acting}
+            onClick={onDeclineJoinReq}
+            className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
+          >
+            Not this time
+          </button>
+        </div>
+      </div>
     );
   }
 

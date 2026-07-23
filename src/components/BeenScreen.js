@@ -168,11 +168,16 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       const wMap = new Map();
       const actIds = (data || []).map((r) => r.id);
       if (actIds.length > 0) {
-        const { data: tags } = await supabase
+        const { data: rawTags } = await supabase
           .from("activity_tags")
-          .select("activity_id, tagged_user_id, status")
+          .select("activity_id, tagged_user_id, status, requested_by")
           .in("activity_id", actIds)
           .neq("status", "removed");
+        // Hide pending self-requests (join asks awaiting the owner).
+        const tags = (rawTags || []).filter(
+          (t) =>
+            !(t.status === "pending" && t.requested_by === t.tagged_user_id)
+        );
         const uids = Array.from(
           new Set((tags || []).map((t) => t.tagged_user_id))
         );

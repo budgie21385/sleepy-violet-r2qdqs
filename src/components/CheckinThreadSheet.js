@@ -9,7 +9,7 @@ import { X, Send, ChevronLeft, ChevronRight, UserPlus } from "lucide-react";
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
-import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
+import { timeAgoShort, FRESH_MS } from "../lib/checkins";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,
@@ -158,42 +158,48 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const listRef = useRef(null);
   const isOwner = thread.ownerId === userId;
   const uploadTargetId = isOwner ? thread.activityId : myActivityId;
-  // THE SHARED NIGHT: a tag-accept creates a twin check-in with the SAME
-  // timestamp, and a join creates a sibling — content (comments/photos/
-  // reactions) can land on any of them. The card merges the whole same-night
-  // cluster at this venue so it never opens "the wrong twin" (Mark hit this:
-  // photo + comments lived on the twin, card showed the bare one). RLS still
-  // trims every row to what the viewer may see — merging widens nothing.
+  // THE NIGHT GRAPH (July 23 — Mark: nights are defined by INVITATIONS, not
+  // venue coincidence). The card merges shards connected to this one through
+  // joined_from edges: walk UP to the night's root, then collect the tree
+  // below it. Two groups at the same pub never merge. RLS still trims every
+  // row to what the viewer may see.
   const [clusterIds, setClusterIds] = useState([thread.activityId]);
   const clusterKey = clusterIds.join(",");
 
   useEffect(() => {
     let cancelled = false;
-    if (!thread.venueObj) {
-      setClusterIds([thread.activityId]);
-      return;
-    }
     (async () => {
-      const SAME_NIGHT_MS = 12 * 60 * 60 * 1000;
-      const ref = new Date(thread.timestamp).getTime();
-      const { data } = await supabase
+      // Walk up joined_from to the root (bounded).
+      let rootId = thread.activityId;
+      for (let hop = 0; hop < 4; hop++) {
+        const { data: row } = await supabase
+          .from("activities")
+          .select("joined_from")
+          .eq("id", rootId)
+          .maybeSingle();
+        if (row?.joined_from) rootId = row.joined_from;
+        else break;
+      }
+      // Collect the tree below the root (two levels covers real nights).
+      const ids = new Set([rootId, thread.activityId]);
+      const { data: l1 } = await supabase
         .from("activities")
         .select("id")
-        .eq("venue_id", thread.venueObj.id)
-        .eq("kind", "checkin")
-        .gte("created_at", new Date(ref - SAME_NIGHT_MS).toISOString())
-        .lte("created_at", new Date(ref + SAME_NIGHT_MS).toISOString());
-      if (cancelled) return;
-      setClusterIds(
-        Array.from(
-          new Set([thread.activityId, ...(data || []).map((r) => r.id)])
-        )
-      );
+        .eq("joined_from", rootId);
+      (l1 || []).forEach((r) => ids.add(r.id));
+      if (l1 && l1.length > 0) {
+        const { data: l2 } = await supabase
+          .from("activities")
+          .select("id")
+          .in("joined_from", l1.map((r) => r.id));
+        (l2 || []).forEach((r) => ids.add(r.id));
+      }
+      if (!cancelled) setClusterIds(Array.from(ids));
     })();
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId, thread.venueObj?.id, thread.timestamp]);
+  }, [thread.activityId]);
   // Cap applies per check-in — only count photos on the one I'd upload to.
   const myPhotoCount = photos.filter(
     (p) => p.activity_id === uploadTargetId
@@ -494,49 +500,43 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     thread.ownerId !== userId &&
     Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS;
 
-  // "Was I there the SAME NIGHT as this check-in?" — window is relative to
-  // the check-in's moment, not to now (a DUPE_MS-from-now check went stale
-  // the instant your own check-in aged past 4h). Same-night = ±12h.
+  // "Am I part of this NIGHT?" — edge-based (July 23): my shard is whichever
+  // check-in of MINE sits in this night's graph. An independent check-in at
+  // the same venue is a different night and grants nothing here.
   useEffect(() => {
-    if (isOwner || !thread.venueObj || !userId) return;
+    if (isOwner || !userId) return;
     let cancelled = false;
     (async () => {
-      const SAME_NIGHT_MS = 12 * 60 * 60 * 1000;
-      const ref = new Date(thread.timestamp).getTime();
       const { data } = await supabase
         .from("activities")
-        .select("id, created_at")
+        .select("id")
+        .in("id", clusterIds)
         .eq("user_id", userId)
-        .eq("venue_id", thread.venueObj.id)
-        .eq("kind", "checkin")
-        .gte("created_at", new Date(ref - SAME_NIGHT_MS).toISOString())
-        .lte("created_at", new Date(ref + SAME_NIGHT_MS).toISOString())
-        .order("created_at", { ascending: false })
         .limit(1);
       if (cancelled) return;
-      // joined still means "currently there" for the join-button state.
-      setJoined(
-        (data || []).some(
-          (a) => Date.now() - new Date(a.created_at).getTime() < DUPE_MS
-        )
-      );
       setMyActivityId(data?.[0]?.id ?? null);
+      setJoined((data || []).length > 0);
     })();
     return () => {
       cancelled = true;
     };
-  }, [isOwner, userId, thread.venueObj?.id, thread.timestamp]);
+  }, [isOwner, userId, clusterKey]);
 
   // "with JD and Bianca" — tags on this check-in (pending + accepted render;
   // removed never does). taggedIds feeds the owner's add-friends picker.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: tags } = await supabase
+      const { data: rawTags } = await supabase
         .from("activity_tags")
-        .select("tagged_user_id, status")
+        .select("tagged_user_id, status, requested_by")
         .eq("activity_id", thread.activityId)
         .neq("status", "removed");
+      // Pending SELF-requests (joiner asking on) render nowhere until the
+      // owner accepts — their card, their consent.
+      const tags = (rawTags || []).filter(
+        (t) => !(t.status === "pending" && t.requested_by === t.tagged_user_id)
+      );
       const statusById = Object.fromEntries(
         (tags || []).map((t) => [t.tagged_user_id, t.status])
       );
@@ -987,9 +987,37 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           <div className="px-5 pt-3">
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 onClose();
-                onCheckIn(thread.venueObj);
+                // Second arg = the night-graph edge: joining links your new
+                // check-in into THIS night (July 23 model).
+                const act = await onCheckIn(thread.venueObj, thread.activityId);
+                if (act) {
+                  // Ask the owner to put you on their with-line — a
+                  // SELF-REQUESTED tag they accept or decline. Until accepted
+                  // it renders nowhere (their card, their consent).
+                  supabase
+                    .from("activity_tags")
+                    .upsert(
+                      {
+                        activity_id: thread.activityId,
+                        tagged_user_id: userId,
+                        requested_by: userId,
+                        status: "pending",
+                      },
+                      {
+                        onConflict: "activity_id,tagged_user_id",
+                        ignoreDuplicates: true,
+                      }
+                    )
+                    .then(() => {
+                      sendPush(
+                        thread.ownerId,
+                        "Someone's here too",
+                        `They joined your night at ${thread.venueName} — add them to your check-in?`
+                      );
+                    });
+                }
               }}
               className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition"
             >
