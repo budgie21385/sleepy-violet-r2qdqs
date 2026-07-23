@@ -723,7 +723,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         const [cRes, rRes] = await Promise.all([
           supabase
             .from("activity_comments")
-            .select("id, activity_id, user_id, body, created_at")
+            .select("id, activity_id, user_id, body, created_at, photo_id")
             .in("activity_id", actIds)
             .neq("user_id", userId)
             .order("created_at", { ascending: false })
@@ -778,6 +778,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               venueName: vById[act?.venue_id]?.name || "your check-in",
               venueObj: vById[act?.venue_id] || null, // venue link inside the card
               body: c.body,
+              photoId: c.photo_id || null, // photo comment → open its lightbox
               checkinTimestamp: act?.created_at,
               timestamp: c.created_at,
             });
@@ -796,6 +797,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               profile: profById2[r.user_id] || null,
               emoji: r.emoji,
               onPhoto: !!r.photo_id,
+              photoId: r.photo_id || null, // photo reaction → open its lightbox
               venueName: vById[act?.venue_id]?.name || "your check-in",
               venueObj: vById[act?.venue_id] || null,
               checkinTimestamp: act?.created_at,
@@ -1654,6 +1656,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             ownerName: "You",
             venueName: item.venueName,
             venueObj: item.venueObj || null,
+            photoId: item.photoId || null, // photo comment → lightbox opens
             timestamp: item.checkinTimestamp || item.timestamp,
           })
         }
@@ -1662,8 +1665,9 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         <FriendAvatar profile={item.profile} small />
         <div className="flex-1 min-w-0">
           <p className="text-sm text-neutral-900">
-            <strong className="font-medium">{name}</strong> commented on your
-            check-in at <strong className="font-medium">{item.venueName}</strong>
+            <strong className="font-medium">{name}</strong> commented on your{" "}
+            {item.photoId ? "photo" : "check-in"} at{" "}
+            <strong className="font-medium">{item.venueName}</strong>
           </p>
           <p className="text-[11px] text-neutral-500 truncate">“{item.body}”</p>
         </div>
@@ -1798,6 +1802,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             ownerName: "You",
             venueName: item.venueName,
             venueObj: item.venueObj || null,
+            photoId: item.photoId || null, // photo reaction → lightbox opens
             timestamp: item.checkinTimestamp || item.timestamp,
           })
         }
