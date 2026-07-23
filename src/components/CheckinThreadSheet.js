@@ -109,17 +109,6 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     autoLightboxDone.current = false; // new thread → new photo target
   }, [thread.activityId, thread.label]);
 
-  // Deep-link a photo (Activity: "reacted to your PHOTO" / "commented on
-  // your PHOTO") — the card opens with that photo's lightbox already up.
-  useEffect(() => {
-    if (autoLightboxDone.current || !thread.photoId) return;
-    const target = photos.find((p) => p.id === thread.photoId);
-    if (target) {
-      autoLightboxDone.current = true;
-      setLightbox(target);
-    }
-  }, [photos, thread.photoId]);
-
   async function saveLabel() {
     if (labelSaving) return;
     const text = labelDraft.trim().slice(0, 80);
@@ -217,6 +206,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // Lightbox holds the full photo ROW — it's a mini-thread now (photo +
   // its own reactions + its own comments), not just a big image.
   const [lightbox, setLightbox] = useState(null);
+
+  // Deep-link a photo (Activity: "reacted to your PHOTO" / "commented on
+  // your PHOTO") — the card opens with that photo's lightbox already up.
+  // Lives BELOW the photos/lightbox declarations: referencing them earlier
+  // is a TDZ crash at render (the July 23 white screen).
+  useEffect(() => {
+    if (autoLightboxDone.current || !thread.photoId) return;
+    const target = photos.find((p) => p.id === thread.photoId);
+    if (target) {
+      autoLightboxDone.current = true;
+      setLightbox(target);
+    }
+  }, [photos, thread.photoId]);
   const [photoComments, setPhotoComments] = useState(null); // null = loading
   const [photoBody, setPhotoBody] = useState("");
   const [photoSending, setPhotoSending] = useState(false);
