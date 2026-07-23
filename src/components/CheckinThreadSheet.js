@@ -46,39 +46,57 @@ import {
 import { Camera } from "lucide-react";
 import { sendPush } from "../lib/push";
 
-// One tap-bar: 🔥 💀 😭 👀 🫶 🍻 with counts; yours is highlighted. One
-// swappable reaction per person per target (see lib/reactions.js).
-function ReactionBar({ counts, mine, onTap, disabled }) {
+// Always-visible palette (Mark's design, July 24): all six emojis render as
+// round chips every time — tapping one reacts/swaps, tapping yours again
+// removes it. Two glance signals: a count badge on any emoji that's been
+// used, and olive fill on the one YOU picked. "See reactions ›" appears
+// once anyone has reacted and opens the who-list sheet (onSeeWho).
+// One swappable reaction per person per target (see lib/reactions.js).
+function ReactionBar({ counts, mine, onTap, disabled, onSeeWho }) {
+  const total = REACTION_SET.reduce((s, e) => s + (counts[e] || 0), 0);
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      {REACTION_SET.map((e) => {
-        const n = counts[e] || 0;
-        const isMine = mine === e;
-        return (
-          <button
-            key={e}
-            type="button"
-            disabled={disabled}
-            onClick={() => onTap(e)}
-            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-sm active:scale-90 transition disabled:opacity-50 ${
-              isMine
-                ? "bg-[#edf2eb] border-[#455d3b]"
-                : "border-neutral-200 bg-white"
-            }`}
-          >
-            <span>{e}</span>
-            {n > 0 && (
-              <span
-                className={`text-[11px] font-medium ${
-                  isMine ? "text-[#455d3b]" : "text-neutral-500"
-                }`}
-              >
-                {n}
-              </span>
-            )}
-          </button>
-        );
-      })}
+    <div>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {REACTION_SET.map((e) => {
+          const n = counts[e] || 0;
+          const isMine = mine === e;
+          return (
+            <button
+              key={e}
+              type="button"
+              disabled={disabled}
+              onClick={() => onTap(e)}
+              className={`relative flex h-9 w-9 items-center justify-center rounded-full border text-lg active:scale-90 transition disabled:opacity-50 ${
+                isMine
+                  ? "bg-[#455d3b] border-[#455d3b]"
+                  : "border-neutral-200 bg-white"
+              }`}
+            >
+              {e}
+              {n > 0 && (
+                <span
+                  className={`absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full border border-white px-1 text-[9px] font-semibold ${
+                    isMine
+                      ? "bg-[#2f3f29] text-white"
+                      : "bg-neutral-200 text-neutral-600"
+                  }`}
+                >
+                  {n}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {total > 0 && onSeeWho && (
+        <button
+          type="button"
+          onClick={onSeeWho}
+          className="mt-2 text-xs font-medium text-[#455d3b]"
+        >
+          See reactions ›
+        </button>
+      )}
     </div>
   );
 }
@@ -254,6 +272,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // summarizeReactions() slices per target.
   const [reactions, setReactions] = useState([]);
   const [reacting, setReacting] = useState(false);
+  // "See reactions ›" who-list sheet. null = closed; { photoId } picks the
+  // target (null photoId = the check-in itself). Renders above the lightbox.
+  const [reactSheet, setReactSheet] = useState(null);
+  // Close on thread switch or lightbox flips — the target went stale.
+  // (Effect sits BELOW both states it reads — TDZ rule, see 05-log.)
+  useEffect(() => {
+    setReactSheet(null);
+  }, [thread.activityId, lightbox?.id]);
   // In-flight tiles come from the MODULE-LEVEL store (lib/photos), not local
   // state — so closing and reopening the card still shows "Uploading…" for
   // anything mid-flight, and finishing uploads refresh any mounted card.
@@ -424,11 +450,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     );
   }
 
-  // Resolve uploader profiles for any media rows we haven't seen yet.
+  // Resolve uploader + reactor profiles for any rows we haven't seen yet
+  // (reactors feed the "See reactions" sheet — anyone who can see the card
+  // can react, so they're not always in nightPeople).
   useEffect(() => {
-    const ids = Array.from(new Set(photos.map((p) => p.user_id))).filter(
-      (id) => id && !mediaProfiles[id]
-    );
+    const ids = Array.from(
+      new Set([
+        ...photos.map((p) => p.user_id),
+        ...reactions.map((r) => r.user_id),
+      ])
+    ).filter((id) => id && !mediaProfiles[id]);
     if (ids.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -1302,6 +1333,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             mine={summarizeReactions(reactions, userId, null).mine}
             disabled={reacting}
             onTap={(e) => react(e, null)}
+            onSeeWho={() => setReactSheet({ photoId: null })}
           />
         </div>
         )}
@@ -1659,6 +1691,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 mine={summarizeReactions(reactions, userId, lightbox.id).mine}
                 disabled={reacting}
                 onTap={(e) => react(e, lightbox)}
+                onSeeWho={() => setReactSheet({ photoId: lightbox.id })}
               />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
@@ -1709,6 +1742,73 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               >
                 <Send size={16} />
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* "See reactions ›" who-list. z-3850: above the lightbox (3800),
+          below ProfileLookupScreen (3900) so profile tap-throughs land on
+          top and Back returns here. Stays open under the profile, same as
+          the card itself. */}
+      {reactSheet && (
+        <div
+          className="fixed inset-0 z-[3850] bg-black/40 flex items-end"
+          onClick={() => setReactSheet(null)}
+        >
+          <div
+            className="w-full max-h-[60%] rounded-t-2xl bg-white flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-4 pb-2">
+              <p className="text-sm font-semibold text-neutral-900">
+                Reactions
+              </p>
+              <button
+                type="button"
+                onClick={() => setReactSheet(null)}
+                aria-label="Close"
+                className="p-1 text-neutral-400"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 pb-6">
+              {(() => {
+                const rows = reactions.filter(
+                  (r) =>
+                    (r.photo_id ?? null) === reactSheet.photoId &&
+                    (r.comment_id ?? null) === null
+                );
+                if (rows.length === 0)
+                  return (
+                    <p className="py-2 text-xs text-neutral-400">
+                      No reactions yet.
+                    </p>
+                  );
+                return (
+                  <div className="space-y-1">
+                    {rows.map((r) => {
+                      const p = mediaProfiles[r.user_id] || null;
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => onOpenProfile?.(r.user_id)}
+                          className="flex w-full items-center gap-3 rounded-xl px-1 py-2 text-left active:bg-neutral-50"
+                        >
+                          <FriendAvatar profile={p} small />
+                          <span className="flex-1 min-w-0 truncate text-sm text-neutral-900">
+                            {r.user_id === userId
+                              ? "You"
+                              : p?.display_name || p?.username || "Someone"}
+                          </span>
+                          <span className="text-lg">{r.emoji}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
