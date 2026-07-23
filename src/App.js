@@ -4214,11 +4214,9 @@ function ProfileTab({
           onOpenProfile={(uid) => {
             console.log("FLANIT-PROFILE App/Been handler", uid, "self:", session?.user?.id);
             setShowBeen(false); // Been (z-2500) would cover the profile screen
-            if (uid && uid === session?.user?.id) {
-              setTab("profile"); // self → your own Profile tab
-              return;
-            }
-            setLookupUserId(uid);
+            // Self → closing Been lands you on your own Profile tab already.
+            if (uid && uid === session?.user?.id) return;
+            onOpenProfile?.(uid); // ProfileTab's prop → lookup screen at root
           }}
         />
       )}
