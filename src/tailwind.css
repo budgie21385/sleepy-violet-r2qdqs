@@ -1,0 +1,4 @@
+/* Build-time Tailwind entry — imported once in src/index.js. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

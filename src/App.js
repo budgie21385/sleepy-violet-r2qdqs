@@ -49,6 +49,7 @@ import {
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
 import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { prefetchVenueDetails } from "./lib/venueDetails";
 import { QRCodeSVG } from "qrcode.react";
 import { Turnstile } from "@marsidev/react-turnstile";
 
@@ -1800,17 +1801,63 @@ useEffect(() => {
   }
  
   useEffect(() => {
+    // Venue bootstrap diet (July 21 speed pair): LIGHT columns only — every
+    // filter signal + pin/card-header fields. The heavy tail (image arrays,
+    // reviews, editorial) hydrates per venue via lib/venueDetails when a
+    // card opens. Also: paginated past Supabase's 1,000-row default (we were
+    // silently missing venues beyond it), and cached on-device so repeat
+    // opens paint instantly (stale-while-revalidate).
+    const LIGHT_COLS = [
+      "id", "name", "address", "suburb", "latitude", "longitude",
+      "type", "cuisine", "cuisine_bucket", "google_types",
+      "rating", "review_count", "price_level", "primary_image",
+      "verified", "created_by", "google_place_id",
+      "monday_hours", "tuesday_hours", "wednesday_hours", "thursday_hours",
+      "friday_hours", "saturday_hours", "sunday_hours",
+      "serves_breakfast", "serves_brunch", "serves_coffee",
+      "serves_cocktails", "serves_dessert", "serves_wine",
+      "serves_vegetarian_food", "outdoor_seating", "live_music",
+      "allows_dogs", "good_for_groups", "reservable", "takeout", "delivery",
+    ].join(",");
+    const CACHE_KEY = "flanit_venues_light_v1";
+
+    let cachedCount = 0;
+    try {
+      const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      if (cached?.rows?.length) {
+        cachedCount = cached.rows.length;
+        setVenues([...cached.rows].sort(() => Math.random() - 0.5));
+        setLoading(false);
+      }
+    } catch {}
+
     async function loadVenues() {
-      const { data, error } = await supabase
-        .from("venues")
-        .select("*");
-      console.log("Supabase venues data:", data);
-      console.log("Supabase venues error:", error);
-      if (error) {
-        console.error("Error loading venues:", error);
-      } else {
-        const shuffled = [...(data || [])].sort(() => Math.random() - 0.5);
-        setVenues(shuffled);
+      const all = [];
+      const PAGE = 1000;
+      for (let fromIdx = 0; ; fromIdx += PAGE) {
+        const { data, error } = await supabase
+          .from("venues")
+          .select(LIGHT_COLS)
+          .range(fromIdx, fromIdx + PAGE - 1);
+        if (error) {
+          console.error("Error loading venues:", error);
+          break;
+        }
+        all.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+      }
+      if (all.length > 0) {
+        try {
+          localStorage.setItem(
+            CACHE_KEY,
+            JSON.stringify({ t: Date.now(), rows: all })
+          );
+        } catch {}
+        // Don't reshuffle mid-use for a same-size refresh — only swap in the
+        // fresh set when it actually differs (new/removed venues).
+        if (all.length !== cachedCount) {
+          setVenues([...all].sort(() => Math.random() - 0.5));
+        }
       }
       setLoading(false);
     }
@@ -1998,7 +2045,17 @@ loadAreas();
   const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
   );
- 
+
+  // Warm the heavy tail for the current + next couple of swipe cards so the
+  // deck never shows a skeleton mid-swipe.
+  useEffect(() => {
+    if (!currentVenue?.id) return;
+    const idx = swipeQueue.findIndex((v) => v.id === currentVenue.id);
+    prefetchVenueDetails(
+      swipeQueue.slice(Math.max(0, idx), idx + 3).map((v) => v.id)
+    );
+  }, [currentVenue?.id, swipeQueue]);
+
   const currentUserSwipedCount = currentUserSwipedIds.length;
  
   function resetSwipe() {

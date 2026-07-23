@@ -26,11 +26,12 @@ import {
   OpenMapsButton,
 } from "./VenueBits";
 import { getMapsUrl } from "../lib/venueLogic";
+import { useVenueDetails } from "../lib/venueDetails";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
 
 export function MapVenueSheet({
-  venue,
+  venue: venueLight,
   onClose,
   savedIds,
   onSave,
@@ -48,6 +49,10 @@ export function MapVenueSheet({
   // this returns you to the check-in rather than losing it.
   zIndex = 3100,
 }) {
+  // Hydrate the heavy tail (photos/reviews/editorial) on card open — the
+  // bootstrap ships light columns only. All body code below uses `venue`
+  // exactly as before.
+  const venue = useVenueDetails(venueLight);
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in

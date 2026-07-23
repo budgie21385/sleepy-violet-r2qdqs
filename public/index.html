@@ -38,7 +38,8 @@
 	<meta name="twitter:title" content="Discover your city with friends">
 	<meta name="twitter:description" content="Swipe, match and decide where to go — together.">
 	<meta name="twitter:image" content="https://flanit.co/og-default.png">
-	<script src="https://cdn.tailwindcss.com"></script>
+	<!-- Tailwind is now compiled at build time (tailwind.config.js) — the CDN
+	     runtime compiler is gone; it cost slow phones seconds per load. -->
 	<!-- On-phone debug console: open flanit.co/?flanitdebug=1 on any device to
 	     get an in-page console (Eruda) — the only way to read iPhone logs
 	     without a Mac. Does nothing unless the param is present. -->

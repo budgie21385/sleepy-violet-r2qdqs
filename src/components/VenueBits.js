@@ -19,6 +19,7 @@ import {
   getMapsUrl,
   formatPriceSymbols,
 } from "../lib/venueLogic";
+import { useVenueDetails } from "../lib/venueDetails";
 
 export function VenueHeroCarousel({ venue, disableSwipe = false }) {
   // Prefer CDN-cached photos (fast — served from Supabase Storage). Fall back to
@@ -445,7 +446,10 @@ export function OpenMapsButton({ url }) {
   );
 }
 
-export function VenueCard({ venue }) {
+export function VenueCard({ venue: venueLight }) {
+  // Hydrate the heavy tail (photos/reviews/editorial) on demand — the
+  // bootstrap only ships light columns now. Body below is unchanged.
+  const venue = useVenueDetails(venueLight);
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
       <VenueHeroCarousel venue={venue} />
