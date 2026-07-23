@@ -714,7 +714,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: myActs } = await supabase
         .from("activities")
-        .select("id, venue_id, created_at")
+        .select("id, venue_id, created_at, label")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .gte("created_at", weekAgo);
@@ -779,6 +779,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               venueObj: vById[act?.venue_id] || null, // venue link inside the card
               body: c.body,
               photoId: c.photo_id || null, // photo comment → open its lightbox
+              label: act?.label || null,
               checkinTimestamp: act?.created_at,
               timestamp: c.created_at,
             });
@@ -800,6 +801,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               photoId: r.photo_id || null, // photo reaction → open its lightbox
               venueName: vById[act?.venue_id]?.name || "your check-in",
               venueObj: vById[act?.venue_id] || null,
+              label: act?.label || null,
               checkinTimestamp: act?.created_at,
               timestamp: r.created_at,
             });
@@ -1657,6 +1659,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             venueName: item.venueName,
             venueObj: item.venueObj || null,
             photoId: item.photoId || null, // photo comment → lightbox opens
+            label: item.label || null,
             timestamp: item.checkinTimestamp || item.timestamp,
           })
         }
@@ -1803,6 +1806,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             venueName: item.venueName,
             venueObj: item.venueObj || null,
             photoId: item.photoId || null, // photo reaction → lightbox opens
+            label: item.label || null,
             timestamp: item.checkinTimestamp || item.timestamp,
           })
         }

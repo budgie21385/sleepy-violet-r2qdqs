@@ -109,6 +109,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     autoLightboxDone.current = false; // new thread → new photo target
   }, [thread.activityId, thread.label]);
 
+  // Self-heal the title: openers don't all carry the label (mount-prop
+  // parity strikes again) — the DB is the truth, fetch it once per thread.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("activities")
+        .select("label")
+        .eq("id", thread.activityId)
+        .maybeSingle();
+      if (!cancelled && data?.label) setLabelValue(data.label);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.activityId]);
+
   async function saveLabel() {
     if (labelSaving) return;
     const text = labelDraft.trim().slice(0, 80);
