@@ -316,7 +316,12 @@ export default function RestaurantSwipeMVP() {
   const [selectedOccasions, setSelectedOccasions] = useState([]);
   const [selectedPrices, setSelectedPrices] = useState([]); // price levels 1..4
   const [selectedAmenities, setSelectedAmenities] = useState([]); // amenity keys
-  const [matchLimit, setMatchLimit] = useState(3);
+  // Default 1 (Mark, July 24): one match ends a Right Now session — most
+  // groups only need the one answer.
+  const [matchLimit, setMatchLimit] = useState(1);
+  // Setup filters: Suburbs / Time of day / What are you after lead;
+  // everything else folds into "See more" (Cuisine on top).
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [cardIndex, setCardIndex] = useState(0);
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
@@ -3061,8 +3066,6 @@ if (authLoading || guestLoading) {
                 setAreaSearch={setAreaSearch}
                 selectedAreas={selectedAreas}
                 setSelectedAreas={setSelectedAreas}
-                radiusKm={radiusKm}
-                setRadiusKm={setRadiusKm}
                 showAreaDropdown={showAreaDropdown}
                 setShowAreaDropdown={setShowAreaDropdown}
                 areas={areas}
@@ -3070,17 +3073,6 @@ if (authLoading || guestLoading) {
                 expandedRegions={expandedRegions}
                 setExpandedRegions={setExpandedRegions}
               />
-              {/* "How many matches?" is a stop-after-N target — only
-                  meaningful for Right Now (concurrent). Send options
-                  (curated) curates the whole shortlist, so no target. */}
-              {matchMode !== "curated" && (
-                <DropdownField
-                  label="Matches"
-                  value={matchLimit}
-                  onChange={setMatchLimit}
-                  options={MATCH_OPTIONS.map((n) => ({ value: n, label: String(n) }))}
-                />
-              )}
               <MapFilterGroup title="Time of day">
                 {TIME_BAND_LABELS.map((label) => (
                   <MapFilterChip
@@ -3113,62 +3105,103 @@ if (authLoading || guestLoading) {
                   />
                 ))}
               </MapFilterGroup>
-              <MapFilterGroup title="Must-haves">
-                {AMENITY_FILTERS.map((a) => (
-                  <MapFilterChip
-                    key={a.key}
-                    on={selectedAmenities.includes(a.key)}
-                    label={a.label}
-                    onClick={() =>
-                      setSelectedAmenities((prev) =>
-                        prev.includes(a.key)
-                          ? prev.filter((x) => x !== a.key)
-                          : [...prev, a.key]
-                      )
-                    }
-                  />
-                ))}
-              </MapFilterGroup>
-              <MapFilterGroup title="Price">
-                {[1, 2, 3, 4].map((p) => (
-                  <MapFilterChip
-                    key={p}
-                    on={selectedPrices.includes(p)}
-                    label={"$".repeat(p)}
-                    onClick={() =>
-                      setSelectedPrices((prev) =>
-                        prev.includes(p)
-                          ? prev.filter((x) => x !== p)
-                          : [...prev, p]
-                      )
-                    }
-                  />
-                ))}
-              </MapFilterGroup>
-              <MapFilterSection
-                title="Cuisine"
-                summary={
-                  selectedCuisines.length === 0
-                    ? "Any"
-                    : selectedCuisines.length === 1
-                    ? selectedCuisines[0]
-                    : `${selectedCuisines.length} selected`
-                }
-                accent={selectedCuisines.length > 0}
+              {/* SEE MORE (July 24, Mark's setup diet): Suburbs / Time of
+                  day / What are you after lead; everything else folds away.
+                  Cuisine on top, then Radius + Matches as one pill row. */}
+              <button
+                type="button"
+                onClick={() => setShowMoreFilters((v) => !v)}
+                className="w-full text-center text-sm font-medium text-[#455d3b]"
               >
-                <SearchableChips
-                  options={cuisines.filter((item) => item !== ALL)}
-                  selected={selectedCuisines}
-                  onToggle={(c) =>
-                    setSelectedCuisines((prev) =>
-                      prev.includes(c)
-                        ? prev.filter((x) => x !== c)
-                        : [...prev, c]
-                    )
-                  }
-                  placeholder="Search cuisines"
-                />
-              </MapFilterSection>
+                {showMoreFilters ? "See fewer filters ⌃" : "See more filters ⌄"}
+              </button>
+              {showMoreFilters && (
+                <>
+                  <MapFilterSection
+                    title="Cuisine"
+                    summary={
+                      selectedCuisines.length === 0
+                        ? "Any"
+                        : selectedCuisines.length === 1
+                        ? selectedCuisines[0]
+                        : `${selectedCuisines.length} selected`
+                    }
+                    accent={selectedCuisines.length > 0}
+                  >
+                    <SearchableChips
+                      options={cuisines.filter((item) => item !== ALL)}
+                      selected={selectedCuisines}
+                      onToggle={(c) =>
+                        setSelectedCuisines((prev) =>
+                          prev.includes(c)
+                            ? prev.filter((x) => x !== c)
+                            : [...prev, c]
+                        )
+                      }
+                      placeholder="Search cuisines"
+                    />
+                  </MapFilterSection>
+                  {/* Radius + Matches: pills, one row. Matches is a
+                      stop-after-N target — Right Now only (curated
+                      curates the whole shortlist, no target). */}
+                  <div className="flex gap-2">
+                    <DropdownField
+                      pill
+                      label="Radius"
+                      value={radiusKm}
+                      onChange={setRadiusKm}
+                      options={RADIUS_OPTIONS.map((r) => ({
+                        value: r,
+                        label: `${r} km`,
+                      }))}
+                    />
+                    {matchMode !== "curated" && (
+                      <DropdownField
+                        pill
+                        label="Matches"
+                        value={matchLimit}
+                        onChange={setMatchLimit}
+                        options={MATCH_OPTIONS.map((n) => ({
+                          value: n,
+                          label: String(n),
+                        }))}
+                      />
+                    )}
+                  </div>
+                  <MapFilterGroup title="Must-haves">
+                    {AMENITY_FILTERS.map((a) => (
+                      <MapFilterChip
+                        key={a.key}
+                        on={selectedAmenities.includes(a.key)}
+                        label={a.label}
+                        onClick={() =>
+                          setSelectedAmenities((prev) =>
+                            prev.includes(a.key)
+                              ? prev.filter((x) => x !== a.key)
+                              : [...prev, a.key]
+                          )
+                        }
+                      />
+                    ))}
+                  </MapFilterGroup>
+                  <MapFilterGroup title="Price">
+                    {[1, 2, 3, 4].map((p) => (
+                      <MapFilterChip
+                        key={p}
+                        on={selectedPrices.includes(p)}
+                        label={"$".repeat(p)}
+                        onClick={() =>
+                          setSelectedPrices((prev) =>
+                            prev.includes(p)
+                              ? prev.filter((x) => x !== p)
+                              : [...prev, p]
+                          )
+                        }
+                      />
+                    ))}
+                  </MapFilterGroup>
+                </>
+              )}
 
               <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600">
                 {swipeQueue.length} places available with these filters.
@@ -3624,8 +3657,6 @@ function AreaFilter({
   setAreaSearch,
   selectedAreas,
   setSelectedAreas,
-  radiusKm,
-  setRadiusKm,
   showAreaDropdown,
   setShowAreaDropdown,
   areas,
@@ -3898,15 +3929,6 @@ function AreaFilter({
           )}
         </div>
       )}
- 
-      <div className="mt-5">
-        <DropdownField
-          label="Radius"
-          value={radiusKm}
-          onChange={setRadiusKm}
-          options={RADIUS_OPTIONS.map((r) => ({ value: r, label: `${r} km` }))}
-        />
-      </div>
     </div>
   );
 }

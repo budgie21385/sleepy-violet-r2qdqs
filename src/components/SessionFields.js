@@ -133,12 +133,17 @@ export function MultiSelectChips({ label, options, selected, setSelected }) {
   );
 }
 
-// Compact labelled dropdown row: label left, native select right. Replaces
-// the old segmented-pill fields (Radius, How many matches) — the native
-// select keeps the row one line tall and behaves well on mobile.
-export function DropdownField({ label, value, onChange, options }) {
+// Compact labelled dropdown row: label left, native select right. The
+// native select keeps the row one line tall and behaves well on mobile.
+// pill=true → rounded-full half-width variant (July 24: Radius + Matches
+// share one row inside "See more").
+export function DropdownField({ label, value, onChange, options, pill }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 border border-neutral-100 px-4 py-3">
+    <div
+      className={`flex items-center justify-between bg-neutral-50 border border-neutral-100 ${
+        pill ? "flex-1 rounded-full px-4 py-2.5" : "rounded-2xl px-4 py-3"
+      }`}
+    >
       <span className="text-sm font-medium text-neutral-700">{label}</span>
       <select
         value={value}
