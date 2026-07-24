@@ -366,9 +366,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
 
   function shareCollectLink() {
     if (!collectLink) return;
-    const text = `Add your photos from ${thread.venueName} 📸 ${collectUrl()}`;
+    // url as its OWN field (July 25): Messenger and friends were linkifying
+    // just the domain out of the text blob and landing people on flanit.co
+    // instead of the /c/ page.
     if (navigator.share) {
-      navigator.share({ text }).catch(() => {});
+      navigator
+        .share({
+          title: "Add your photos",
+          text: `Add your photos from ${thread.venueName} 📸`,
+          url: collectUrl(),
+        })
+        .catch(() => {});
     } else {
       navigator.clipboard?.writeText(collectUrl());
       showToast?.("Link copied");

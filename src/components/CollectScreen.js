@@ -144,9 +144,12 @@ export function CollectScreen({ token }) {
         await supabase.auth.getSession();
       }
       if (!uid) throw new Error("no user");
-      await supabase
-        .from("profiles")
-        .upsert({ id: uid, display_name: nm }, { onConflict: "id" });
+      // SECURITY DEFINER — the old client-side upsert could fail silently
+      // under RLS and leave a stale name ("New", July 25 field test).
+      const { error: nameErr } = await supabase.rpc("set_guest_name", {
+        p_name: nm,
+      });
+      if (nameErr) throw nameErr;
       setMe({ id: uid, isAnon: true });
       setDisplayName(nm);
       setNeedsDoor(false);
@@ -251,15 +254,108 @@ export function CollectScreen({ token }) {
     }
     setUploading(false);
     if (landed > 0) {
-      sendPush(
-        ctx.owner_id,
-        "📸 New photos on your night",
-        `${displayName || "Someone"} added ${landed} ${
-          landed === 1 ? "photo" : "photos"
-        } at ${ctx.venue_name}`
-      );
+      // Fan the push out to EVERYONE in the night (July 25, Mark: "notify
+      // all people on the album"), not just the link owner.
+      const body = `${displayName || "Someone"} added ${landed} ${
+        landed === 1 ? "photo" : "photos"
+      } at ${ctx.venue_name}`;
+      try {
+        const { data: recips } = await supabase.rpc("collect_recipients", {
+          p_token: token,
+        });
+        const targets =
+          recips && recips.length > 0
+            ? recips.filter((uid) => uid !== me.id)
+            : [ctx.owner_id];
+        for (const uid of targets) {
+          sendPush(uid, "📸 New photos on your night", body);
+        }
+      } catch {
+        sendPush(ctx.owner_id, "📸 New photos on your night", body);
+      }
       ensureFriendTwin();
     }
+  }
+
+  // CLAIM FLOW (July 25 — Mark: "Get Flanit goes to install, not sign up").
+  // Email-code sign-in ON this page. The claim token is minted while STILL
+  // anon (it records the anon uid); after verifyOtp swaps the session to the
+  // real account, claim_collect_uploads() moves the uploads across. Works
+  // for brand-new accounts AND forgotten ones (signInWithOtp signs into the
+  // existing account when the email is known).
+  const [claimPhase, setClaimPhase] = useState(null); // null | "email" | "code"
+  const [claimEmail, setClaimEmail] = useState("");
+  const [claimCode, setClaimCode] = useState("");
+  const [claimToken, setClaimToken] = useState(null);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimErr, setClaimErr] = useState("");
+  const [claimCaptcha, setClaimCaptcha] = useState(null);
+  const claimCaptchaRef = useRef(null);
+
+  async function startClaimEmail() {
+    if (!claimEmail.trim() || !claimCaptcha || claimBusy) return;
+    setClaimBusy(true);
+    setClaimErr("");
+    try {
+      const { data: minted, error: mintErr } = await supabase.rpc(
+        "create_collect_claim"
+      );
+      if (mintErr) throw mintErr;
+      setClaimToken(minted);
+      const { error } = await supabase.auth.signInWithOtp({
+        email: claimEmail.trim(),
+        options: { captchaToken: claimCaptcha, shouldCreateUser: true },
+      });
+      claimCaptchaRef.current?.reset();
+      setClaimCaptcha(null);
+      if (error) throw error;
+      setClaimPhase("code");
+    } catch (e) {
+      console.error("Claim email failed:", e);
+      setClaimErr("Couldn't send the code — try again.");
+    }
+    setClaimBusy(false);
+  }
+
+  async function submitClaimCode() {
+    if (!claimCode.trim() || claimBusy) return;
+    setClaimBusy(true);
+    setClaimErr("");
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: claimEmail.trim(),
+        token: claimCode.trim(),
+        type: "email",
+      });
+      if (error) throw error;
+      const uid = data?.user?.id;
+      if (!uid) throw new Error("no user");
+      await supabase.auth.getSession(); // settle the new JWT
+      if (claimToken) {
+        const { error: cErr } = await supabase.rpc("claim_collect_uploads", {
+          p_claim: claimToken,
+        });
+        if (cErr) console.error("Claim reassign failed:", cErr);
+      }
+      // Seed the door name ONLY if the account has none — a forgotten
+      // account's real name must never be overwritten.
+      if (displayName) {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("id", uid)
+          .maybeSingle();
+        if (!prof?.display_name) {
+          await supabase.rpc("set_guest_name", { p_name: displayName });
+        }
+      }
+      setMe({ id: uid, isAnon: false }); // relation effect takes over the exit
+      setClaimPhase(null);
+    } catch (e) {
+      console.error("Claim code failed:", e);
+      setClaimErr("That code didn't work — check it and try again.");
+    }
+    setClaimBusy(false);
   }
 
   async function addOwnerAsFriend() {
@@ -436,19 +532,92 @@ export function CollectScreen({ token }) {
                   {landedCount === 1 ? "Photo added" : `${landedCount} added`} to{" "}
                   {ctx.owner_name}'s night
                 </p>
-                {me.isAnon && (
+                {me.isAnon && claimPhase === null && (
                   <>
                     <p className="mt-2 text-xs text-neutral-500">
-                      Want to see everyone's photos from the night? Get Flanit
-                      and add {ctx.owner_name} as a friend.
+                      Want to see everyone's photos from the night? Create an
+                      account (or sign back in) and ask {ctx.owner_name} to
+                      add you — your photos come with you.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => setClaimPhase("email")}
+                      className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white active:scale-95 transition"
+                    >
+                      Sign up / sign in
+                    </button>
                     <a
                       href="/install"
-                      className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
+                      className="ml-3 text-xs font-medium text-neutral-500 underline underline-offset-2"
                     >
-                      Get Flanit
+                      or get the app
                     </a>
                   </>
+                )}
+                {me.isAnon && claimPhase === "email" && (
+                  <div className="mt-3">
+                    <input
+                      type="email"
+                      value={claimEmail}
+                      onChange={(e) => setClaimEmail(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && startClaimEmail()}
+                      placeholder="you@email.com"
+                      className="w-full rounded-2xl bg-neutral-50 px-4 py-3.5 text-base outline-none border border-neutral-100 focus:border-[#455d3b]"
+                    />
+                    <div className="mt-2 flex justify-center">
+                      <Turnstile
+                        ref={claimCaptchaRef}
+                        siteKey={TURNSTILE_SITE_KEY}
+                        onSuccess={setClaimCaptcha}
+                        onExpire={() => setClaimCaptcha(null)}
+                        onError={() => setClaimCaptcha(null)}
+                        options={{
+                          theme: "light",
+                          appearance: "interaction-only",
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        claimBusy || !claimEmail.trim() || !claimCaptcha
+                      }
+                      onClick={startClaimEmail}
+                      className="mt-2 w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white disabled:bg-neutral-300 active:scale-[0.99] transition"
+                    >
+                      {claimBusy ? "Sending…" : "Email me a code"}
+                    </button>
+                    {claimErr && (
+                      <p className="mt-2 text-xs text-red-600">{claimErr}</p>
+                    )}
+                  </div>
+                )}
+                {me.isAnon && claimPhase === "code" && (
+                  <div className="mt-3">
+                    <p className="text-xs text-neutral-500">
+                      We emailed a 6-digit code to {claimEmail.trim()}.
+                    </p>
+                    <input
+                      inputMode="numeric"
+                      value={claimCode}
+                      onChange={(e) => setClaimCode(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && submitClaimCode()}
+                      placeholder="123456"
+                      maxLength={6}
+                      className="mt-2 w-full rounded-2xl bg-neutral-50 px-4 py-3.5 text-base tracking-widest outline-none border border-neutral-100 focus:border-[#455d3b]"
+                    />
+                    <button
+                      type="button"
+                      disabled={claimBusy || !claimCode.trim()}
+                      onClick={submitClaimCode}
+                      className="mt-2 w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white disabled:bg-neutral-300 active:scale-[0.99] transition"
+                    >
+                      {claimBusy ? "Checking…" : "Sign in"}
+                    </button>
+                    {claimErr && (
+                      <p className="mt-2 text-xs text-red-600">{claimErr}</p>
+                    )}
+                  </div>
                 )}
                 {!me.isAnon && relation === "friend" && (
                   <>

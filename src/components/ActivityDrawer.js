@@ -965,6 +965,87 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         }));
     })();
 
+    // ---- Guest uploads (collect links, July 25): "[Name] added N photos
+    // to your night" — items for MY shards (other participants get the
+    // push; their card shows the photos regardless). ----
+    const guestUploadP = (async () => {
+      const since = new Date(Date.now() - 7 * 864e5).toISOString();
+      const { data: ph } = await supabase
+        .from("activity_photos")
+        .select("id, activity_id, user_id, created_at")
+        .eq("via_link", true)
+        .neq("user_id", userId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (!ph || ph.length === 0) return [];
+      const actIds = Array.from(new Set(ph.map((r) => r.activity_id)));
+      const { data: acts } = await supabase
+        .from("activities")
+        .select("id, user_id, venue_id, label")
+        .in("id", actIds)
+        .eq("user_id", userId);
+      if (!acts || acts.length === 0) return [];
+      const gActById = Object.fromEntries(acts.map((a) => [a.id, a]));
+      const mine = ph.filter((r) => gActById[r.activity_id]);
+      if (mine.length === 0) return [];
+      const upIds = Array.from(new Set(mine.map((r) => r.user_id)));
+      const gVenueIds = Array.from(
+        new Set(acts.map((a) => a.venue_id).filter(Boolean))
+      );
+      const [profsRes, vRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", upIds),
+        gVenueIds.length
+          ? supabase.from("venues").select("*").in("id", gVenueIds)
+          : { data: [] },
+      ]);
+      const gpById = Object.fromEntries(
+        (profsRes.data || []).map((p) => [p.id, p])
+      );
+      const gvById = Object.fromEntries(
+        (vRes.data || []).map((v) => [v.id, v])
+      );
+      // One item per (shard, uploader): count + newest photo for deep-link.
+      const groups = new Map();
+      for (const r of mine) {
+        const k = `${r.activity_id}_${r.user_id}`;
+        const g =
+          groups.get(k) || {
+            count: 0,
+            latest: r.created_at,
+            photoId: r.id,
+            activity_id: r.activity_id,
+            user_id: r.user_id,
+          };
+        g.count += 1;
+        if (r.created_at > g.latest) {
+          g.latest = r.created_at;
+          g.photoId = r.id;
+        }
+        groups.set(k, g);
+      }
+      return Array.from(groups.values()).map((g) => {
+        const act = gActById[g.activity_id];
+        return {
+          kind: "guest_upload",
+          id: `gup_${g.activity_id}_${g.user_id}`,
+          activityId: g.activity_id,
+          ownerId: userId, // my shard — the thread opens as my own card
+          photoId: g.photoId,
+          count: g.count,
+          profile: gpById[g.user_id] || null,
+          venueId: act.venue_id,
+          venueName: gvById[act.venue_id]?.name || "your night",
+          venueObj: gvById[act.venue_id] || null,
+          label: act.label || null,
+          timestamp: g.latest,
+        };
+      });
+    })();
+
     // Everything lands together — one concurrent wave instead of a waterfall.
     const [
       [incomingItems, acceptedItems],
@@ -980,6 +1061,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       friendNewsItems,
       joinReqItems,
       venueShareItems,
+      guestUploadItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -994,6 +1076,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       friendNewsP,
       joinReqP,
       venueShareP,
+      guestUploadP,
     ]);
 
     const all = [
@@ -1012,6 +1095,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...friendNewsItems,
       ...joinReqItems,
       ...venueShareItems,
+      ...guestUploadItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -1698,6 +1782,39 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             Decline
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "guest_upload") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <button
+          type="button"
+          onClick={() =>
+            onOpenThread?.({
+              activityId: item.activityId,
+              ownerId: item.ownerId,
+              ownerName: "You",
+              venueName: item.venueName,
+              label: item.label || null,
+              venueObj: item.venueObj || null,
+              timestamp: item.timestamp,
+              photoId: item.photoId, // lightbox deep-link
+            })
+          }
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong> added{" "}
+              {item.count === 1 ? "a photo" : `${item.count} photos`} to your
+              night at <strong className="font-medium">{item.venueName}</strong>
+            </p>
+            <p className="text-[11px] text-[#455d3b]">Tap to see</p>
+          </div>
+        </button>
       </div>
     );
   }
