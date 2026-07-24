@@ -131,6 +131,76 @@ async function grabVideoFrame(file) {
   }
 }
 
+// VIA-LINK upload (collect links, July 24). Storage objects land in the
+// GUEST's own uid folder (existing storage write policy covers anon-auth
+// users), but the ROW attaches to the LINK OWNER's activity through the
+// add_photo_via_link RPC — the only path past the own-activity insert RLS.
+// Revocation + per-guest/per-link caps are enforced inside the RPC at
+// insert time, so a revoked link dies even for an already-open page.
+// Returns { id, url, kind } — url is the signed web derivative for the
+// guest's own-thumbnails confirmation strip.
+export async function uploadViaCollectLink(userId, token, activityId, file, onProgress) {
+  const isVideo = (file.type || "").startsWith("video/");
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const base = `${userId}/${activityId}/${stamp}`;
+  const origPath = `${base}_orig.${extOf(file)}`;
+  const webPath = `${base}_web.jpg`;
+
+  let webBlob;
+  if (isVideo) {
+    if ((file.size || 0) > MAX_VIDEO_BYTES) {
+      const err = new Error("Video over the 50MB limit");
+      err.code = "too_big";
+      throw err;
+    }
+    webBlob = await makeVideoThumb(file);
+  } else {
+    webBlob = await makeWebDerivative(file);
+  }
+
+  const { error: webErr } = await supabase.storage
+    .from(BUCKET)
+    .upload(webPath, webBlob, { contentType: "image/jpeg" });
+  if (webErr) throw webErr;
+
+  try {
+    if (isVideo) {
+      await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
+    } else {
+      const { error: origErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(origPath, file, { contentType: file.type || "image/jpeg" });
+      if (origErr) throw origErr;
+    }
+  } catch (origErr) {
+    await supabase.storage.from(BUCKET).remove([webPath]);
+    throw origErr;
+  }
+
+  const { data: newId, error: rpcErr } = await supabase.rpc(
+    "add_photo_via_link",
+    {
+      p_token: token,
+      p_web_path: webPath,
+      p_orig_path: origPath,
+      p_bytes: (file.size || 0) + (webBlob.size || 0),
+      p_kind: isVideo ? "video" : "photo",
+    }
+  );
+  if (rpcErr) {
+    await supabase.storage.from(BUCKET).remove([webPath, origPath]);
+    throw rpcErr;
+  }
+  const { data: signed } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(webPath, SIGNED_URL_TTL);
+  return {
+    id: newId,
+    url: signed?.signedUrl || null,
+    kind: isVideo ? "video" : "photo",
+  };
+}
+
 function extOf(file) {
   const fromName = (file.name || "").split(".").pop()?.toLowerCase();
   if (fromName && fromName.length <= 5) return fromName;

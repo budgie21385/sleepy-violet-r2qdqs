@@ -5,6 +5,7 @@ import "./tailwind.css";
 import App from "./App";
 import { PublicVenuePage } from "./components/PublicVenuePage";
 import { InstallScreen } from "./components/InstallScreen";
+import { CollectScreen } from "./components/CollectScreen";
 import { UpdatePill } from "./components/UpdatePill";
 
 const rootElement = document.getElementById("root");
@@ -16,6 +17,8 @@ const root = createRoot(rootElement);
 // Anything else → the app.
 const publicVenue = window.location.pathname.match(/^\/v\/(\d+)/);
 const installPage = /^\/install\/?$/.test(window.location.pathname);
+// Collect link: flanit.co/c/<token> — guest photo drop for a check-in.
+const collectPage = window.location.pathname.match(/^\/c\/([A-Za-z0-9_-]+)/);
 
 // Keep the push service worker alive across visits (push-only SW — it never
 // intercepts fetches, so it can't serve stale bundles).
@@ -31,6 +34,8 @@ root.render(
       <PublicVenuePage venueId={publicVenue[1]} />
     ) : installPage ? (
       <InstallScreen />
+    ) : collectPage ? (
+      <CollectScreen token={collectPage[1]} />
     ) : (
       <App />
     )}

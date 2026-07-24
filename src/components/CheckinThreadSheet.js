@@ -298,6 +298,82 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const listRef = useRef(null);
   const isOwner = thread.ownerId === userId;
   const uploadTargetId = isOwner ? thread.activityId : myActivityId;
+  // COLLECT LINK (July 24) — one shared, revocable link per check-in that
+  // lets ANYONE (no app, no account) drop photos onto this night. Shard
+  // rule: the link belongs to YOUR shard (uploadTargetId), so on a shared
+  // night each participant manages their own. null = loading, false = none.
+  const [collectLink, setCollectLink] = useState(null);
+  const [collectBusy, setCollectBusy] = useState(false);
+
+  useEffect(() => {
+    if (view !== "add" || !uploadTargetId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("checkin_collect_links")
+        .select("id, token, revoked")
+        .eq("activity_id", uploadTargetId)
+        .eq("revoked", false)
+        .maybeSingle();
+      if (!cancelled) setCollectLink(data || false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, uploadTargetId]);
+
+  async function collectAction(kind) {
+    // kind: "mint" | "revoke" | "rotate". Rotate = revoke + mint.
+    if (collectBusy || !uploadTargetId) return;
+    setCollectBusy(true);
+    try {
+      if (kind !== "mint" && collectLink) {
+        const { data: gone, error } = await supabase
+          .from("checkin_collect_links")
+          .update({ revoked: true })
+          .eq("id", collectLink.id)
+          .select("id");
+        if (error) throw error;
+        // RLS-filtered updates return success with ZERO rows — check.
+        if (!gone || gone.length === 0) throw new Error("revoke matched 0 rows");
+        setCollectLink(false);
+        if (kind === "revoke") showToast?.("Link turned off");
+      }
+      if (kind !== "revoke") {
+        const token = (
+          crypto.randomUUID?.() ||
+          `${Date.now()}${Math.random().toString(36).slice(2)}`
+        ).replace(/-/g, "");
+        const { data: row, error } = await supabase
+          .from("checkin_collect_links")
+          .insert({ activity_id: uploadTargetId, token })
+          .select("id, token, revoked")
+          .single();
+        if (error) throw error;
+        setCollectLink(row);
+        if (kind === "rotate") showToast?.("New link — old one is dead");
+      }
+    } catch (e) {
+      console.error("Collect link action failed:", e);
+      showToast?.("Couldn't do that");
+    }
+    setCollectBusy(false);
+  }
+
+  function collectUrl() {
+    return collectLink ? `https://flanit.co/c/${collectLink.token}` : "";
+  }
+
+  function shareCollectLink() {
+    if (!collectLink) return;
+    const text = `Add your photos from ${thread.venueName} 📸 ${collectUrl()}`;
+    if (navigator.share) {
+      navigator.share({ text }).catch(() => {});
+    } else {
+      navigator.clipboard?.writeText(collectUrl());
+      showToast?.("Link copied");
+    }
+  }
   // THE NIGHT GRAPH (July 23 — Mark: nights are defined by INVITATIONS, not
   // venue coincidence). The card merges shards connected to this one through
   // joined_from edges: walk UP to the night's root, then collect the tree
@@ -582,7 +658,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     if (!lightbox || deleting) return;
     setDeleting(true);
     try {
-      await deleteCheckinPhoto(lightbox);
+      if (lightbox.user_id === userId) {
+        // Own media: client-side path (RLS delete_own + own-folder storage).
+        await deleteCheckinPhoto(lightbox);
+      } else {
+        // Guest media on YOUR shard (via_link): the objects live in the
+        // guest's uid folder — only the service role can remove them.
+        const { data: sess } = await supabase.auth.getSession();
+        const resp = await fetch("/api/delete-media", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${sess?.session?.access_token || ""}`,
+          },
+          body: JSON.stringify({ photoId: lightbox.id }),
+        });
+        if (!resp.ok) throw new Error(`delete-media ${resp.status}`);
+      }
       setPhotos((prev) => prev.filter((p) => p.id !== lightbox.id));
       setLightbox(null);
     } catch (e) {
@@ -1166,6 +1258,79 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </p>
               </>
             )}
+            {/* COLLECT LINK — the non-Flanit door (Mark's mock). One link
+                for the group chat; guests land on /c/<token>, name at the
+                door, photos onto THIS night. */}
+            <div className="mt-6 border-t border-neutral-100 pt-4">
+              <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                Anyone else — collect photos
+              </p>
+              <p className="mb-3 text-xs text-neutral-500">
+                One link for the group chat. No app or account needed — their
+                photos land on this night, visible to your friends.
+              </p>
+              {collectLink === null && (
+                <p className="text-xs text-neutral-400">Loading…</p>
+              )}
+              {collectLink === false && (
+                <button
+                  type="button"
+                  disabled={collectBusy}
+                  onClick={() => collectAction("mint")}
+                  className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-50"
+                >
+                  {collectBusy ? "Creating…" : "Create collect link"}
+                </button>
+              )}
+              {collectLink && (
+                <>
+                  <div className="flex items-center gap-2 rounded-2xl border border-neutral-200 px-3 py-2">
+                    <span className="flex-1 truncate text-xs text-neutral-600">
+                      flanit.co/c/{collectLink.token}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(collectUrl());
+                        showToast?.("Link copied");
+                      }}
+                      className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1 text-[11px] font-medium text-white active:scale-95 transition"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={shareCollectLink}
+                      className="flex-1 rounded-full border border-[#455d3b] py-2 text-xs font-medium text-[#455d3b] active:scale-95 transition"
+                    >
+                      Share
+                    </button>
+                    <button
+                      type="button"
+                      disabled={collectBusy}
+                      onClick={() => collectAction("rotate")}
+                      className="flex-1 rounded-full border border-neutral-200 py-2 text-xs font-medium text-neutral-600 active:scale-95 transition disabled:opacity-50"
+                    >
+                      New link
+                    </button>
+                    <button
+                      type="button"
+                      disabled={collectBusy}
+                      onClick={() => collectAction("revoke")}
+                      className="flex-1 rounded-full border border-neutral-200 py-2 text-xs font-medium text-red-500 active:scale-95 transition disabled:opacity-50"
+                    >
+                      Turn off
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-neutral-400">
+                    Up to 10 photos per guest · you can delete anything a
+                    guest adds · "New link" kills the old one.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         )}
         <input
@@ -1704,7 +1869,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     {timeAgoShort(lightbox.created_at)}
                   </span>
                 </button>
-                {lightbox.user_id === userId && (
+                {(lightbox.user_id === userId ||
+                  (lightbox.via_link &&
+                    lightbox.activity_id === uploadTargetId)) && (
                   <button
                     type="button"
                     disabled={deleting}
