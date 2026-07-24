@@ -1837,7 +1837,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             <p className="text-sm text-neutral-900">
               <strong className="font-medium">{name}</strong> added{" "}
               {item.count === 1 ? "a photo" : `${item.count} photos`} to your
-              night at <strong className="font-medium">{item.venueName}</strong>
+              check-in at{" "}
+              <strong className="font-medium">{item.venueName}</strong>
             </p>
             <p className="text-[11px] text-[#455d3b]">Tap to see</p>
           </div>

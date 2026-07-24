@@ -395,7 +395,7 @@ export function CollectScreen({ token }) {
       sendPush(
         ctx.owner_id,
         "New friend request",
-        `${displayName || "Someone"} from your night wants to add you`
+        `${displayName || "Someone"} from ${ctx.venue_name} wants to add you`
       );
   }
 
@@ -405,7 +405,7 @@ export function CollectScreen({ token }) {
   if (ctx === undefined) {
     return (
       <div className="min-h-screen bg-[#fdf6f0] flex items-center justify-center">
-        <p className="text-sm text-neutral-500">Opening the night…</p>
+        <p className="text-sm text-neutral-500">Opening…</p>
       </div>
     );
   }

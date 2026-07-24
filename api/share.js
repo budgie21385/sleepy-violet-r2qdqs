@@ -117,7 +117,7 @@ export default async function handler(req, res) {
       // homepage value hijacked every tap. resolve_collect_link is
       // anon-callable, so crawlers get real context too.
       url = `${origin}/c/${token}`;
-      title = "Add your photos to the night 📸";
+      title = "Add your photos 📸";
       description = "No app, no account — just pick your photos.";
       image = `${origin}/og-collect.png`;
       const r = await sb("rpc/resolve_collect_link", {
@@ -127,10 +127,10 @@ export default async function handler(req, res) {
       const rows = await r.json();
       const c = Array.isArray(rows) ? rows[0] : null;
       if (c && c.owner_name) {
-        title = `Add your photos to ${c.owner_name}'s night 📸`;
-        description = `${c.venue_name}${
+        title = `Add your photos from ${c.venue_name} 📸`;
+        description = `${c.owner_name} is collecting everyone's photos${
           c.label ? ` · ${c.label}` : ""
-        } — no app, no account, just pick your photos.`;
+        } — no app, no account needed.`;
       }
     }
   } catch (e) {
