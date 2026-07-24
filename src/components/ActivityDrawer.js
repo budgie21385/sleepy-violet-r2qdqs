@@ -928,6 +928,43 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return inviteItems;
     })();
 
+    // ---- Venue shares: "[X] shared [venue] with you" → opens the card ----
+    const venueShareP = (async () => {
+      const { data: rows } = await supabase
+        .from("venue_shares")
+        .select("id, from_user, venue_id, created_at")
+        .eq("to_user", userId)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (!rows || rows.length === 0) return [];
+      const fromIds = Array.from(new Set(rows.map((r) => r.from_user)));
+      const vIds = Array.from(new Set(rows.map((r) => r.venue_id)));
+      const [profsRes, vRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", fromIds),
+        supabase.from("venues").select("*").in("id", vIds),
+      ]);
+      const pById = Object.fromEntries(
+        (profsRes.data || []).map((p) => [p.id, p])
+      );
+      const vShareById = Object.fromEntries(
+        (vRes.data || []).map((v) => [v.id, v])
+      );
+      return rows
+        .filter((r) => vShareById[r.venue_id])
+        .map((r) => ({
+          kind: "venue_share",
+          id: `vshare_${r.id}`,
+          otherId: r.from_user,
+          profile: pById[r.from_user] || null,
+          venueName: vShareById[r.venue_id]?.name || "a spot",
+          venueObj: vShareById[r.venue_id] || null,
+          timestamp: r.created_at,
+        }));
+    })();
+
     // Everything lands together — one concurrent wave instead of a waterfall.
     const [
       [incomingItems, acceptedItems],
@@ -942,6 +979,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       sessionNudgeItems,
       friendNewsItems,
       joinReqItems,
+      venueShareItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -955,6 +993,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       sessionNudgeP,
       friendNewsP,
       joinReqP,
+      venueShareP,
     ]);
 
     const all = [
@@ -972,6 +1011,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...sessionNudgeItems,
       ...friendNewsItems,
       ...joinReqItems,
+      ...venueShareItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -1658,6 +1698,28 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             Decline
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "venue_share") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <button
+          type="button"
+          onClick={() => item.venueObj && onOpenVenue?.(item.venueObj)}
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <FriendAvatar profile={item.profile} small />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-900">
+              <strong className="font-medium">{name}</strong> shared{" "}
+              <strong className="font-medium">{item.venueName}</strong> with
+              you
+            </p>
+            <p className="text-[11px] text-[#455d3b]">Tap to have a look</p>
+          </div>
+        </button>
       </div>
     );
   }

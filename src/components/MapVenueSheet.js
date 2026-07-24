@@ -27,6 +27,7 @@ import {
 } from "./VenueBits";
 import { getMapsUrl } from "../lib/venueLogic";
 import { useVenueDetails } from "../lib/venueDetails";
+import { sendPush } from "../lib/push";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
 
@@ -299,6 +300,62 @@ export function MapVenueSheet({
     }
   }
 
+  // In-app share (July 24, Mark: "you should be able to share it with your
+  // friends on the app"): the Share button opens a friend picker; each send
+  // = a venue_shares row + a push; the friend gets an Activity item that
+  // opens this card. "Share elsewhere" keeps the external link path.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareFriends, setShareFriends] = useState(null); // null = not loaded
+  const [shareSent, setShareSent] = useState({}); // friendId -> "sent"|"error"
+
+  async function openShareSheet() {
+    setShareOpen(true);
+    if (shareFriends !== null || !userId) return;
+    const { data: fr } = await supabase
+      .from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+    const ids = Array.from(
+      new Set(
+        (fr || []).map((f) =>
+          f.requester_id === userId ? f.addressee_id : f.requester_id
+        )
+      )
+    );
+    if (ids.length === 0) {
+      setShareFriends([]);
+      return;
+    }
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("id, display_name, username, avatar_url")
+      .in("id", ids)
+      .order("display_name", { ascending: true });
+    setShareFriends(profs || []);
+  }
+
+  async function sendVenueShare(friendId) {
+    if (shareSent[friendId] === "sent") return;
+    setShareSent((prev) => ({ ...prev, [friendId]: "sending" }));
+    const { error } = await supabase.from("venue_shares").insert({
+      from_user: userId,
+      to_user: friendId,
+      venue_id: venue.id,
+    });
+    if (error) {
+      console.error("Venue share failed:", error);
+      setShareSent((prev) => ({ ...prev, [friendId]: "error" }));
+      return;
+    }
+    setShareSent((prev) => ({ ...prev, [friendId]: "sent" }));
+    sendPush(
+      friendId,
+      "📍 A spot for you",
+      `${venue.name} — shared with you on Flanit`
+    );
+  }
+
   // Share the public card link (flanit.co/v/<id>) — opens this card with no
   // login. Native share sheet on mobile; copy-to-clipboard fallback elsewhere.
   async function handleShare() {
@@ -514,7 +571,7 @@ export function MapVenueSheet({
           )}
           <button
             type="button"
-            onClick={handleShare}
+            onClick={userId ? openShareSheet : handleShare}
             aria-label="Share"
             className="relative flex h-11 w-11 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 active:scale-95 transition"
           >
@@ -560,6 +617,88 @@ export function MapVenueSheet({
           )}
         </div>
       </div>
+      {/* In-app share sheet — friends first, external link as the exit. */}
+      {shareOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-end"
+          style={{ zIndex: zIndex + 300 }}
+          onClick={() => setShareOpen(false)}
+        >
+          <div
+            className="w-full max-h-[60%] rounded-t-2xl bg-white flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-4 pb-2">
+              <p className="text-sm font-semibold text-neutral-900">
+                Share {venue.name}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShareOpen(false)}
+                aria-label="Close"
+                className="p-1 text-neutral-400"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto overscroll-contain px-5 pb-3">
+              {shareFriends === null && (
+                <p className="py-2 text-xs text-neutral-400">
+                  Loading friends…
+                </p>
+              )}
+              {shareFriends !== null && shareFriends.length === 0 && (
+                <p className="py-2 text-xs text-neutral-400">
+                  No friends on Flanit yet — share the link instead.
+                </p>
+              )}
+              <div className="space-y-1">
+                {(shareFriends || []).map((f) => (
+                  <div
+                    key={f.id}
+                    className="flex items-center gap-3 rounded-xl px-1 py-2"
+                  >
+                    <FriendAvatar profile={f} small />
+                    <span className="flex-1 min-w-0 truncate text-sm text-neutral-900">
+                      {f.display_name || "Someone"}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={shareSent[f.id] === "sending"}
+                      onClick={() => sendVenueShare(f.id)}
+                      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium active:scale-95 transition disabled:opacity-50 ${
+                        shareSent[f.id] === "sent"
+                          ? "bg-[#edf2eb] border border-[#cdd9c6] text-[#455d3b]"
+                          : "bg-[#455d3b] text-white"
+                      }`}
+                    >
+                      {shareSent[f.id] === "sent"
+                        ? "Sent ✓"
+                        : shareSent[f.id] === "sending"
+                        ? "Sending…"
+                        : shareSent[f.id] === "error"
+                        ? "Retry"
+                        : "Send"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-neutral-100 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShareOpen(false);
+                  handleShare();
+                }}
+                className="w-full rounded-full border border-neutral-200 py-2.5 text-sm font-medium text-neutral-700 active:scale-[0.99] transition"
+              >
+                Share elsewhere
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );
