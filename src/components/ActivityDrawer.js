@@ -468,6 +468,82 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             };
           });
       }
+      // MUTUAL CONSENT ACROSS SHARDS (July 24 — Mark + Renasha's coffee):
+      // both answered "Did you go?" separately, then each tagged the OTHER
+      // from their own card. Two consents existed on two shards, yet both
+      // got asked to accept. Rule: if I've already tagged the tagger on my
+      // OWN same-night check-in at the same venue, my consent is on record
+      // — auto-accept their tag silently, link my shard into the night, and
+      // render no ask. (Their side resolves symmetrically when they open
+      // Activity; my outgoing tag is theirs to complete, not mine.)
+      if (tagNudgeItems.length > 0) {
+        const W = 12 * 60 * 60 * 1000;
+        const kept = [];
+        for (const it of tagNudgeItems) {
+          try {
+            if (!it.venueId) {
+              kept.push(it);
+              continue;
+            }
+            const ts = new Date(it.checkinTimestamp).getTime();
+            const { data: myActs } = await supabase
+              .from("activities")
+              .select("id, joined_from")
+              .eq("user_id", userId)
+              .eq("kind", "checkin")
+              .eq("venue_id", it.venueId)
+              .gte("created_at", new Date(ts - W).toISOString())
+              .lte("created_at", new Date(ts + W).toISOString());
+            if (!myActs || myActs.length === 0) {
+              kept.push(it);
+              continue;
+            }
+            const { data: myTags } = await supabase
+              .from("activity_tags")
+              .select("id, activity_id, requested_by")
+              .in("activity_id", myActs.map((a) => a.id))
+              .eq("tagged_user_id", it.otherId);
+            // My initiative only — their self-request on my shard is THEIR
+            // consent, not mine.
+            const myConsent = (myTags || []).find(
+              (t) => t.requested_by !== it.otherId
+            );
+            if (!myConsent) {
+              kept.push(it);
+              continue;
+            }
+            // Two consents → complete silently. No push, no toast.
+            await supabase
+              .from("activity_tags")
+              .update({
+                status: "accepted",
+                responded_at: new Date().toISOString(),
+              })
+              .eq("id", it.tagId);
+            // Link my shard into their night — unless THEIR shard already
+            // points at mine (they resolved first; a back-edge would cycle
+            // the root walk).
+            const shard = myActs.find((a) => a.id === myConsent.activity_id);
+            if (shard && !shard.joined_from && shard.id !== it.activityId) {
+              const { data: theirs } = await supabase
+                .from("activities")
+                .select("joined_from")
+                .eq("id", it.activityId)
+                .maybeSingle();
+              if (theirs?.joined_from !== shard.id) {
+                await supabase
+                  .from("activities")
+                  .update({ joined_from: it.activityId })
+                  .eq("id", shard.id);
+              }
+            }
+          } catch (e) {
+            console.error("Cross-shard auto-accept failed:", e);
+            kept.push(it); // fall back to the manual ask
+          }
+        }
+        tagNudgeItems = kept;
+      }
       return tagNudgeItems;
     })();
 
