@@ -4,7 +4,7 @@
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Send, ChevronLeft, ChevronRight, UserPlus } from "lucide-react";
+import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
@@ -281,6 +281,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   useEffect(() => {
     setReactSheet(null);
   }, [thread.activityId, lightbox?.id]);
+
+  // Lock the page behind while the card is up — drags on non-scrolling
+  // card areas were panning the Activity list underneath (Mark, July 24).
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
   // In-flight tiles come from the MODULE-LEVEL store (lib/photos), not local
   // state — so closing and reopening the card still shows "Uploading…" for
   // anything mid-flight, and finishing uploads refresh any mounted card.
@@ -432,9 +442,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           type="button"
           aria-label={openReactFor === c.id ? "Close" : "Add reaction"}
           onClick={() => setOpenReactFor(openReactFor === c.id ? null : c.id)}
-          className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-neutral-300 text-[13px] leading-none text-neutral-400 active:scale-90 transition"
+          className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-neutral-300 text-neutral-400 active:scale-90 transition"
         >
-          {openReactFor === c.id ? "×" : "+"}
+          {openReactFor === c.id ? <X size={11} /> : <Plus size={11} />}
         </button>
         {openReactFor === c.id &&
           REACTION_SET.map((e) => (
@@ -891,9 +901,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   }, [clusterKey, myActivityId]);
 
   useEffect(() => {
-    // Keep the newest comment in view as the list grows.
+    // Keep the newest comment in view as the list grows — but only in the
+    // expanded comments view. listRef now scrolls the WHOLE card body
+    // (July 24), so auto-scrolling in card view would leap past the grid.
+    if (view !== "comments") return;
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [comments]);
+  }, [comments, view]);
 
   async function send() {
     const text = body.trim();
@@ -1083,7 +1096,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         {/* Add-people view (Mark's mock): friends as ROWS with Add buttons,
             not a chip cloud. Collect link section lands here in Stage 2. */}
         {view === "add" && isOwner && (
-          <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
             <button
               type="button"
               onClick={() => setView("card")}
@@ -1166,6 +1179,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             e.target.value = "";
           }}
         />
+        {/* ONE SCROLLER for the whole night (July 24 — Mark: "you can only
+            see one comment at a time"). The fixed-height card was stacking
+            grid + join + reactions as rigid rows and giving comments only
+            the leftover sliver; drags on the non-scrolling grid panned the
+            page behind. Now everything between header and input scrolls as
+            one region. overscroll-contain stops chaining to the page. */}
+        {(view === "card" || view === "comments") && (
+        <div
+          ref={listRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain"
+        >
         {/* Photo GRID (July 23 redesign) — 3-up album, capped with a
             "+N more" tile; a small strip in the expanded-comments view. */}
         {view === "card" && (photos.length > 0 || uploadTargetId) && (
@@ -1351,10 +1375,109 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           />
         </div>
         )}
+        {view === "comments" && photos.length > 0 && (
+          <div className="px-4 pt-3">
+            <button
+              type="button"
+              onClick={() => setView("card")}
+              className="mb-2 text-xs font-medium text-[#455d3b]"
+            >
+              ‹ Back to the night
+            </button>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {photos.map((p) => (
+                <button
+                  key={`mini_${p.id}`}
+                  type="button"
+                  onClick={() => setLightbox(p)}
+                  className="shrink-0"
+                >
+                  <img
+                    src={p.url}
+                    alt=""
+                    className="h-14 w-14 rounded-lg object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="px-5 py-3">
+          {comments === null && (
+            <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
+          )}
+          {comments !== null && comments.length === 0 && (
+            <div className="py-4 text-center">
+              {thread.ownerProfile ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenProfile?.(thread.ownerId)}
+                  className="inline-flex flex-col items-center gap-2 active:scale-95 transition"
+                >
+                  <FriendAvatar profile={thread.ownerProfile} />
+                  <span className="text-sm font-medium text-neutral-800">
+                    {thread.ownerProfile.display_name || thread.ownerName}
+                  </span>
+                  {thread.ownerProfile.username && (
+                    <span className="-mt-1.5 text-xs text-neutral-500">
+                      @{thread.ownerProfile.username}
+                    </span>
+                  )}
+                </button>
+              ) : null}
+              <p className="text-sm text-neutral-500 mt-2">
+                No comments yet — say something.
+              </p>
+            </div>
+          )}
+          <div className="space-y-3">
+            {(view === "comments"
+              ? comments || []
+              : (comments || []).slice(-2)
+            ).map((c) => (
+              <div key={c.id} className="flex items-start gap-2.5">
+                <button
+                  type="button"
+                  aria-label="View profile"
+                  onClick={() => onOpenProfile?.(c.user_id)}
+                  className="shrink-0 active:scale-95 transition"
+                >
+                  <FriendAvatar profile={c.profile} small />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-neutral-500">
+                    <button
+                      type="button"
+                      onClick={() => onOpenProfile?.(c.user_id)}
+                      className="font-medium text-neutral-800"
+                    >
+                      {c.profile?.display_name || "Someone"}
+                    </button>{" "}
+                    · {timeAgoShort(c.created_at)}
+                  </p>
+                  <p className="text-sm text-neutral-900 break-words">{c.body}</p>
+                  {commentReactionRow(c)}
+                </div>
+              </div>
+            ))}
+          </div>
+          {view === "card" && (comments || []).length > 2 && (
+            <button
+              type="button"
+              onClick={() => setView("comments")}
+              className="mt-3 w-full text-center text-xs font-medium text-[#455d3b]"
+            >
+              See more comments ({comments.length})
+            </button>
+          )}
+        </div>
+        </div>
+        )}
         {/* People view — the album's cast, split into your friends and
-            "others in the album" with Add friend (graph growth, per mock). */}
+            "others in the album" with Add friend (graph growth, per mock).
+            Lives OUTSIDE the card/comments scroller (own view, own scroll). */}
         {view === "people" && (
-          <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
             <button
               type="button"
               onClick={() => setView("card")}
@@ -1452,104 +1575,6 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               );
             })()}
           </div>
-        )}
-        {view === "comments" && photos.length > 0 && (
-          <div className="px-4 pt-3">
-            <button
-              type="button"
-              onClick={() => setView("card")}
-              className="mb-2 text-xs font-medium text-[#455d3b]"
-            >
-              ‹ Back to the night
-            </button>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {photos.map((p) => (
-                <button
-                  key={`mini_${p.id}`}
-                  type="button"
-                  onClick={() => setLightbox(p)}
-                  className="shrink-0"
-                >
-                  <img
-                    src={p.url}
-                    alt=""
-                    className="h-14 w-14 rounded-lg object-cover"
-                  />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {(view === "card" || view === "comments") && (
-        <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-3">
-          {comments === null && (
-            <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
-          )}
-          {comments !== null && comments.length === 0 && (
-            <div className="py-4 text-center">
-              {thread.ownerProfile ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenProfile?.(thread.ownerId)}
-                  className="inline-flex flex-col items-center gap-2 active:scale-95 transition"
-                >
-                  <FriendAvatar profile={thread.ownerProfile} />
-                  <span className="text-sm font-medium text-neutral-800">
-                    {thread.ownerProfile.display_name || thread.ownerName}
-                  </span>
-                  {thread.ownerProfile.username && (
-                    <span className="-mt-1.5 text-xs text-neutral-500">
-                      @{thread.ownerProfile.username}
-                    </span>
-                  )}
-                </button>
-              ) : null}
-              <p className="text-sm text-neutral-500 mt-2">
-                No comments yet — say something.
-              </p>
-            </div>
-          )}
-          <div className="space-y-3">
-            {(view === "comments"
-              ? comments || []
-              : (comments || []).slice(-2)
-            ).map((c) => (
-              <div key={c.id} className="flex items-start gap-2.5">
-                <button
-                  type="button"
-                  aria-label="View profile"
-                  onClick={() => onOpenProfile?.(c.user_id)}
-                  className="shrink-0 active:scale-95 transition"
-                >
-                  <FriendAvatar profile={c.profile} small />
-                </button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-neutral-500">
-                    <button
-                      type="button"
-                      onClick={() => onOpenProfile?.(c.user_id)}
-                      className="font-medium text-neutral-800"
-                    >
-                      {c.profile?.display_name || "Someone"}
-                    </button>{" "}
-                    · {timeAgoShort(c.created_at)}
-                  </p>
-                  <p className="text-sm text-neutral-900 break-words">{c.body}</p>
-                  {commentReactionRow(c)}
-                </div>
-              </div>
-            ))}
-          </div>
-          {view === "card" && (comments || []).length > 2 && (
-            <button
-              type="button"
-              onClick={() => setView("comments")}
-              className="mt-3 w-full text-center text-xs font-medium text-[#455d3b]"
-            >
-              See more comments ({comments.length})
-            </button>
-          )}
-        </div>
         )}
 
         {(view === "card" || view === "comments") && (
@@ -1708,7 +1733,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 onSeeWho={() => setReactSheet({ photoId: lightbox.id })}
               />
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-2">
               {photoComments === null && (
                 <p className="text-xs text-neutral-400 py-1">Loading…</p>
               )}
@@ -1786,7 +1811,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 pb-6">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-5 pb-6">
               {(() => {
                 const rows = reactions.filter((r) => {
                   const pid = r.photo_id ?? null;
