@@ -2843,7 +2843,7 @@ if (authLoading || guestLoading) {
               onClick={() => goToMainApp("map")}
               className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
             >
-              Explore Flanit
+              Done
             </button>
           </div>
           <BottomTabBar tab={null} setTab={goToMainApp} />
@@ -3245,12 +3245,10 @@ if (authLoading || guestLoading) {
                 }
               />
             ) : (
-              <EmptyState
-                title="No more places"
-                text="You've reached the end of this list."
-                action={() => setScreen("matches")}
-                actionText="View matches"
-              />
+              // Friends-mode deck exhausted — the old "No more places /
+              // View matches" card was a redundant stop before the real
+              // end state (Mark, July 24). Route straight through.
+              <AutoRoute go={() => setScreen("matches")} />
             )}
           </div>
         )}
@@ -6755,3 +6753,13 @@ function SwipeActions({
 // VenueCard, VenueHeroCarousel, VenueVibes, VenueRating, OpeningHours,
 // OpenMapsButton moved to ./components/VenueBits.js;
 // EmptyState moved to ./components/EmptyState.js (both imported at the top).
+
+// Render-safe redirect: fires the navigation AFTER mount instead of during
+// render (React forbids setState mid-render). Used where a screen has
+// nothing left to say and should just move on.
+function AutoRoute({ go }) {
+  useEffect(() => {
+    go();
+  }, [go]);
+  return null;
+}
