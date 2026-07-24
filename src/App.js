@@ -390,6 +390,76 @@ export default function RestaurantSwipeMVP() {
     profile &&
     (!profile.username || !profile.avatar_url)
   );
+
+  // NIGHT DEEP-LINK (July 25, collect links): /?night=<activityId> — set by
+  // the /c/ landing after a claim/upload — opens the check-in card once the
+  // session is ready. New accounts complete ONBOARDING first (the effect
+  // simply waits: it re-runs when profile/onboardingDismissed change), then
+  // land on the night with the album loaded.
+  const [pendingNightId, setPendingNightId] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("night") || null;
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    if (!pendingNightId || !session?.user?.id) return;
+    const needsOnboarding =
+      !isGuest &&
+      !cameFromGuestRef.current &&
+      !onboardingDismissed &&
+      session.user.is_anonymous === false &&
+      profile &&
+      !profile.username;
+    if (needsOnboarding) return; // onboarding screen is up — wait for it
+    let cancelled = false;
+    (async () => {
+      const { data: act } = await supabase
+        .from("activities")
+        .select("id, user_id, venue_id, label, created_at")
+        .eq("id", Number(pendingNightId))
+        .maybeSingle();
+      if (cancelled) return;
+      if (!act) {
+        setPendingNightId(null);
+        return;
+      }
+      const [ownerRes, venueRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .eq("id", act.user_id)
+          .maybeSingle(),
+        act.venue_id
+          ? supabase.from("venues").select("*").eq("id", act.venue_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      if (cancelled) return;
+      const ownerProf = ownerRes.data || null;
+      const v = venueRes.data || null;
+      setThreadCheckin({
+        activityId: act.id,
+        ownerId: act.user_id,
+        ownerName:
+          act.user_id === session.user.id
+            ? "You"
+            : ownerProf?.display_name || "A friend",
+        ownerProfile: ownerProf,
+        venueName: v?.name || "a spot",
+        label: act.label || null,
+        venueObj: v,
+        timestamp: act.created_at,
+      });
+      setPendingNightId(null);
+      try {
+        window.history.replaceState({}, "", "/");
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingNightId, session?.user?.id, profile, onboardingDismissed]);
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
   // handle to a user_id once session + profile are loaded, then push it into
   // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up

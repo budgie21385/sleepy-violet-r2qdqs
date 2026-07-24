@@ -160,10 +160,14 @@ export function CollectScreen({ token }) {
     setEntering(false);
   }
 
-  // Signed-in friend after a successful upload: the silent twin — their own
-  // check-in joined into the night (Been + avatar row), no photo split.
-  async function ensureFriendTwin() {
-    if (twinDone || !me || me.isAnon || relation !== "friend" || !ctx) return;
+  // Any signed-in account that came through the link is IN the night — the
+  // link was the owner's invitation, uploading/signing in is the consent
+  // (July 25, Mark: "they should be added to the event"). Friend or not:
+  // the twin + joined_from edge makes them a participant (night graph v2
+  // shows participants each other's shards), lands the night in their Been,
+  // and puts them on the card's avatar row.
+  async function ensureNightTwin(uid) {
+    if (twinDone || !uid || !ctx || uid === ctx.owner_id) return;
     setTwinDone(true);
     try {
       const t = new Date(ctx.checked_in_at).getTime();
@@ -172,7 +176,7 @@ export function CollectScreen({ token }) {
       let q = supabase
         .from("activities")
         .select("id")
-        .eq("user_id", me.id)
+        .eq("user_id", uid)
         .gte("created_at", lo)
         .lte("created_at", hi)
         .limit(1);
@@ -185,7 +189,7 @@ export function CollectScreen({ token }) {
         const { data: ins } = await supabase
           .from("activities")
           .insert({
-            user_id: me.id,
+            user_id: uid,
             venue_id: ctx.venue_id,
             kind: "checkin",
             created_at: ctx.checked_in_at,
@@ -197,6 +201,8 @@ export function CollectScreen({ token }) {
       }
       if (twinId) {
         // My shard says "with [owner]" — my own activity, my tag to write.
+        // Best-effort: tag RLS is friends-only, so this may no-op for
+        // non-friends; the joined_from edge alone carries participation.
         await supabase.from("activity_tags").upsert(
           {
             activity_id: twinId,
@@ -208,7 +214,7 @@ export function CollectScreen({ token }) {
         );
       }
     } catch (e) {
-      console.error("Friend twin failed (photos are safe):", e);
+      console.error("Night twin failed (photos are safe):", e);
     }
   }
 
@@ -268,12 +274,12 @@ export function CollectScreen({ token }) {
             ? recips.filter((uid) => uid !== me.id)
             : [ctx.owner_id];
         for (const uid of targets) {
-          sendPush(uid, "📸 New photos on your night", body);
+          sendPush(uid, "📸 New photos", body);
         }
       } catch {
-        sendPush(ctx.owner_id, "📸 New photos on your night", body);
+        sendPush(ctx.owner_id, "📸 New photos", body);
       }
-      ensureFriendTwin();
+      if (me && !me.isAnon) ensureNightTwin(me.id);
     }
   }
 
@@ -349,6 +355,24 @@ export function CollectScreen({ token }) {
           await supabase.rpc("set_guest_name", { p_name: displayName });
         }
       }
+      // They're in the night now: twin check-in (Been + avatar row) and a
+      // "joined" push to everyone already on the album.
+      await ensureNightTwin(uid);
+      const joinedCount = uploads.filter((u) => u.url).length;
+      try {
+        const { data: recips } = await supabase.rpc("collect_recipients", {
+          p_token: token,
+        });
+        const nm = displayName || "Someone";
+        const body = joinedCount
+          ? `${nm} is in — with ${joinedCount} ${
+              joinedCount === 1 ? "photo" : "photos"
+            } from ${ctx.venue_name}`
+          : `${nm} is in at ${ctx.venue_name}`;
+        for (const r of recips || []) {
+          if (r !== uid) sendPush(r, "🎉 They joined the photos", body);
+        }
+      } catch {}
       setMe({ id: uid, isAnon: false }); // relation effect takes over the exit
       setClaimPhase(null);
     } catch (e) {
@@ -412,11 +436,11 @@ export function CollectScreen({ token }) {
           Flanit
         </p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight leading-snug">
-          Add your photos to {ctx.owner_name}'s night
+          Add your photos from {ctx.venue_name}
         </h1>
         <p className="mt-1 text-sm text-neutral-600">
-          {ctx.label ? `${ctx.label} · ` : ""}
-          {ctx.venue_name} · {niceDate(ctx.checked_in_at)}
+          {ctx.owner_name} is collecting everyone's photos
+          {ctx.label ? ` · ${ctx.label}` : ""} · {niceDate(ctx.checked_in_at)}
         </p>
 
         {/* Name door — once per device, skipped for known browsers. */}
@@ -529,15 +553,16 @@ export function CollectScreen({ token }) {
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
                     <Check size={14} />
                   </span>
-                  {landedCount === 1 ? "Photo added" : `${landedCount} added`} to{" "}
-                  {ctx.owner_name}'s night
+                  {landedCount === 1
+                    ? "Photo added"
+                    : `${landedCount} photos added`}
                 </p>
                 {me.isAnon && claimPhase === null && (
                   <>
                     <p className="mt-2 text-xs text-neutral-500">
-                      Want to see everyone's photos from the night? Create an
-                      account (or sign back in) and ask {ctx.owner_name} to
-                      add you — your photos come with you.
+                      Want to see everyone's photos from {ctx.venue_name}?
+                      Create an account (or sign back in) — your photos come
+                      with you.
                     </p>
                     <button
                       type="button"
@@ -622,37 +647,46 @@ export function CollectScreen({ token }) {
                 {!me.isAnon && relation === "friend" && (
                   <>
                     <p className="mt-2 text-xs text-neutral-500">
-                      Added to the night — it's in your Been too.
+                      You're in — this one's in your Been too.
                     </p>
                     <a
-                      href="/"
+                      href={`/?night=${ctx.activity_id}`}
                       className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
                     >
-                      View the night in Flanit
+                      See all the photos
                     </a>
                   </>
                 )}
                 {!me.isAnon && (relation === "none" || relation === "pending") && (
                   <>
                     <p className="mt-2 text-xs text-neutral-500">
-                      Add {ctx.owner_name} as a friend to see the whole night.
+                      You're in — this one's in your Been too. Add{" "}
+                      {ctx.owner_name} as a friend to keep up beyond it.
                     </p>
-                    <button
-                      type="button"
-                      disabled={relation === "pending"}
-                      onClick={addOwnerAsFriend}
-                      className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-                    >
-                      <UserPlus size={14} />
-                      {relation === "pending"
-                        ? "Requested ✓"
-                        : `Add ${ctx.owner_name}`}
-                    </button>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <a
+                        href={`/?night=${ctx.activity_id}`}
+                        className="inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
+                      >
+                        See all the photos
+                      </a>
+                      <button
+                        type="button"
+                        disabled={relation === "pending"}
+                        onClick={addOwnerAsFriend}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-[#455d3b] px-5 py-2.5 text-sm font-medium text-[#455d3b] disabled:opacity-60"
+                      >
+                        <UserPlus size={14} />
+                        {relation === "pending"
+                          ? "Requested ✓"
+                          : `Add ${ctx.owner_name}`}
+                      </button>
+                    </div>
                   </>
                 )}
                 {!me.isAnon && relation === "self" && (
                   <p className="mt-2 text-xs text-neutral-500">
-                    This is your own link — open Flanit to see the night.
+                    This is your own link — open Flanit to see the photos.
                   </p>
                 )}
               </div>

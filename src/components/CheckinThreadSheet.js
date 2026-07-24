@@ -1275,7 +1275,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               </p>
               <p className="mb-3 text-xs text-neutral-500">
                 One link for the group chat. No app or account needed — their
-                photos land on this night, visible to your friends.
+                photos land right here, visible to your friends.
               </p>
               {collectLink === null && (
                 <p className="text-xs text-neutral-400">Loading…</p>
@@ -1363,6 +1363,31 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           ref={listRef}
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain"
         >
+        {/* ADD-HOST banner (July 25, Mark): anyone ON the night (came via a
+            collect link / join) who isn't friends with the card's owner yet
+            gets the ask right here — below the header, above the album. */}
+        {view === "card" &&
+          thread.ownerId &&
+          thread.ownerId !== userId &&
+          (joined === true || !!myActivityId) &&
+          friendState[thread.ownerId] !== "friend" && (
+            <div className="mx-4 mt-3 flex items-center gap-3 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-3">
+              <p className="flex-1 min-w-0 text-xs text-[#2f3f29]">
+                You were at {thread.venueName} with {thread.ownerName} — add
+                them as a friend?
+              </p>
+              <button
+                type="button"
+                disabled={friendState[thread.ownerId] === "pending"}
+                onClick={() => addFriendFromAlbum(thread.ownerId)}
+                className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60 active:scale-95 transition"
+              >
+                {friendState[thread.ownerId] === "pending"
+                  ? "Requested"
+                  : "Add friend"}
+              </button>
+            </div>
+          )}
         {/* Photo GRID (July 23 redesign) — 3-up album, capped with a
             "+N more" tile; a small strip in the expanded-comments view. */}
         {view === "card" && (photos.length > 0 || uploadTargetId) && (
