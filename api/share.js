@@ -119,6 +119,7 @@ export default async function handler(req, res) {
       url = `${origin}/c/${token}`;
       title = "Add your photos to the night 📸";
       description = "No app, no account — just pick your photos.";
+      image = `${origin}/og-collect.png`;
       const r = await sb("rpc/resolve_collect_link", {
         method: "POST",
         body: JSON.stringify({ p_token: String(token) }),
