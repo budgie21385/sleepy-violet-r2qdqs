@@ -3601,6 +3601,18 @@ if (authLoading || guestLoading) {
           setTab("map");
           setMapSearchOpen(true);
         }}
+        onRightNow={() => {
+          setMatchMode("concurrent");
+          setEventDate(null);
+          setScreen("filters");
+          setTab("matches");
+        }}
+        onShortlist={() => {
+          setMatchMode("curated");
+          setEventDate(null);
+          setScreen("filters");
+          setTab("matches");
+        }}
       />
       {checkinSheet && (
         <CheckinSheet

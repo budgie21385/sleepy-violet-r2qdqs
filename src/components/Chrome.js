@@ -1,9 +1,17 @@
 // App chrome: the bottom tab bar, the floating add-button, and the toast.
 // Props-only presentational components extracted from App.js.
 import { useState, useEffect } from "react";
-import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User } from "lucide-react";
+import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, Zap, Send } from "lucide-react";
 
-export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap, onCheckIn }) {
+export function FloatingActionButton({
+  tab,
+  showToast,
+  onAddFriend,
+  onImportMap,
+  onCheckIn,
+  onRightNow,
+  onShortlist,
+}) {
   const [open, setOpen] = useState(false);
 
   // Don't render outside Profile + Map tabs.
@@ -41,7 +49,29 @@ export function FloatingActionButton({ tab, showToast, onAddFriend, onImportMap,
     },
   ];
 
-  const mapOptions = profileOptions.filter((o) => o.key !== "add_friend");
+  // Map FAB leads with the two session starters (Mark, July 24) — the map
+  // is where "where should we go?" actually gets asked.
+  const mapOptions = [
+    {
+      key: "right_now",
+      icon: <Zap size={16} />,
+      label: "Right now",
+      action: () => {
+        setOpen(false);
+        onRightNow?.();
+      },
+    },
+    {
+      key: "shortlist",
+      icon: <Send size={16} />,
+      label: "Send a shortlist",
+      action: () => {
+        setOpen(false);
+        onShortlist?.();
+      },
+    },
+    ...profileOptions.filter((o) => o.key !== "add_friend"),
+  ];
   const options = tab === "profile" ? profileOptions : mapOptions;
 
   return (
