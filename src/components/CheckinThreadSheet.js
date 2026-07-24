@@ -272,8 +272,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // summarizeReactions() slices per target.
   const [reactions, setReactions] = useState([]);
   const [reacting, setReacting] = useState(false);
-  // "See reactions ›" who-list sheet. null = closed; { photoId } picks the
-  // target (null photoId = the check-in itself). Renders above the lightbox.
+  // "See reactions ›" who-list sheet. null = closed. Target: { commentId }
+  // for a comment, else { photoId } (null photoId = the check-in itself).
+  // Renders above the lightbox.
   const [reactSheet, setReactSheet] = useState(null);
   // Close on thread switch or lightbox flips — the target went stale.
   // (Effect sits BELOW both states it reads — TDZ rule, see 05-log.)
@@ -401,12 +402,15 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setReacting(false);
   }
 
-  // Per-comment reactions: existing emoji render as tiny count chips; the
-  // "React" toggle opens the six-emoji row for THAT comment (one at a time).
+  // Per-comment reactions — miniature of the card doctrine (July 24):
+  // chips toggle your reaction, the dashed ⊕ circle opens the six-emoji
+  // palette for THAT comment (one at a time), and "N reacted ›" opens the
+  // same who-list sheet. Nothing but chips/palette ever reacts.
   const [openReactFor, setOpenReactFor] = useState(null);
   function commentReactionRow(c) {
     const { counts, mine } = summarizeReactions(reactions, userId, null, c.id);
     const entries = Object.entries(counts);
+    const total = entries.reduce((s, [, n]) => s + n, 0);
     return (
       <div className="mt-1 flex items-center gap-1 flex-wrap">
         {entries.map(([e, n]) => (
@@ -426,10 +430,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         ))}
         <button
           type="button"
+          aria-label={openReactFor === c.id ? "Close" : "Add reaction"}
           onClick={() => setOpenReactFor(openReactFor === c.id ? null : c.id)}
-          className="text-[11px] text-neutral-400 px-1"
+          className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-neutral-300 text-[13px] leading-none text-neutral-400 active:scale-90 transition"
         >
-          {openReactFor === c.id ? "close" : entries.length === 0 ? "react" : "+"}
+          {openReactFor === c.id ? "×" : "+"}
         </button>
         {openReactFor === c.id &&
           REACTION_SET.map((e) => (
@@ -446,6 +451,15 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               {e}
             </button>
           ))}
+        {total > 0 && (
+          <button
+            type="button"
+            onClick={() => setReactSheet({ photoId: null, commentId: c.id })}
+            className="text-[11px] font-medium text-[#455d3b] px-0.5"
+          >
+            {total} reacted ›
+          </button>
+        )}
       </div>
     );
   }
@@ -1774,11 +1788,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             </div>
             <div className="flex-1 overflow-y-auto px-5 pb-6">
               {(() => {
-                const rows = reactions.filter(
-                  (r) =>
-                    (r.photo_id ?? null) === reactSheet.photoId &&
-                    (r.comment_id ?? null) === null
-                );
+                const rows = reactions.filter((r) => {
+                  const pid = r.photo_id ?? null;
+                  const cid = r.comment_id ?? null;
+                  if (reactSheet.commentId) return cid === reactSheet.commentId;
+                  return pid === reactSheet.photoId && cid === null;
+                });
                 if (rows.length === 0)
                   return (
                     <p className="py-2 text-xs text-neutral-400">
