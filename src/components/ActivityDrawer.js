@@ -52,6 +52,21 @@ function afternoonAfter(ts) {
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
+import { timeAgoShort } from "../lib/checkins";
+
+// Tiny corner timestamp on every Activity card (Mark, July 25): "2h" while
+// fresh, "yesterday", then a date — same ladder as the check-in card.
+function whenLabel(ts) {
+  if (!ts) return "";
+  const ms = Date.now() - new Date(ts).getTime();
+  if (ms < 0) return ""; // future-dated nudge windows — say nothing
+  if (ms < 24 * 3600e3) return timeAgoShort(ts);
+  if (ms < 48 * 3600e3) return "yesterday";
+  return new Date(ts).toLocaleDateString("en-AU", {
+    day: "numeric",
+    month: "short",
+  });
+}
 
 // Last loaded items, module-level — reopening the tab paints instantly from
 // this while load() refreshes in the background (stale-while-revalidate).
@@ -1470,8 +1485,13 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2 mb-4">
             {newItems.map((item) => (
+              <div key={item.id} className="relative">
+                {whenLabel(item.timestamp) && (
+                  <span className="pointer-events-none absolute right-3 top-2 z-10 text-[10px] text-neutral-400">
+                    {whenLabel(item.timestamp)}
+                  </span>
+                )}
               <ActivityItem
-                key={item.id}
                 item={item}
                 isNew
                 acting={
@@ -1494,6 +1514,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenVenue={onOpenVenue}
                 onOpenThread={setThread}
               />
+              </div>
             ))}
           </div>
         </>
@@ -1506,8 +1527,13 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2">
             {earlierItems.map((item) => (
+              <div key={item.id} className="relative">
+                {whenLabel(item.timestamp) && (
+                  <span className="pointer-events-none absolute right-3 top-2 z-10 text-[10px] text-neutral-400">
+                    {whenLabel(item.timestamp)}
+                  </span>
+                )}
               <ActivityItem
-                key={item.id}
                 item={item}
                 acting={
                   acting === item.friendshipId ||
@@ -1529,6 +1555,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenVenue={onOpenVenue}
                 onOpenThread={setThread}
               />
+              </div>
             ))}
           </div>
         </>
