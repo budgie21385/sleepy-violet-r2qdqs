@@ -40,7 +40,7 @@ async function sb(path, opts = {}) {
 export default async function handler(req, res) {
   const host = req.headers.host || "flanit.co";
   const origin = `https://${host}`;
-  const { type, id, handle } = req.query || {};
+  const { type, id, handle, token } = req.query || {};
 
   // Branded defaults (match the tags already in index.html).
   let title = "Discover your city with friends";
@@ -111,6 +111,26 @@ export default async function handler(req, res) {
       description = "Swipe, match and decide where to go — together.";
       image = `${origin}/og-invite.png`;
       url = `${origin}/u/@${clean}`;
+    } else if (type === "collect" && token) {
+      // Collect link (July 25): og:url MUST be the /c/ page itself —
+      // Messenger sends preview-card taps to og:url, and the old static
+      // homepage value hijacked every tap. resolve_collect_link is
+      // anon-callable, so crawlers get real context too.
+      url = `${origin}/c/${token}`;
+      title = "Add your photos to the night 📸";
+      description = "No app, no account — just pick your photos.";
+      const r = await sb("rpc/resolve_collect_link", {
+        method: "POST",
+        body: JSON.stringify({ p_token: String(token) }),
+      });
+      const rows = await r.json();
+      const c = Array.isArray(rows) ? rows[0] : null;
+      if (c && c.owner_name) {
+        title = `Add your photos to ${c.owner_name}'s night 📸`;
+        description = `${c.venue_name}${
+          c.label ? ` · ${c.label}` : ""
+        } — no app, no account, just pick your photos.`;
+      }
     }
   } catch (e) {
     // fall through to branded defaults
