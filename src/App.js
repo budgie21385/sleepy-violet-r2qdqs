@@ -3615,6 +3615,12 @@ if (authLoading || guestLoading) {
           viewerUserId={session?.user?.id}
           onBack={() => setLookupUserId(null)}
           showToast={showToast}
+          onOpenThread={(t) => {
+            // Cards render UNDER the profile (3600 < 3900) — close the
+            // profile first so the album opens on top.
+            setLookupUserId(null);
+            setThreadCheckin(t);
+          }}
         />
       )}
       {notifSessionId && (
@@ -5866,6 +5872,7 @@ function ProfileLookupScreen({
   viewerUserId,
   onBack,
   showToast,
+  onOpenThread,
 }) {
   const [profile, setProfile] = useState(null);
   const [friendship, setFriendship] = useState(null); // null = no row found
@@ -5917,11 +5924,16 @@ function ProfileLookupScreen({
   const iAmRequester = friendship?.requester_id === viewerUserId;
   const isFriends = status === "accepted";
 
-  // Check-in history for the "Recent activity" section — only meaningful (and
-  // only readable, per activities RLS) once you're friends.
+  // PHOTO-FIRST PROFILE (July 25, Mark's pick): one fetch builds the whole
+  // page. An "event" is just a check-in that collected media — those render
+  // as album covers; photoless check-ins are quiet "Also been" rows. RLS
+  // already trims activities AND photos to what the viewer may see, so the
+  // page is privacy-correct for free.
+  const [theirData, setTheirData] = useState(null);
   useEffect(() => {
     if (!isFriends || !userId) {
       setTheirCheckins(null);
+      setTheirData(null);
       return;
     }
     let cancelled = false;
@@ -5932,25 +5944,81 @@ function ProfileLookupScreen({
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
-        .limit(8);
-      let nameById = {};
-      const venueIds = Array.from(new Set((rows || []).map((r) => r.venue_id)));
-      if (venueIds.length > 0) {
-        const { data: vRows } = await supabase
-          .from("venues")
-          .select("id, name")
-          .in("id", venueIds);
-        nameById = Object.fromEntries((vRows || []).map((v) => [v.id, v.name]));
+        .limit(30);
+      const acts = rows || [];
+      const venueIds = Array.from(
+        new Set(acts.map((r) => r.venue_id).filter(Boolean))
+      );
+      const [vRes, pRes] = await Promise.all([
+        venueIds.length
+          ? supabase.from("venues").select("*").in("id", venueIds)
+          : Promise.resolve({ data: [] }),
+        acts.length
+          ? supabase
+              .from("activity_photos")
+              .select("id, activity_id, web_path, created_at")
+              .in("activity_id", acts.map((a) => a.id))
+          : Promise.resolve({ data: [] }),
+      ]);
+      const vById = Object.fromEntries(
+        (vRes.data || []).map((v) => [v.id, v])
+      );
+      const photos = pRes.data || [];
+      const byAct = {};
+      for (const ph of photos) {
+        if (!byAct[ph.activity_id]) byAct[ph.activity_id] = [];
+        byAct[ph.activity_id].push(ph);
+      }
+      const albumActs = acts.filter((a) => (byAct[a.id] || []).length > 0);
+      const covers = albumActs.map((a) => {
+        const ps = byAct[a.id]
+          .slice()
+          .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+        return { act: a, count: ps.length, coverPath: ps[0].web_path };
+      });
+      let coverUrlByPath = {};
+      if (covers.length > 0) {
+        const { data: signed } = await supabase.storage
+          .from("checkin-photos")
+          .createSignedUrls(covers.map((c) => c.coverPath), 3600);
+        coverUrlByPath = Object.fromEntries(
+          (signed || [])
+            .filter((s) => s.signedUrl)
+            .map((s) => [s.path, s.signedUrl])
+        );
       }
       if (cancelled) return;
+      // Old banner state keeps working off the same rows.
       setTheirCheckins(
-        (rows || []).map((r) => ({
+        acts.slice(0, 8).map((r) => ({
           id: r.id,
-          venueName: nameById[r.venue_id] || "a spot",
+          venueName: vById[r.venue_id]?.name || "a spot",
           label: r.label || null,
           created_at: r.created_at,
         }))
       );
+      setTheirData({
+        albums: covers.map((c) => ({
+          activityId: c.act.id,
+          title: c.act.label || vById[c.act.venue_id]?.name || "A day out",
+          venueName: vById[c.act.venue_id]?.name || "a spot",
+          venueObj: vById[c.act.venue_id] || null,
+          label: c.act.label || null,
+          created_at: c.act.created_at,
+          count: c.count,
+          coverUrl: coverUrlByPath[c.coverPath] || null,
+        })),
+        alsoBeen: acts
+          .filter((a) => !(byAct[a.id] || []).length)
+          .map((a) => ({
+            id: a.id,
+            venueName: vById[a.venue_id]?.name || "a spot",
+            label: a.label || null,
+            created_at: a.created_at,
+          })),
+        photoCount: photos.length,
+        placeCount: new Set(acts.map((a) => a.venue_id).filter(Boolean)).size,
+      });
     })();
     return () => {
       cancelled = true;
@@ -6281,71 +6349,134 @@ function ProfileLookupScreen({
           </div>
         )}
 
-        {/* Unlocked sections (post-friend) — placeholders for D.2 */}
+        {/* PHOTO-FIRST profile (July 25): counts → live → EVENTS (albums =
+            check-ins with media) → Also been (quiet check-ins). Friends
+            section deliberately absent until the friends-of-friends
+            privacy call + RPC. */}
         {!loading && isFriends && (
           <>
-            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-3">
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
-                Their list
+            {theirData === null && (
+              <p className="text-sm text-neutral-500 text-center py-4">
+                Loading…
               </p>
-              <p className="text-sm text-neutral-600">
-                Coming soon — friend list visibility ships with D.2.
-              </p>
-            </div>
-            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-3">
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
-                Their friends
-              </p>
-              <p className="text-sm text-neutral-600">
-                Coming soon — friends-of-friends ships with D.2.
-              </p>
-            </div>
-            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
-                Recent activity
-              </p>
-              {theirCheckins === null && (
-                <p className="text-sm text-neutral-500">Loading…</p>
-              )}
-              {theirCheckins !== null && theirCheckins.length === 0 && (
-                <p className="text-sm text-neutral-600">
-                  No check-ins yet — when {profile?.display_name || "they"}{" "}
-                  checks in somewhere, it shows up here.
-                </p>
-              )}
-              {theirCheckins !== null && theirCheckins.length > 0 && (
-                <div className="space-y-2">
-                  {(() => {
-                    const [latest, ...rest] = theirCheckins;
-                    const live =
-                      Date.now() - new Date(latest.created_at).getTime() <
-                      3 * 60 * 60 * 1000;
-                    return (
-                      <>
-                        {live ? (
-                          <div className="flex items-center gap-2 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5">
-                            <span className="h-2 w-2 rounded-full bg-[#455d3b] animate-pulse" />
-                            <p className="text-sm text-[#2f3f29]">
-                              Is at{" "}
-                              <strong className="font-medium">
-                                {latest.venueName}
-                              </strong>{" "}
-                              right now
-                              {latest.label ? ` · ${latest.label}` : ""}
-                            </p>
-                          </div>
-                        ) : (
-                          <CheckinHistoryRow c={latest} />
-                        )}
-                        {rest.slice(0, 5).map((c) => (
-                          <CheckinHistoryRow key={c.id} c={c} />
-                        ))}
-                      </>
-                    );
-                  })()}
+            )}
+            {theirData !== null && (
+              <>
+                <div className="mb-3 grid grid-cols-3 gap-2 text-center">
+                  {[
+                    ["Events", theirData.albums.length],
+                    ["Photos", theirData.photoCount],
+                    ["Places", theirData.placeCount],
+                  ].map(([label, n]) => (
+                    <div
+                      key={label}
+                      className="rounded-2xl bg-white border border-neutral-100 py-2.5"
+                    >
+                      <p className="text-base font-semibold text-neutral-900">
+                        {n}
+                      </p>
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                        {label}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
+                {(() => {
+                  const latest = theirCheckins?.[0];
+                  const live =
+                    latest &&
+                    Date.now() - new Date(latest.created_at).getTime() <
+                      3 * 60 * 60 * 1000;
+                  return live ? (
+                    <div className="mb-3 flex items-center gap-2 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-3 py-2.5">
+                      <span className="h-2 w-2 rounded-full bg-[#455d3b] animate-pulse" />
+                      <p className="text-sm text-[#2f3f29]">
+                        Is at{" "}
+                        <strong className="font-medium">
+                          {latest.venueName}
+                        </strong>{" "}
+                        right now
+                        {latest.label ? ` · ${latest.label}` : ""}
+                      </p>
+                    </div>
+                  ) : null;
+                })()}
+                {theirData.albums.length > 0 && (
+                  <>
+                    <p className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                      Events
+                    </p>
+                    <div className="mb-4 grid grid-cols-2 gap-2">
+                      {theirData.albums.map((al) => (
+                        <button
+                          key={al.activityId}
+                          type="button"
+                          onClick={() =>
+                            onOpenThread?.({
+                              activityId: al.activityId,
+                              ownerId: userId,
+                              ownerName:
+                                profile?.display_name || "A friend",
+                              ownerProfile: profile || null,
+                              venueName: al.venueName,
+                              label: al.label,
+                              venueObj: al.venueObj,
+                              timestamp: al.created_at,
+                            })
+                          }
+                          className="text-left active:scale-[0.98] transition"
+                        >
+                          <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#dfe9da]">
+                            {al.coverUrl && (
+                              <img
+                                src={al.coverUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            )}
+                            <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white">
+                              {al.count} 📷
+                            </span>
+                          </div>
+                          <p className="mt-1 truncate text-xs font-semibold text-neutral-900">
+                            {al.title}
+                          </p>
+                          <p className="truncate text-[10px] text-neutral-500">
+                            {al.label ? `${al.venueName} · ` : ""}
+                            {new Date(al.created_at).toLocaleDateString(
+                              "en-AU",
+                              { day: "numeric", month: "short" }
+                            )}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {theirData.alsoBeen.length > 0 && (
+                  <>
+                    <p className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                      Also been
+                    </p>
+                    <div className="space-y-2">
+                      {theirData.alsoBeen.slice(0, 6).map((c) => (
+                        <CheckinHistoryRow key={c.id} c={c} />
+                      ))}
+                    </div>
+                  </>
+                )}
+                {theirData.albums.length === 0 &&
+                  theirData.alsoBeen.length === 0 && (
+                    <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+                      <p className="text-sm text-neutral-600">
+                        Nothing here yet — when{" "}
+                        {profile?.display_name || "they"} checks in somewhere,
+                        it shows up here.
+                      </p>
+                    </div>
+                  )}
+              </>
+            )}
           </>
         )}
       </div>
