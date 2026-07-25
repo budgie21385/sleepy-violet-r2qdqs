@@ -621,9 +621,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     };
   }, [clusterKey]);
 
-  // Friendship status per night-person — powers the Add friend buttons.
+  // Friendship status — powers the Add friend buttons AND the card-view
+  // add-host banner, so it loads on OPEN, not when the people view does
+  // (July 25: banner showed "Add friend" against a pending incoming
+  // request until "View all" was tapped). One cheap query per thread.
   useEffect(() => {
-    if (view !== "people" || nightPeople.length === 0 || !userId) return;
+    if (!userId) return;
     let cancelled = false;
     (async () => {
       const { data: rows } = await supabase
@@ -646,7 +649,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     return () => {
       cancelled = true;
     };
-  }, [view, nightPeople.length, userId]);
+  }, [userId, thread.activityId]);
 
   async function addFriendFromAlbum(otherId) {
     setFriendState((prev) => ({ ...prev, [otherId]: "pending_out" }));
