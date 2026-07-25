@@ -9,6 +9,25 @@ import { supabase } from "../supabaseClient";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
+// Same /api/add-venue caller as AddVenueSheet — the add-a-night search
+// falls back to Google for places not on Flanit (July 25, Mark: "I want to
+// add the cinema I went to yesterday and it won't come up").
+async function callAddVenueApi(body) {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  const resp = await fetch("/api/add-venue", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+  return json;
+}
+
 // One compact history row — also used by ProfileLookupScreen's Recent
 // activity section (a friend's history on their profile).
 export function CheckinHistoryRow({ c }) {
@@ -51,28 +70,64 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   const [addSaving, setAddSaving] = useState(false);
   const todayStr = new Date().toISOString().slice(0, 10);
 
+  const [addGoogle, setAddGoogle] = useState([]); // Google fallback rows
+  const [addingPlaceId, setAddingPlaceId] = useState(null);
+
   useEffect(() => {
     if (!addOpen) return;
     const q = addQ.trim();
     if (q.length < 2) {
       setAddResults([]);
+      setAddGoogle([]);
       return;
     }
     const t = setTimeout(async () => {
-      const { data } = await supabase
-        .from("venues")
-        .select("*")
-        .ilike("name", `%${q}%`)
-        .limit(12);
-      setAddResults(data || []);
+      // Pool + Google in parallel — cinemas, bowling alleys, someone's
+      // favourite kebab van: anywhere counts as a place you were.
+      const [dbRes, gRes] = await Promise.all([
+        supabase.from("venues").select("*").ilike("name", `%${q}%`).limit(12),
+        callAddVenueApi({ action: "search", q }).catch(() => ({
+          results: [],
+        })),
+      ]);
+      const dbRows = dbRes.data || [];
+      const knownPlaceIds = new Set(
+        dbRows.map((v) => v.google_place_id).filter(Boolean)
+      );
+      setAddResults(dbRows);
+      setAddGoogle(
+        (gRes.results || []).filter((r) => !knownPlaceIds.has(r.place_id))
+      );
     }, 250);
     return () => clearTimeout(t);
   }, [addQ, addOpen]);
+
+  // Google pick: create the venue row WITHOUT saving it to their list
+  // (Timber Yard rule — being somewhere ≠ curating it), then flow into the
+  // normal date step.
+  async function pickGooglePlace(r) {
+    if (addingPlaceId) return;
+    setAddingPlaceId(r.place_id);
+    try {
+      const { venue } = await callAddVenueApi({
+        action: "add",
+        placeId: r.place_id,
+        save: false,
+      });
+      setAddVenue(venue);
+    } catch (e) {
+      console.error("Google add-a-night pick failed:", e);
+      showToast?.("Couldn't add that place");
+    }
+    setAddingPlaceId(null);
+  }
 
   function closeAdd() {
     setAddOpen(false);
     setAddQ("");
     setAddResults([]);
+    setAddGoogle([]);
+    setAddingPlaceId(null);
     setAddVenue(null);
     setAddSaving(false);
   }
@@ -370,11 +425,39 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                       )}
                     </button>
                   ))}
-                  {addQ.trim().length >= 2 && addResults.length === 0 && (
-                    <p className="text-xs text-neutral-400 px-2 py-2">
-                      Nothing on Flanit by that name yet.
-                    </p>
+                  {addGoogle.length > 0 && (
+                    <>
+                      <p className="px-2 pt-2 text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                        More places
+                      </p>
+                      {addGoogle.map((r) => (
+                        <button
+                          key={r.place_id}
+                          type="button"
+                          disabled={!!addingPlaceId}
+                          onClick={() => pickGooglePlace(r)}
+                          className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                        >
+                          <MapPin size={15} className="shrink-0 text-neutral-300" />
+                          <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                            {r.name}
+                          </span>
+                          <span className="text-[11px] text-neutral-400 shrink-0 truncate max-w-[110px]">
+                            {addingPlaceId === r.place_id
+                              ? "Adding…"
+                              : r.address || ""}
+                          </span>
+                        </button>
+                      ))}
+                    </>
                   )}
+                  {addQ.trim().length >= 2 &&
+                    addResults.length === 0 &&
+                    addGoogle.length === 0 && (
+                      <p className="text-xs text-neutral-400 px-2 py-2">
+                        Nothing by that name — check the spelling?
+                      </p>
+                    )}
                 </div>
               </>
             ) : (
