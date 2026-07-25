@@ -5963,9 +5963,11 @@ function ProfileLookupScreen({
       ]);
       if (cancelled) return;
       // setof uuid arrives as scalars; normalize defensively either way.
+      // The viewer stays IN the list (Mark: "I am not seen in the friends
+      // list") — you're part of their circle, show it.
       const theirIds = (uidsRaw || [])
         .map((u) => (typeof u === "string" ? u : u?.friends_of))
-        .filter((id) => id && id !== viewerUserId);
+        .filter(Boolean);
       const mine = new Set(
         (myRows || []).map((r) =>
           r.requester_id === viewerUserId ? r.addressee_id : r.requester_id
@@ -5982,10 +5984,15 @@ function ProfileLookupScreen({
       if (cancelled) return;
       setTheirFriends(
         (profs || [])
-          .map((p) => ({ ...p, mutual: mine.has(p.id) }))
+          .map((p) => ({
+            ...p,
+            self: p.id === viewerUserId,
+            mutual: mine.has(p.id),
+          }))
           .sort(
             (a, b) =>
-              (b.mutual ? 1 : 0) - (a.mutual ? 1 : 0) ||
+              (b.self ? 2 : b.mutual ? 1 : 0) -
+                (a.self ? 2 : a.mutual ? 1 : 0) ||
               (a.display_name || "").localeCompare(b.display_name || "")
           )
       );
@@ -6552,30 +6559,27 @@ function ProfileLookupScreen({
                 <p className="mb-2 mt-4 px-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
                   Friends · {theirFriends.length}
                 </p>
-                <div className="rounded-3xl bg-white p-3 shadow-sm border border-neutral-100 space-y-1">
-                  {theirFriends.slice(0, 12).map((f) => (
+                {/* Compact avatar rail (Mark: full-width rows were too much
+                    chrome) — horizontal scroll, you first, mutuals next. */}
+                <div className="flex gap-3 overflow-x-auto pb-2 px-1 -mx-1">
+                  {theirFriends.map((f) => (
                     <button
                       key={f.id}
                       type="button"
                       onClick={() => onOpenProfile?.(f.id)}
-                      className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left active:bg-neutral-50"
+                      className="flex w-16 shrink-0 flex-col items-center gap-1 active:scale-95 transition"
                     >
-                      <FriendAvatar profile={f} small />
-                      <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
-                        {f.display_name || "Someone"}
+                      <FriendAvatar profile={f} />
+                      <span className="w-full truncate text-center text-[10px] text-neutral-700">
+                        {f.self ? "You" : f.display_name || "Someone"}
                       </span>
-                      {f.mutual && (
-                        <span className="shrink-0 rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#455d3b]">
-                          Mutual
+                      {f.mutual && !f.self && (
+                        <span className="-mt-0.5 text-[8px] font-medium text-[#455d3b]">
+                          mutual
                         </span>
                       )}
                     </button>
                   ))}
-                  {theirFriends.length > 12 && (
-                    <p className="px-2 py-1 text-[11px] text-neutral-400">
-                      +{theirFriends.length - 12} more
-                    </p>
-                  )}
                 </div>
               </>
             )}
