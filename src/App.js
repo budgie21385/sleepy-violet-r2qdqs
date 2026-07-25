@@ -3622,6 +3622,7 @@ if (authLoading || guestLoading) {
           onBack={() => setLookupUserId(null)}
           showToast={showToast}
           hidden={lookupHidden}
+          onOpenProfile={(uid) => openProfile(uid)}
           onOpenThread={(t) => {
             // Cards render UNDER the profile (3600 < 3900) — hide the
             // profile so the album shows, without unmounting it.
@@ -5883,6 +5884,7 @@ function ProfileLookupScreen({
   onBack,
   showToast,
   onOpenThread,
+  onOpenProfile,
   hidden = false,
 }) {
   const [profile, setProfile] = useState(null);
@@ -5941,6 +5943,57 @@ function ProfileLookupScreen({
   // already trims activities AND photos to what the viewer may see, so the
   // page is privacy-correct for free.
   const [theirData, setTheirData] = useState(null);
+  // Their friends — via friends_of() (SECURITY DEFINER; only THEIR accepted
+  // friends get rows, so this stays empty pre-friendship). Mutuals first.
+  const [theirFriends, setTheirFriends] = useState(null);
+  useEffect(() => {
+    if (!isFriends || !userId || !viewerUserId) {
+      setTheirFriends(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [{ data: uidsRaw }, { data: myRows }] = await Promise.all([
+        supabase.rpc("friends_of", { p_user: userId }),
+        supabase
+          .from("friendships")
+          .select("requester_id, addressee_id")
+          .eq("status", "accepted")
+          .or(`requester_id.eq.${viewerUserId},addressee_id.eq.${viewerUserId}`),
+      ]);
+      if (cancelled) return;
+      // setof uuid arrives as scalars; normalize defensively either way.
+      const theirIds = (uidsRaw || [])
+        .map((u) => (typeof u === "string" ? u : u?.friends_of))
+        .filter((id) => id && id !== viewerUserId);
+      const mine = new Set(
+        (myRows || []).map((r) =>
+          r.requester_id === viewerUserId ? r.addressee_id : r.requester_id
+        )
+      );
+      if (theirIds.length === 0) {
+        setTheirFriends([]);
+        return;
+      }
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", theirIds);
+      if (cancelled) return;
+      setTheirFriends(
+        (profs || [])
+          .map((p) => ({ ...p, mutual: mine.has(p.id) }))
+          .sort(
+            (a, b) =>
+              (b.mutual ? 1 : 0) - (a.mutual ? 1 : 0) ||
+              (a.display_name || "").localeCompare(b.display_name || "")
+          )
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isFriends, userId, viewerUserId]);
   useEffect(() => {
     if (!isFriends || !userId) {
       setTheirCheckins(null);
@@ -6492,6 +6545,38 @@ function ProfileLookupScreen({
                       </p>
                     </div>
                   )}
+              </>
+            )}
+            {theirFriends !== null && theirFriends.length > 0 && (
+              <>
+                <p className="mb-2 mt-4 px-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                  Friends · {theirFriends.length}
+                </p>
+                <div className="rounded-3xl bg-white p-3 shadow-sm border border-neutral-100 space-y-1">
+                  {theirFriends.slice(0, 12).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => onOpenProfile?.(f.id)}
+                      className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left active:bg-neutral-50"
+                    >
+                      <FriendAvatar profile={f} small />
+                      <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                        {f.display_name || "Someone"}
+                      </span>
+                      {f.mutual && (
+                        <span className="shrink-0 rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#455d3b]">
+                          Mutual
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  {theirFriends.length > 12 && (
+                    <p className="px-2 py-1 text-[11px] text-neutral-400">
+                      +{theirFriends.length - 12} more
+                    </p>
+                  )}
+                </div>
               </>
             )}
           </>
