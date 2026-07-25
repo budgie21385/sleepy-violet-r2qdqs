@@ -373,8 +373,14 @@ export function CollectScreen({ token }) {
           if (r !== uid) sendPush(r, "🎉 They joined the photos", body);
         }
       } catch {}
-      setMe({ id: uid, isAnon: false }); // relation effect takes over the exit
-      setClaimPhase(null);
+      // Straight through to the photos (Mark, July 25: no gate ceremony):
+      // the app shows onboarding first for brand-new accounts, then opens
+      // the card with the album loaded. Brief pause so the joined pushes
+      // aren't cancelled by the navigation.
+      setClaimBusy(false);
+      await new Promise((r) => setTimeout(r, 400));
+      window.location.href = `/?night=${ctx.activity_id}`;
+      return;
     } catch (e) {
       console.error("Claim code failed:", e);
       setClaimErr("That code didn't work — check it and try again.");
@@ -559,17 +565,12 @@ export function CollectScreen({ token }) {
                 </p>
                 {me.isAnon && claimPhase === null && (
                   <>
-                    <p className="mt-2 text-xs text-neutral-500">
-                      Want to see everyone's photos from {ctx.venue_name}?
-                      Create an account (or sign back in) — your photos come
-                      with you.
-                    </p>
                     <button
                       type="button"
                       onClick={() => setClaimPhase("email")}
                       className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white active:scale-95 transition"
                     >
-                      Sign up / sign in
+                      See all the photos
                     </button>
                     <a
                       href="/install"
@@ -581,13 +582,17 @@ export function CollectScreen({ token }) {
                 )}
                 {me.isAnon && claimPhase === "email" && (
                   <div className="mt-3">
+                    <p className="text-xs text-neutral-500">
+                      Your email gets you in — we'll send a code. Your photos
+                      come with you.
+                    </p>
                     <input
                       type="email"
                       value={claimEmail}
                       onChange={(e) => setClaimEmail(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && startClaimEmail()}
                       placeholder="you@email.com"
-                      className="w-full rounded-2xl bg-neutral-50 px-4 py-3.5 text-base outline-none border border-neutral-100 focus:border-[#455d3b]"
+                      className="mt-2 w-full rounded-2xl bg-neutral-50 px-4 py-3.5 text-base outline-none border border-neutral-100 focus:border-[#455d3b]"
                     />
                     <div className="mt-2 flex justify-center">
                       <Turnstile
@@ -637,7 +642,7 @@ export function CollectScreen({ token }) {
                       onClick={submitClaimCode}
                       className="mt-2 w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white disabled:bg-neutral-300 active:scale-[0.99] transition"
                     >
-                      {claimBusy ? "Checking…" : "Sign in"}
+                      {claimBusy ? "One sec…" : "See the photos"}
                     </button>
                     {claimErr && (
                       <p className="mt-2 text-xs text-red-600">{claimErr}</p>
