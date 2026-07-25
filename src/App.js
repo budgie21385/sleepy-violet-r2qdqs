@@ -344,6 +344,10 @@ export default function RestaurantSwipeMVP() {
   // Comment thread opened from a venue card's check-in strip or the
   // checked-in pill (the Activity tab renders its own sheet internally).
   const [threadCheckin, setThreadCheckin] = useState(null);
+  // Return ticket for profile → album hops (July 25): opening an event from
+  // a friend's profile closes the profile (cards render under it); closing
+  // that card reopens the profile you came from.
+  const profileReturnRef = useRef(null);
   // Post-check-in sheet (what's-on label + tag friends) — its own layer over
   // the venue card, opened on every FRESH check-in. { venue, activity }.
   const [checkinSheet, setCheckinSheet] = useState(null);
@@ -3617,7 +3621,9 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onOpenThread={(t) => {
             // Cards render UNDER the profile (3600 < 3900) — close the
-            // profile first so the album opens on top.
+            // profile first so the album opens on top, and remember whose
+            // profile to return to when the card closes.
+            profileReturnRef.current = lookupUserId;
             setLookupUserId(null);
             setThreadCheckin(t);
           }}
@@ -3704,7 +3710,14 @@ if (authLoading || guestLoading) {
           thread={threadCheckin}
           userId={session?.user?.id}
           showToast={showToast}
-          onClose={() => setThreadCheckin(null)}
+          onClose={() => {
+            setThreadCheckin(null);
+            // Came from a friend's profile? Land back on it.
+            if (profileReturnRef.current) {
+              setLookupUserId(profileReturnRef.current);
+              profileReturnRef.current = null;
+            }
+          }}
           onOpenProfile={(uid) => {
             // Lookup sits ABOVE the card now — only close for self (Profile
             // tab lives beneath everything).
