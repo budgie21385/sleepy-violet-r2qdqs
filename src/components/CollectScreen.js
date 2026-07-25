@@ -343,17 +343,17 @@ export function CollectScreen({ token }) {
         });
         if (cErr) console.error("Claim reassign failed:", cErr);
       }
-      // Seed the door name ONLY if the account has none — a forgotten
-      // account's real name must never be overwritten.
-      if (displayName) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("display_name")
-          .eq("id", uid)
-          .maybeSingle();
-        if (!prof?.display_name) {
-          await supabase.rpc("set_guest_name", { p_name: displayName });
-        }
+      // Name rule (Mark, July 25 — "Flynn" became "mark+event"): the
+      // signup trigger seeds display_name from the EMAIL local part, so
+      // "only if empty" never fired. Instead: BRAND-NEW account (created
+      // by this very code-send) → the door name wins. Existing account →
+      // never touched, whatever they have is theirs.
+      const isNewAccount =
+        data?.user?.created_at &&
+        Date.now() - new Date(data.user.created_at).getTime() <
+          10 * 60 * 1000;
+      if (displayName && isNewAccount) {
+        await supabase.rpc("set_guest_name", { p_name: displayName });
       }
       // They're in the night now: twin check-in (Been + avatar row) and a
       // "joined" push to everyone already on the album.
