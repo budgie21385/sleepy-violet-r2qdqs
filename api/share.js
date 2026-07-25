@@ -127,9 +127,10 @@ export default async function handler(req, res) {
       const rows = await r.json();
       const c = Array.isArray(rows) ? rows[0] : null;
       if (c && c.owner_name) {
-        title = `Add your photos from ${c.venue_name} 📸`;
+        // Event name leads; venue is the fallback (mirrors the landing).
+        title = `Add your photos from ${c.label || c.venue_name} 📸`;
         description = `${c.owner_name} is collecting everyone's photos${
-          c.label ? ` · ${c.label}` : ""
+          c.label ? ` · ${c.venue_name}` : ""
         } — no app, no account needed.`;
       }
     }

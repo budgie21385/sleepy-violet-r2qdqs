@@ -4542,7 +4542,7 @@ function ProfileTab({
         <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 space-y-4">
           <label className="block">
             <span className="block text-xs font-medium text-neutral-700 mb-1.5">
-              Display name
+              Your name
             </span>
             <input
               type="text"

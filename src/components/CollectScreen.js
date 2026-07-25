@@ -427,12 +427,15 @@ export function CollectScreen({ token }) {
         <p className="text-xs font-semibold uppercase tracking-wide text-[#455d3b]">
           Flanit
         </p>
+        {/* Event name leads when there is one; the venue is the fallback
+            (Mark, July 25: "the main CTA should be centered around the
+            event name"). */}
         <h1 className="mt-2 text-2xl font-semibold tracking-tight leading-snug">
-          Add your photos from {ctx.venue_name}
+          Add your photos from {ctx.label || ctx.venue_name}
         </h1>
         <p className="mt-1 text-sm text-neutral-600">
           {ctx.owner_name} is collecting everyone's photos
-          {ctx.label ? ` · ${ctx.label}` : ""} · {niceDate(ctx.checked_in_at)}
+          {ctx.label ? ` · ${ctx.venue_name}` : ""} · {niceDate(ctx.checked_in_at)}
         </p>
 
         {/* Name door — once per device, skipped for known browsers. */}
