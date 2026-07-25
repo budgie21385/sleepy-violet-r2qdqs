@@ -349,6 +349,8 @@ export default function RestaurantSwipeMVP() {
   // the whole page on return, Mark: "it reloads their page"). Closing the
   // card just unhides it: state, data and scroll all survive.
   const [lookupHidden, setLookupHidden] = useState(false);
+  // Profile "Places" counter → the map wearing one friend's trail.
+  const [mapPersonFilter, setMapPersonFilter] = useState(null); // {userId, profile}
   // Post-check-in sheet (what's-on label + tag friends) — its own layer over
   // the venue card, opened on every FRESH check-in. { venue, activity }.
   const [checkinSheet, setCheckinSheet] = useState(null);
@@ -3551,6 +3553,8 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
+          personFilter={mapPersonFilter}
+          onClearPersonFilter={() => setMapPersonFilter(null)}
           onVenueAdded={(venue, opts) => {
             // New venue from the search sheet → into the pool state so the
             // card/fly-to work. Only mark saved when the user chose "Add to
@@ -3623,6 +3627,11 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           hidden={lookupHidden}
           onOpenProfile={(uid) => openProfile(uid)}
+          onShowOnMap={(p) => {
+            setLookupUserId(null);
+            setMapPersonFilter({ userId: lookupUserId, profile: p });
+            setTab("map");
+          }}
           onOpenThread={(t) => {
             // Cards render UNDER the profile (3600 < 3900) — hide the
             // profile so the album shows, without unmounting it.
@@ -5885,8 +5894,17 @@ function ProfileLookupScreen({
   showToast,
   onOpenThread,
   onOpenProfile,
+  onShowOnMap,
   hidden = false,
 }) {
+  // Subviews behind the counters (July 25): "photos" = flat grid,
+  // "friends" = the full list. Reset when the profile re-targets.
+  const [subView, setSubView] = useState(null);
+  const [gridUrls, setGridUrls] = useState({}); // web_path → signed URL
+  useEffect(() => {
+    setSubView(null);
+    setGridUrls({});
+  }, [userId]);
   const [profile, setProfile] = useState(null);
   const [friendship, setFriendship] = useState(null); // null = no row found
   const [loading, setLoading] = useState(true);
@@ -6123,12 +6141,54 @@ function ProfileLookupScreen({
           })),
         photoCount: photos.length,
         placeCount: new Set(acts.map((a) => a.venue_id).filter(Boolean)).size,
+        // Flat grid + tap-through metadata (Photos counter subview).
+        photoList: photos
+          .slice()
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+        actMeta: Object.fromEntries(
+          acts.map((a) => [
+            a.id,
+            {
+              venueName: vById[a.venue_id]?.name || "a spot",
+              label: a.label || null,
+              created_at: a.created_at,
+              venueObj: vById[a.venue_id] || null,
+            },
+          ])
+        ),
       });
     })();
     return () => {
       cancelled = true;
     };
   }, [isFriends, userId]);
+
+  // Sign the flat grid's URLs when the Photos subview opens (covers are
+  // signed in the main fetch; the rest wait until someone actually looks).
+  useEffect(() => {
+    if (subView !== "photos" || !theirData?.photoList?.length) return;
+    const missing = theirData.photoList
+      .map((p) => p.web_path)
+      .filter((path) => path && !gridUrls[path]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const { data: signed } = await supabase.storage
+        .from("checkin-photos")
+        .createSignedUrls(missing, 3600);
+      if (cancelled || !signed) return;
+      setGridUrls((prev) => ({
+        ...prev,
+        ...Object.fromEntries(
+          signed.filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl])
+        ),
+      }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [subView, theirData, gridUrls]);
+
   const pendingFromMe = status === "pending" && iAmRequester;
   const pendingToMe = status === "pending" && !iAmRequester;
   // 'declined' or 'blocked' or no row → treat as openable (Add friend).
@@ -6474,23 +6534,40 @@ function ProfileLookupScreen({
             {theirData !== null && (
               <>
                 <div className="mb-3 grid grid-cols-3 gap-2 text-center">
-                  {[
-                    ["Events", theirData.albums.length],
-                    ["Photos", theirData.photoCount],
-                    ["Places", theirData.placeCount],
-                  ].map(([label, n]) => (
-                    <div
-                      key={label}
-                      className="rounded-2xl bg-white border border-neutral-100 py-2.5"
-                    >
-                      <p className="text-base font-semibold text-neutral-900">
-                        {n}
-                      </p>
-                      <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
-                        {label}
-                      </p>
-                    </div>
-                  ))}
+                  <div className="rounded-2xl bg-white border border-neutral-100 py-2.5">
+                    <p className="text-base font-semibold text-neutral-900">
+                      {theirData.albums.length}
+                    </p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                      Events
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={theirData.photoCount === 0}
+                    onClick={() => setSubView("photos")}
+                    className="rounded-2xl bg-white border border-neutral-100 py-2.5 active:scale-95 transition"
+                  >
+                    <p className="text-base font-semibold text-neutral-900">
+                      {theirData.photoCount}
+                    </p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                      Photos{theirData.photoCount > 0 ? " ›" : ""}
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={theirData.placeCount === 0}
+                    onClick={() => onShowOnMap?.(profile)}
+                    className="rounded-2xl bg-white border border-neutral-100 py-2.5 active:scale-95 transition"
+                  >
+                    <p className="text-base font-semibold text-neutral-900">
+                      {theirData.placeCount}
+                    </p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                      Places{theirData.placeCount > 0 ? " ›" : ""}
+                    </p>
+                  </button>
                 </div>
                 {(() => {
                   const latest = theirCheckins?.[0];
@@ -6616,12 +6693,118 @@ function ProfileLookupScreen({
                       )}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setSubView("friends")}
+                    className="flex w-16 shrink-0 flex-col items-center gap-1 active:scale-95 transition"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 bg-white text-base text-neutral-500">
+                      ›
+                    </span>
+                    <span className="text-[10px] text-neutral-500">
+                      See all
+                    </span>
+                  </button>
                 </div>
               </>
             )}
           </>
         )}
       </div>
+
+      {/* PHOTOS subview — the flat grid behind the Photos counter. Tiles
+          open the check-in card with that photo's lightbox deep-linked. */}
+      {subView === "photos" && theirData && (
+        <div className="fixed inset-0 z-[3910] bg-[#fdf6f0] overflow-y-auto pb-24">
+          <div className="max-w-sm mx-auto p-4">
+            <button
+              type="button"
+              onClick={() => setSubView(null)}
+              className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600"
+            >
+              <ArrowLeft size={16} /> {displayName}
+            </button>
+            <p className="mb-3 text-lg font-semibold tracking-tight">
+              Photos · {theirData.photoCount}
+            </p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {theirData.photoList.map((ph) => {
+                const meta = theirData.actMeta[ph.activity_id];
+                return (
+                  <button
+                    key={ph.id}
+                    type="button"
+                    onClick={() =>
+                      meta &&
+                      onOpenThread?.({
+                        activityId: ph.activity_id,
+                        ownerId: userId,
+                        ownerName: displayName,
+                        ownerProfile: profile || null,
+                        venueName: meta.venueName,
+                        label: meta.label,
+                        venueObj: meta.venueObj,
+                        timestamp: meta.created_at,
+                        photoId: ph.id,
+                      })
+                    }
+                    className="aspect-square overflow-hidden rounded-lg bg-[#dfe9da] active:scale-95 transition"
+                  >
+                    {gridUrls[ph.web_path] && (
+                      <img
+                        src={gridUrls[ph.web_path]}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FRIENDS subview — the full list behind "See all". */}
+      {subView === "friends" && theirFriends && (
+        <div className="fixed inset-0 z-[3910] bg-[#fdf6f0] overflow-y-auto pb-24">
+          <div className="max-w-sm mx-auto p-4">
+            <button
+              type="button"
+              onClick={() => setSubView(null)}
+              className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600"
+            >
+              <ArrowLeft size={16} /> {displayName}
+            </button>
+            <p className="mb-3 text-lg font-semibold tracking-tight">
+              Friends · {theirFriends.length}
+            </p>
+            <div className="rounded-3xl bg-white p-3 shadow-sm border border-neutral-100 space-y-1">
+              {theirFriends.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => onOpenProfile?.(f.id)}
+                  className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left active:bg-neutral-50"
+                >
+                  <FriendAvatar profile={f} small />
+                  <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                    {f.self ? "You" : f.display_name || "Someone"}
+                    {f.username ? (
+                      <span className="text-neutral-400"> · @{f.username}</span>
+                    ) : null}
+                  </span>
+                  {f.mutual && !f.self && (
+                    <span className="shrink-0 rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#455d3b]">
+                      Mutual
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

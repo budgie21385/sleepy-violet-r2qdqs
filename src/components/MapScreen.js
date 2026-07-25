@@ -86,6 +86,31 @@ function createFriendsIcon(group) {
   });
 }
 
+// One person's whole trail (July 25 — profile "Places" counter): a pin at
+// every venue they've checked in, visit count + recency on the label.
+function createPersonIcon(group, profile) {
+  const style =
+    "width:30px;height:30px;border-radius:50%;border:2px solid #455d3b;box-shadow:0 1px 3px rgba(0,0,0,0.3);";
+  const avatar = profile?.avatar_url
+    ? `<img src="${esc(profile.avatar_url)}" style="${style}object-fit:cover;background:#fff;" />`
+    : `<div style="${style}background:#455d3b;color:#fff;display:flex;align-items:center;justify-content:center;font:600 13px sans-serif;">${esc(
+        (profile?.display_name || "?").trim().charAt(0).toUpperCase()
+      )}</div>`;
+  const n = group.visits.length;
+  const label = `${n > 1 ? `×${n} · ` : ""}${timeAgoShort(
+    group.visits[0].created_at
+  )}`;
+  return L.divIcon({
+    html: `<div style="display:flex;flex-direction:column;align-items:center;">
+      <div>${avatar}</div>
+      <div style="margin-top:2px;background:#fff;border-radius:9999px;padding:1px 7px;font:600 10px sans-serif;color:#455d3b;box-shadow:0 1px 2px rgba(0,0,0,0.25);white-space:nowrap;">${label}</div>
+    </div>`,
+    className: "friend-checkin-icon",
+    iconSize: [90, 52],
+    iconAnchor: [45, 48],
+  });
+}
+
 function MapResizer() {
   const map = useMap();
   useEffect(() => {
@@ -125,7 +150,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onClearPersonFilter }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -269,6 +294,55 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       cancelled = true;
     };
   }, [mapFilter, userId]);
+
+  // PERSON FILTER (profile "Places"): the whole trail of ONE friend — every
+  // venue they've checked in, grouped per venue with visit counts. RLS
+  // trims to friends-only for free.
+  const [personPins, setPersonPins] = useState([]);
+  useEffect(() => {
+    if (!personFilter?.userId) {
+      setPersonPins([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: rows } = await supabase
+        .from("activities")
+        .select("venue_id, created_at, label")
+        .eq("kind", "checkin")
+        .eq("user_id", personFilter.userId)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      const byVenue = new Map();
+      for (const r of rows || []) {
+        if (!r.venue_id) continue;
+        if (!byVenue.has(r.venue_id)) byVenue.set(r.venue_id, []);
+        byVenue.get(r.venue_id).push(r);
+      }
+      const ids = Array.from(byVenue.keys());
+      if (ids.length === 0) {
+        if (!cancelled) setPersonPins([]);
+        return;
+      }
+      const { data: vens } = await supabase
+        .from("venues")
+        .select("*")
+        .in("id", ids);
+      if (cancelled) return;
+      setPersonPins(
+        (vens || [])
+          .filter(
+            (v) =>
+              Number.isFinite(Number(v.latitude)) &&
+              Number.isFinite(Number(v.longitude))
+          )
+          .map((v) => ({ venue: v, visits: byVenue.get(v.id) }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [personFilter?.userId]);
 
   // Group visible check-ins by venue — the per-viewer "Mark and John are at X"
   // clustering. One pin per venue, entries newest-first.
@@ -515,7 +589,22 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
-          {mapFilter === "friends" ? (
+          {personFilter ? (
+            // One friend's trail — their places, their pins.
+            personPins.map((group) => (
+              <Marker
+                key={`p_${group.venue.id}`}
+                position={[
+                  Number(group.venue.latitude),
+                  Number(group.venue.longitude),
+                ]}
+                icon={createPersonIcon(group, personFilter.profile)}
+                eventHandlers={{
+                  click: () => setSelectedVenue(group.venue),
+                }}
+              />
+            ))
+          ) : mapFilter === "friends" ? (
             // Friend pins: one per venue, avatar stack + name label, no
             // clustering (there are few, and each pin IS the information).
             friendPins.map((group) => (
@@ -553,7 +642,23 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           )}
         </MapContainer>
       </div>
-      {mapFilter === "friends" && friendCheckins !== null && friendPins.length === 0 && (
+      {personFilter && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-[2100]"
+          style={{ top: 120 }}
+        >
+          <button
+            type="button"
+            onClick={onClearPersonFilter}
+            className="flex items-center gap-2 rounded-full bg-white/95 border border-neutral-100 shadow-lg px-4 py-2 text-xs font-medium text-neutral-800 active:scale-95 transition"
+          >
+            {(personFilter.profile?.display_name || "Their").split(" ")[0]}'s
+            places · {personPins.length}
+            <span className="text-neutral-400">✕</span>
+          </button>
+        </div>
+      )}
+      {!personFilter && mapFilter === "friends" && friendCheckins !== null && friendPins.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
