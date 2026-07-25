@@ -6011,7 +6011,7 @@ function ProfileLookupScreen({
     (async () => {
       const { data: rows } = await supabase
         .from("activities")
-        .select("id, venue_id, created_at, label")
+        .select("id, venue_id, created_at, label, joined_from")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
@@ -6020,38 +6020,67 @@ function ProfileLookupScreen({
       const venueIds = Array.from(
         new Set(acts.map((r) => r.venue_id).filter(Boolean))
       );
-      const [vRes, pRes] = await Promise.all([
+      const [vRes, pRes, pMineRes] = await Promise.all([
         venueIds.length
           ? supabase.from("venues").select("*").in("id", venueIds)
           : Promise.resolve({ data: [] }),
         acts.length
           ? supabase
               .from("activity_photos")
-              .select("id, activity_id, web_path, created_at")
+              .select("id, activity_id, user_id, web_path, created_at")
               .in("activity_id", acts.map((a) => a.id))
           : Promise.resolve({ data: [] }),
+        // Photos they AUTHORED that live on someone else's check-in —
+        // via-link uploads attach to the ALBUM OWNER's shard (doctrine),
+        // so without this their own contribution is invisible on their
+        // profile (July 25 field test).
+        supabase
+          .from("activity_photos")
+          .select("id, activity_id, user_id, web_path, created_at")
+          .eq("user_id", userId),
       ]);
       const vById = Object.fromEntries(
         (vRes.data || []).map((v) => [v.id, v])
       );
       const photos = pRes.data || [];
+      const have = new Set(photos.map((p) => p.id));
+      for (const ph of pMineRes.data || []) {
+        if (have.has(ph.id)) continue;
+        // Re-home onto their twin shard: the twin joined THROUGH the
+        // activity the photo lives on (joined_from edge).
+        const home = acts.find((a) => a.joined_from === ph.activity_id);
+        if (home) {
+          photos.push({ ...ph, activity_id: home.id });
+          have.add(ph.id);
+        }
+      }
       const byAct = {};
       for (const ph of photos) {
         if (!byAct[ph.activity_id]) byAct[ph.activity_id] = [];
         byAct[ph.activity_id].push(ph);
       }
-      const albumActs = acts.filter((a) => (byAct[a.id] || []).length > 0);
+      // An event = a check-in with MEDIA or a TITLE (July 25, Mark: titled
+      // nights are events even before photos land). Untitled + photoless
+      // stays in "Also been".
+      const albumActs = acts.filter(
+        (a) => (byAct[a.id] || []).length > 0 || a.label
+      );
       const covers = albumActs.map((a) => {
-        const ps = byAct[a.id]
+        const ps = (byAct[a.id] || [])
           .slice()
           .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
-        return { act: a, count: ps.length, coverPath: ps[0].web_path };
+        return {
+          act: a,
+          count: ps.length,
+          coverPath: ps[0]?.web_path || null,
+        };
       });
       let coverUrlByPath = {};
-      if (covers.length > 0) {
+      const coverPaths = covers.map((c) => c.coverPath).filter(Boolean);
+      if (coverPaths.length > 0) {
         const { data: signed } = await supabase.storage
           .from("checkin-photos")
-          .createSignedUrls(covers.map((c) => c.coverPath), 3600);
+          .createSignedUrls(coverPaths, 3600);
         coverUrlByPath = Object.fromEntries(
           (signed || [])
             .filter((s) => s.signedUrl)
@@ -6077,10 +6106,15 @@ function ProfileLookupScreen({
           label: c.act.label || null,
           created_at: c.act.created_at,
           count: c.count,
-          coverUrl: coverUrlByPath[c.coverPath] || null,
+          // Photo cover when they have one; the venue's own photo otherwise
+          // (titled-but-photoless events still get a face).
+          coverUrl:
+            (c.coverPath && coverUrlByPath[c.coverPath]) ||
+            vById[c.act.venue_id]?.image_cdn_urls?.[0] ||
+            null,
         })),
         alsoBeen: acts
-          .filter((a) => !(byAct[a.id] || []).length)
+          .filter((a) => !(byAct[a.id] || []).length && !a.label)
           .map((a) => ({
             id: a.id,
             venueName: vById[a.venue_id]?.name || "a spot",
@@ -6511,9 +6545,11 @@ function ProfileLookupScreen({
                                 className="h-full w-full object-cover"
                               />
                             )}
-                            <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white">
-                              {al.count} 📷
-                            </span>
+                            {al.count > 0 && (
+                              <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white">
+                                {al.count} 📷
+                              </span>
+                            )}
                           </div>
                           <p className="mt-1 truncate text-xs font-semibold text-neutral-900">
                             {al.title}
