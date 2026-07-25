@@ -14,7 +14,7 @@
 //   * Every upload batch pushes the owner ("X added N photos to your night").
 import { useState, useEffect, useRef } from "react";
 import { Turnstile } from "@marsidev/react-turnstile";
-import { Camera, Check, UserPlus } from "lucide-react";
+import { Camera, Check } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { uploadViaCollectLink } from "../lib/photos";
 import { sendPush } from "../lib/push";
@@ -388,22 +388,8 @@ export function CollectScreen({ token }) {
     setClaimBusy(false);
   }
 
-  async function addOwnerAsFriend() {
-    if (!me || me.isAnon || !ctx) return;
-    setRelation("pending");
-    const { error } = await supabase.from("friendships").insert({
-      requester_id: me.id,
-      addressee_id: ctx.owner_id,
-      status: "pending",
-    });
-    if (error && error.code !== "23505") setRelation("none");
-    else
-      sendPush(
-        ctx.owner_id,
-        "New friend request",
-        `${displayName || "Someone"} from ${ctx.venue_name} wants to add you`
-      );
-  }
+  // (Add-owner-as-friend moved to the check-in card's banner — the landing
+  // stays single-purpose: photos in, photos seen.)
 
   const landedCount = uploads.filter((u) => u.url).length;
 
@@ -664,29 +650,17 @@ export function CollectScreen({ token }) {
                 )}
                 {!me.isAnon && (relation === "none" || relation === "pending") && (
                   <>
+                    {/* Same exit as friends — the Add-[owner] ask lives on
+                        the check-in card itself (the banner), not here. */}
                     <p className="mt-2 text-xs text-neutral-500">
-                      You're in — this one's in your Been too. Add{" "}
-                      {ctx.owner_name} as a friend to keep up beyond it.
+                      You're in — this one's in your Been too.
                     </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <a
-                        href={`/?night=${ctx.activity_id}`}
-                        className="inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
-                      >
-                        See all the photos
-                      </a>
-                      <button
-                        type="button"
-                        disabled={relation === "pending"}
-                        onClick={addOwnerAsFriend}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-[#455d3b] px-5 py-2.5 text-sm font-medium text-[#455d3b] disabled:opacity-60"
-                      >
-                        <UserPlus size={14} />
-                        {relation === "pending"
-                          ? "Requested ✓"
-                          : `Add ${ctx.owner_name}`}
-                      </button>
-                    </div>
+                    <a
+                      href={`/?night=${ctx.activity_id}`}
+                      className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
+                    >
+                      See all the photos
+                    </a>
                   </>
                 )}
                 {!me.isAnon && relation === "self" && (
