@@ -1111,8 +1111,11 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         const other =
           f.requester_id === userId ? f.addressee_id : f.requester_id;
         if (f.status === "accepted") relById[other] = "friend";
+        // Direction-aware (July 25): they asked → Accept, I asked →
+        // Requested. Same rule as the check-in card.
         else if (f.status === "pending" && !relById[other])
-          relById[other] = "pending";
+          relById[other] =
+            f.requester_id === userId ? "pending_out" : "pending_in";
       }
       // Group people per night root.
       const peopleByRoot = new Map();
@@ -1243,6 +1246,28 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       );
     drawerCache = { uid: userId, items: all };
     setItems(all);
+  }
+
+  // Accept an incoming request by USER (the meet-people rows know uids,
+  // not friendship ids). Row-count-checked — a stale request surfaces.
+  async function acceptRequestFrom(otherId) {
+    setActing(otherId);
+    const { data: rows, error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted" })
+      .eq("requester_id", otherId)
+      .eq("addressee_id", userId)
+      .eq("status", "pending")
+      .select("requester_id");
+    setActing(null);
+    if (error || !rows || rows.length === 0) {
+      console.error("Accept by uid failed:", error);
+      showToast?.("Couldn't accept that");
+      return;
+    }
+    showToast?.("You're friends now");
+    sendPush(otherId, "Request accepted 🎉", "You're now friends on Flanit");
+    await load();
   }
 
   async function sendRequest(otherId) {
@@ -1624,6 +1649,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
                 onAddAnyFriend={(uid) => sendRequest(uid)}
+                onAcceptAnyFriend={(uid) => acceptRequestFrom(uid)}
                 onAcceptTag={() => acceptTag(item)}
                 onRemoveTag={() => removeTag(item)}
                 onSessionNudgeYes={() => sessionNudgeYes(item)}
@@ -1666,6 +1692,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
                 onAddAnyFriend={(uid) => sendRequest(uid)}
+                onAcceptAnyFriend={(uid) => acceptRequestFrom(uid)}
                 onAcceptTag={() => acceptTag(item)}
                 onRemoveTag={() => removeTag(item)}
                 onSessionNudgeYes={() => sessionNudgeYes(item)}
@@ -1744,7 +1771,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAddAnyFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAddAnyFriend, onAcceptAnyFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -1963,11 +1990,19 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               ) : (
                 <button
                   type="button"
-                  disabled={p.rel === "pending" || acting}
-                  onClick={() => onAddAnyFriend?.(p.id)}
+                  disabled={p.rel === "pending_out" || acting}
+                  onClick={() =>
+                    p.rel === "pending_in"
+                      ? onAcceptAnyFriend?.(p.id)
+                      : onAddAnyFriend?.(p.id)
+                  }
                   className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 active:scale-95 transition"
                 >
-                  {p.rel === "pending" ? "Requested" : "Add"}
+                  {p.rel === "pending_in"
+                    ? "Accept"
+                    : p.rel === "pending_out"
+                    ? "Requested"
+                    : "Add"}
                 </button>
               )}
             </div>
