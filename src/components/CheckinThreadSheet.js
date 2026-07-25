@@ -635,7 +635,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       for (const r of rows || []) {
         const other = r.requester_id === userId ? r.addressee_id : r.requester_id;
         if (r.status === "accepted") map[other] = "friend";
-        else if (r.status === "pending" && !map[other]) map[other] = "pending";
+        // Direction matters (July 25, Mark: MB had already REQUESTED — the
+        // card offered "Add friend" instead of completing the handshake):
+        // they asked → Accept; I asked → Requested.
+        else if (r.status === "pending" && !map[other])
+          map[other] = r.requester_id === userId ? "pending_out" : "pending_in";
       }
       setFriendState(map);
     })();
@@ -645,7 +649,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   }, [view, nightPeople.length, userId]);
 
   async function addFriendFromAlbum(otherId) {
-    setFriendState((prev) => ({ ...prev, [otherId]: "pending" }));
+    setFriendState((prev) => ({ ...prev, [otherId]: "pending_out" }));
     const { error } = await supabase
       .from("friendships")
       .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
@@ -655,6 +659,27 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       return;
     }
     sendPush(otherId, "New friend request", "Someone from your night wants to add you");
+  }
+
+  // They already asked — one tap completes the handshake (their request was
+  // consent #1, this tap is #2).
+  async function acceptFriendFromAlbum(otherId) {
+    setFriendState((prev) => ({ ...prev, [otherId]: "friend" }));
+    const { data: rows, error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted" })
+      .eq("requester_id", otherId)
+      .eq("addressee_id", userId)
+      .eq("status", "pending")
+      .select("requester_id");
+    // RLS-filtered updates return success with ZERO rows — check both.
+    if (error || !rows || rows.length === 0) {
+      setFriendState((prev) => ({ ...prev, [otherId]: "pending_in" }));
+      showToast?.("Couldn't accept that");
+      return;
+    }
+    showToast?.("You're friends now");
+    sendPush(otherId, "Request accepted 🎉", "You're now friends on Flanit");
   }
 
   // Delete your OWN media (bytes count toward YOUR credit — so you can
@@ -1373,16 +1398,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           friendState[thread.ownerId] !== "friend" && (
             <div className="mx-4 mt-3 flex items-center gap-3 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-3">
               <p className="flex-1 min-w-0 text-xs text-[#2f3f29]">
-                You were at {thread.venueName} with {thread.ownerName} — add
-                them as a friend?
+                {friendState[thread.ownerId] === "pending_in"
+                  ? `${thread.ownerName} already asked to be friends — accept?`
+                  : `You were at ${thread.venueName} with ${thread.ownerName} — add them as a friend?`}
               </p>
               <button
                 type="button"
-                disabled={friendState[thread.ownerId] === "pending"}
-                onClick={() => addFriendFromAlbum(thread.ownerId)}
+                disabled={friendState[thread.ownerId] === "pending_out"}
+                onClick={() =>
+                  friendState[thread.ownerId] === "pending_in"
+                    ? acceptFriendFromAlbum(thread.ownerId)
+                    : addFriendFromAlbum(thread.ownerId)
+                }
                 className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60 active:scale-95 transition"
               >
-                {friendState[thread.ownerId] === "pending"
+                {friendState[thread.ownerId] === "pending_in"
+                  ? "Accept"
+                  : friendState[thread.ownerId] === "pending_out"
                   ? "Requested"
                   : "Add friend"}
               </button>
@@ -1756,11 +1788,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                             </button>
                             <button
                               type="button"
-                              disabled={friendState[p.id] === "pending"}
-                              onClick={() => addFriendFromAlbum(p.id)}
+                              disabled={friendState[p.id] === "pending_out"}
+                              onClick={() =>
+                                friendState[p.id] === "pending_in"
+                                  ? acceptFriendFromAlbum(p.id)
+                                  : addFriendFromAlbum(p.id)
+                              }
                               className="shrink-0 rounded-full bg-[#455d3b] text-white text-xs font-medium px-3 py-1.5 disabled:opacity-50"
                             >
-                              {friendState[p.id] === "pending"
+                              {friendState[p.id] === "pending_in"
+                                ? "Accept"
+                                : friendState[p.id] === "pending_out"
                                 ? "Requested"
                                 : "Add friend"}
                             </button>
