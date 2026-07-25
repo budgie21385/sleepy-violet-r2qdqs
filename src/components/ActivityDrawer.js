@@ -1061,6 +1061,123 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       });
     })();
 
+    // ---- Meet the people from your check-ins (July 25, Mark): for each
+    // recent night of MINE with other participants, one item listing
+    // everyone — Add buttons for non-friends, display-only for friends.
+    // Surfaces only while someone's still addable; ages out after 14 days.
+    const meetPeopleP = (async () => {
+      const since = new Date(Date.now() - 14 * 864e5).toISOString();
+      const { data: mine } = await supabase
+        .from("activities")
+        .select("id, venue_id, joined_from, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (!mine || mine.length === 0) return [];
+      // Night members, one level around each shard: parent (or self) +
+      // direct joins + accepted tags. Deep chains are rare; the card
+      // handles them — this is a nudge, not the source of truth.
+      const rootIds = Array.from(
+        new Set(mine.map((a) => a.joined_from || a.id))
+      );
+      const [rootsRes, kidsRes] = await Promise.all([
+        supabase
+          .from("activities")
+          .select("id, user_id, joined_from")
+          .in("id", rootIds),
+        supabase
+          .from("activities")
+          .select("id, user_id, joined_from")
+          .in("joined_from", rootIds),
+      ]);
+      const nightActs = [...(rootsRes.data || []), ...(kidsRes.data || [])];
+      const allActIds = Array.from(
+        new Set([...nightActs.map((a) => a.id), ...mine.map((a) => a.id)])
+      );
+      const { data: tagRows2 } = await supabase
+        .from("activity_tags")
+        .select("activity_id, tagged_user_id")
+        .in("activity_id", allActIds)
+        .eq("status", "accepted");
+      // My standing with everyone (accepted + pending, either direction).
+      const { data: frRows } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id, status")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      const relById = {};
+      for (const f of frRows || []) {
+        const other =
+          f.requester_id === userId ? f.addressee_id : f.requester_id;
+        if (f.status === "accepted") relById[other] = "friend";
+        else if (f.status === "pending" && !relById[other])
+          relById[other] = "pending";
+      }
+      // Group people per night root.
+      const peopleByRoot = new Map();
+      const addPerson = (root, uid) => {
+        if (!uid || uid === userId) return;
+        if (!peopleByRoot.has(root)) peopleByRoot.set(root, new Set());
+        peopleByRoot.get(root).add(uid);
+      };
+      const rootOf = (actId) => {
+        const a =
+          nightActs.find((x) => x.id === actId) ||
+          mine.find((x) => x.id === actId);
+        return a ? a.joined_from || a.id : actId;
+      };
+      for (const a of nightActs) addPerson(a.joined_from || a.id, a.user_id);
+      for (const t of tagRows2 || [])
+        addPerson(rootOf(t.activity_id), t.tagged_user_id);
+      // Build one item per MY shard whose night has ≥1 non-friend.
+      const candidates = [];
+      const seenRoots = new Set();
+      for (const m of mine) {
+        const root = m.joined_from || m.id;
+        if (seenRoots.has(root)) continue;
+        seenRoots.add(root);
+        const people = Array.from(peopleByRoot.get(root) || []);
+        if (people.length === 0) continue;
+        if (!people.some((uid) => !relById[uid])) continue; // all connected
+        candidates.push({ shard: m, people });
+      }
+      if (candidates.length === 0) return [];
+      const pplIds = Array.from(
+        new Set(candidates.flatMap((c) => c.people))
+      );
+      const mpVenueIds = Array.from(
+        new Set(candidates.map((c) => c.shard.venue_id).filter(Boolean))
+      );
+      const [pplRes, mvRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", pplIds),
+        mpVenueIds.length
+          ? supabase.from("venues").select("id, name").in("id", mpVenueIds)
+          : { data: [] },
+      ]);
+      const mpProfById = Object.fromEntries(
+        (pplRes.data || []).map((p) => [p.id, p])
+      );
+      const mvById = Object.fromEntries(
+        (mvRes.data || []).map((v) => [v.id, v])
+      );
+      return candidates.map((c) => ({
+        kind: "meet_people",
+        id: `meet_${c.shard.joined_from || c.shard.id}`,
+        activityId: c.shard.id,
+        venueName: mvById[c.shard.venue_id]?.name || "your check-in",
+        people: c.people.map((uid) => ({
+          id: uid,
+          profile: mpProfById[uid] || null,
+          rel: relById[uid] || "none",
+        })),
+        timestamp: c.shard.created_at,
+      }));
+    })();
+
     // Everything lands together — one concurrent wave instead of a waterfall.
     const [
       [incomingItems, acceptedItems],
@@ -1077,6 +1194,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       joinReqItems,
       venueShareItems,
       guestUploadItems,
+      meetPeopleItems,
     ] = await Promise.all([
       requestsP,
       submittedP,
@@ -1092,6 +1210,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       joinReqP,
       venueShareP,
       guestUploadP,
+      meetPeopleP,
     ]);
 
     const all = [
@@ -1111,6 +1230,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...joinReqItems,
       ...venueShareItems,
       ...guestUploadItems,
+      ...meetPeopleItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -1503,6 +1623,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onAccept={() => setStatus(item.friendshipId, "accepted")}
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
+                onAddAnyFriend={(uid) => sendRequest(uid)}
                 onAcceptTag={() => acceptTag(item)}
                 onRemoveTag={() => removeTag(item)}
                 onSessionNudgeYes={() => sessionNudgeYes(item)}
@@ -1544,6 +1665,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onAccept={() => setStatus(item.friendshipId, "accepted")}
                 onDecline={() => setStatus(item.friendshipId, "declined")}
                 onAddFriend={() => sendRequest(item.otherId)}
+                onAddAnyFriend={(uid) => sendRequest(uid)}
                 onAcceptTag={() => acceptTag(item)}
                 onRemoveTag={() => removeTag(item)}
                 onSessionNudgeYes={() => sessionNudgeYes(item)}
@@ -1622,7 +1744,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAddAnyFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -1808,6 +1930,48 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           >
             Decline
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "meet_people") {
+    return (
+      <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
+        <p className="mb-2 text-sm text-neutral-900">
+          You were at{" "}
+          <strong className="font-medium">{item.venueName}</strong> — add the
+          people from it
+        </p>
+        <div className="space-y-2">
+          {item.people.map((p) => (
+            <div key={p.id} className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => onOpenProfile?.(p.id)}
+                className="flex flex-1 min-w-0 items-center gap-2.5 text-left"
+              >
+                <FriendAvatar profile={p.profile} small />
+                <span className="truncate text-sm text-neutral-800">
+                  {p.profile?.display_name || "Someone"}
+                </span>
+              </button>
+              {p.rel === "friend" ? (
+                <span className="shrink-0 text-[11px] font-medium text-neutral-400">
+                  Friends ✓
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={p.rel === "pending" || acting}
+                  onClick={() => onAddAnyFriend?.(p.id)}
+                  className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 active:scale-95 transition"
+                >
+                  {p.rel === "pending" ? "Requested" : "Add"}
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     );
