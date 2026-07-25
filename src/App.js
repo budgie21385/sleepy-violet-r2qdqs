@@ -344,10 +344,11 @@ export default function RestaurantSwipeMVP() {
   // Comment thread opened from a venue card's check-in strip or the
   // checked-in pill (the Activity tab renders its own sheet internally).
   const [threadCheckin, setThreadCheckin] = useState(null);
-  // Return ticket for profile → album hops (July 25): opening an event from
-  // a friend's profile closes the profile (cards render under it); closing
-  // that card reopens the profile you came from.
-  const profileReturnRef = useRef(null);
+  // Profile → album hops (July 25): the profile stays MOUNTED but invisible
+  // while the card is up (visibility, not unmount — unmounting refetched
+  // the whole page on return, Mark: "it reloads their page"). Closing the
+  // card just unhides it: state, data and scroll all survive.
+  const [lookupHidden, setLookupHidden] = useState(false);
   // Post-check-in sheet (what's-on label + tag friends) — its own layer over
   // the venue card, opened on every FRESH check-in. { venue, activity }.
   const [checkinSheet, setCheckinSheet] = useState(null);
@@ -1770,6 +1771,7 @@ useEffect(() => {
   // the lookup screen (which sits ABOVE cards, so nothing needs closing).
   function openProfile(uid) {
     if (!uid) return;
+    setLookupHidden(false); // any explicit profile open unhides the screen
     if (uid === session?.user?.id) {
       setLookupUserId(null);
       setTab("profile");
@@ -3619,12 +3621,11 @@ if (authLoading || guestLoading) {
           viewerUserId={session?.user?.id}
           onBack={() => setLookupUserId(null)}
           showToast={showToast}
+          hidden={lookupHidden}
           onOpenThread={(t) => {
-            // Cards render UNDER the profile (3600 < 3900) — close the
-            // profile first so the album opens on top, and remember whose
-            // profile to return to when the card closes.
-            profileReturnRef.current = lookupUserId;
-            setLookupUserId(null);
+            // Cards render UNDER the profile (3600 < 3900) — hide the
+            // profile so the album shows, without unmounting it.
+            setLookupHidden(true);
             setThreadCheckin(t);
           }}
         />
@@ -3712,11 +3713,7 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onClose={() => {
             setThreadCheckin(null);
-            // Came from a friend's profile? Land back on it.
-            if (profileReturnRef.current) {
-              setLookupUserId(profileReturnRef.current);
-              profileReturnRef.current = null;
-            }
+            setLookupHidden(false); // unhide the profile if we came from one
           }}
           onOpenProfile={(uid) => {
             // Lookup sits ABOVE the card now — only close for self (Profile
@@ -5886,6 +5883,7 @@ function ProfileLookupScreen({
   onBack,
   showToast,
   onOpenThread,
+  hidden = false,
 }) {
   const [profile, setProfile] = useState(null);
   const [friendship, setFriendship] = useState(null); // null = no row found
@@ -6136,7 +6134,13 @@ function ProfileLookupScreen({
   return (
     // z-3900: ABOVE check-in cards (3600) and lightbox (3800) — profile taps
     // from any card must land on top, not underneath (Mark's bug report).
-    <div className="fixed inset-0 z-[3900] bg-[#fdf6f0] overflow-y-auto pb-24">
+    // `invisible` (not unmount) while an album opened FROM here is up —
+    // visibility keeps state + scroll so the return is instant.
+    <div
+      className={`fixed inset-0 z-[3900] bg-[#fdf6f0] overflow-y-auto pb-24 ${
+        hidden ? "invisible" : ""
+      }`}
+    >
       <div className="max-w-sm mx-auto p-4">
         <button
           type="button"
