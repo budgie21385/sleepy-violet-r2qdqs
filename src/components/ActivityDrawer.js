@@ -1272,18 +1272,42 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 
   async function sendRequest(otherId) {
     setActing(otherId);
+    // Declined rows are immutable under RLS and their unique constraint
+    // blocks a fresh insert — DELETE then INSERT, same as
+    // ProfileLookupScreen.sendRequest (the May 25 re-request fix; this
+    // mount never got it — July 25 field test: "Couldn't send request").
+    const { data: existing } = await supabase
+      .from("friendships")
+      .select("id, status")
+      .or(
+        `and(requester_id.eq.${userId},addressee_id.eq.${otherId}),and(requester_id.eq.${otherId},addressee_id.eq.${userId})`
+      )
+      .limit(1);
+    const row = existing?.[0] || null;
+    if (row && row.status === "accepted") {
+      setActing(null);
+      showToast?.("You're already friends");
+      await load();
+      return;
+    }
+    if (row && row.status === "declined") {
+      await supabase.from("friendships").delete().eq("id", row.id);
+    }
     const { error } = await supabase
       .from("friendships")
       .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
-    if (!error) {
-      sendPush(otherId, "New friend request", "Someone wants to add you on Flanit");
-    }
     setActing(null);
+    if (error && error.code === "23505") {
+      showToast?.("Request already sent");
+      await load();
+      return;
+    }
     if (error) {
       console.error("Drawer add friend failed:", error);
       showToast?.("Couldn't send request");
       return;
     }
+    sendPush(otherId, "New friend request", "Someone wants to add you on Flanit");
     showToast?.("Request sent");
     await load();
   }
@@ -1965,7 +1989,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
   if (item.kind === "meet_people") {
     return (
       <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
-        <p className="mb-2 text-sm text-neutral-900">
+        {/* pr clears the corner timestamp overlay. */}
+        <p className="mb-2 pr-12 text-sm text-neutral-900">
           You were at{" "}
           <strong className="font-medium">{item.venueName}</strong> — add the
           people from it
