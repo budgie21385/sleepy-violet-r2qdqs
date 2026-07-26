@@ -206,7 +206,9 @@ async function cachePhotos(supabase, key, venueId, photoNames) {
   const cdnUrls = [];
   for (let i = 0; i < Math.min(photoNames.length, MAX_PHOTOS); i++) {
     try {
-      const resp = await fetch(`${photoMediaUrl(photoNames[i], 1000)}&key=${key}`);
+      // 800px (July 25, derivatives pass): plenty for a max-w-sm card at
+      // 2-3x DPR, and ~40% fewer bytes than the old 1000px pulls.
+      const resp = await fetch(`${photoMediaUrl(photoNames[i], 800)}&key=${key}`);
       if (!resp.ok) continue;
       const buf = Buffer.from(await resp.arrayBuffer());
       const path = `${venueId}/${i}.jpg`;

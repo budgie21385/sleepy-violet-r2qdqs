@@ -16,7 +16,19 @@ export async function fetchVenueDetails(venueId) {
     .select("*")
     .eq("id", venueId)
     .maybeSingle();
-  if (data) cache.set(venueId, data);
+  if (data) {
+    cache.set(venueId, data);
+    // Pre-warm the hero: the browser starts pulling the first photo the
+    // moment details land, so the carousel paints instead of loading.
+    const hero = Array.isArray(data.image_cdn_urls)
+      ? data.image_cdn_urls[0]
+      : null;
+    if (hero) {
+      try {
+        new Image().src = hero;
+      } catch {}
+    }
+  }
   return data;
 }
 
