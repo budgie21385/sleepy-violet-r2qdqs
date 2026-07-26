@@ -254,9 +254,9 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
 // or app switch no longer restarts a 50MB transfer from zero (Mark's video
 // died exactly this way; single PUTs don't survive it).
 async function uploadResumable(path, file, contentType, onProgress) {
-  // FLANIT-UPLOAD logs: temporary diagnostics for the stuck-video hunt
-  // (July 18) — strip once video uploads are verified in the field.
-  const log = (...a) => console.log("FLANIT-UPLOAD", ...a);
+  // Diagnostics silenced July 25 (video uploads field-verified). Flip to
+  // console.log if the stuck-video hunt ever reopens.
+  const log = () => {};
   log("tus: importing client");
   const mod = await import("tus-js-client");
   const Upload = mod.Upload || mod.default?.Upload;
@@ -325,10 +325,8 @@ export async function uploadCheckinVideo(userId, activityId, file, onProgress) {
   const origPath = `${base}_orig.${extOf(file)}`;
   const webPath = `${base}_web.jpg`;
 
-  console.log("FLANIT-UPLOAD video: making thumb", file.name, file.size);
   const thumbBlob = await makeVideoThumb(file);
 
-  console.log("FLANIT-UPLOAD video: uploading thumb");
   const { error: webErr } = await supabase.storage
     .from(BUCKET)
     .upload(webPath, thumbBlob, { contentType: "image/jpeg" });

@@ -43,6 +43,29 @@ export default async function handler(req, res) {
   }
   if (targetUserId === actor.id) return res.status(200).json({ sent: 0 });
 
+  // Rate limit (July 25): 60 sends per sender per hour. Closes the
+  // spam-anyone hole without breaking collect links, which legitimately
+  // push non-friends. Fails OPEN if the log table is missing so a skipped
+  // SQL run degrades to the old behaviour, not broken pushes.
+  try {
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count, error: rlErr } = await admin
+      .from("push_send_log")
+      .select("id", { count: "exact", head: true })
+      .eq("sender", actor.id)
+      .gte("created_at", hourAgo);
+    if (!rlErr && count != null && count >= 60) {
+      return res.status(429).json({ error: "rate limited" });
+    }
+    if (!rlErr) {
+      await admin
+        .from("push_send_log")
+        .insert({ sender: actor.id, target: targetUserId });
+    }
+  } catch {
+    /* fail open */
+  }
+
   webpush.setVapidDetails("mailto:mark@sayi.do", pub, priv);
 
   const { data: subs } = await admin
