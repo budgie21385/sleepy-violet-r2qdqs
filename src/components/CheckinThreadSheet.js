@@ -678,7 +678,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       showToast?.("Couldn't send that");
       return;
     }
-    sendPush(otherId, "New friend request", "Someone from your night wants to add you");
+    sendPush(
+      otherId,
+      "New friend request",
+      `Someone from ${thread.label || thread.venueName} wants to add you`
+    );
   }
 
   // They already asked — one tap completes the handshake (their request was
@@ -1040,7 +1044,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         sendPush(
           friendId,
           "You've been checked in",
-          `${thread.venueName} — accept to add the night to your Been list`
+          `${thread.label || thread.venueName} — accept to add it to your Been list`
         );
       }
     }
@@ -1287,7 +1291,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               onClick={() => setView("card")}
               className="mb-3 text-xs font-medium text-[#455d3b]"
             >
-              ‹ Back to the night
+              ‹ Back
             </button>
             <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
               Friends on Flanit
@@ -1617,7 +1621,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     sendPush(
                       thread.ownerId,
                       "You're together 🎉",
-                      `They joined your night at ${thread.venueName}`
+                      `They're at ${thread.label || thread.venueName} with you`
                     );
                   } else if (!existingTag) {
                     await supabase.from("activity_tags").upsert(
@@ -1635,7 +1639,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     sendPush(
                       thread.ownerId,
                       "Someone's here too",
-                      `They joined your night at ${thread.venueName} — add them to your check-in?`
+                      `They're at ${thread.label || thread.venueName} too — add them to your check-in?`
                     );
                   }
                 }
@@ -1672,7 +1676,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               onClick={() => setView("card")}
               className="mb-2 text-xs font-medium text-[#455d3b]"
             >
-              ‹ Back to the night
+              ‹ Back
             </button>
             <div className="flex gap-1.5 overflow-x-auto pb-1">
               {photos.map((p) => (
@@ -1773,7 +1777,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               onClick={() => setView("card")}
               className="mb-3 text-xs font-medium text-[#455d3b]"
             >
-              ‹ Back to the night
+              ‹ Back
             </button>
             {(() => {
               const others = nightPeople.filter(

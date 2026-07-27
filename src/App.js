@@ -918,7 +918,7 @@ useEffect(() => {
               sendPush(
                 hostId,
                 "Everyone's in 🎉",
-                "All picks are submitted — choose tonight's spot"
+                "All picks are submitted — make the call"
               );
             }
           });
@@ -2939,7 +2939,7 @@ if (authLoading || guestLoading) {
         <div className="w-full max-w-sm">
           <div className="text-center">
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-              {hostName} wants to pick dinner with you
+              {hostName} wants to pick a place with you
             </h1>
           </div>
 
@@ -6816,7 +6816,7 @@ function ProfileLookupScreen({
 // starts on a random line so repeat visitors don't see the same one twice.
 const LOADING_LINES = [
   "finding the good spots",
-  "checking who's out tonight",
+  "checking who's out",
   "scouting the laneways",
   "asking the group chat",
   "reading the chalkboard menu",
@@ -7048,7 +7048,7 @@ function InviteShareScreen({
       try {
         await navigator.share({
           title: "Join my session",
-          text: "Help me pick a place to eat",
+          text: "Help me pick a place",
           url: shareUrl,
         });
       } catch (err) {

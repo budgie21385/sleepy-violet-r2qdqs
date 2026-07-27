@@ -172,7 +172,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
         sendPush(
           friendId,
           "You've been checked in",
-          `${venue.name} — accept to add the night to your Been list`
+          `${labelText?.trim() || venue.name} — accept to add it to your Been list`
         );
       }
     }
@@ -228,7 +228,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
                 value={labelText}
                 onChange={(e) => setLabelText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveLabel()}
-                placeholder="What's on tonight?"
+                placeholder="What's on?"
                 maxLength={80}
                 className="flex-1 min-w-0 bg-transparent text-base focus:outline-none"
               />

@@ -306,7 +306,7 @@ export function AddVenueSheet({ onClose, onAdded, onOpenVenue, onCheckInAfterAdd
                 Add to my list
               </button>
               <p className="text-[11px] text-neutral-400 text-center mt-2">
-                Check in = just tonight · Add = pins on your map
+                Check in = just this once · Add = pins on your map
               </p>
             </div>
           )}

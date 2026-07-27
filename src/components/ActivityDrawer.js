@@ -616,7 +616,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           activityId: t.activity_id,
           otherId: t.tagged_user_id,
           profile: pById[t.tagged_user_id] || null,
-          venueName: vNameById[actById[t.activity_id]?.venue_id] || "your night",
+          venueName: vNameById[actById[t.activity_id]?.venue_id] || "your check-in",
           timestamp: t.created_at,
         });
       }
@@ -660,7 +660,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           activityId: a.id,
           ownerId: userId,
           venueObj: venById[a.venue_id] || null,
-          venueName: venById[a.venue_id]?.name || "last night's spot",
+          venueName: venById[a.venue_id]?.name || "that spot",
           label: a.label || null,
           checkinTimestamp: a.created_at,
           // Surfaces as NEW the morning after, not buried at check-in time.
@@ -1522,7 +1522,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       sendPush(
         item.otherId,
         "Tag accepted 🎉",
-        `Your night at ${item.venueName} just got company`
+        `Your check-in at ${item.venueName} just got company`
       );
     }
     setActing(null);
@@ -2082,8 +2082,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           </div>
         </button>
         <p className="mb-2.5 px-0.5 text-[11px] text-neutral-500">
-          Accept and it's on your Been list too — add your photos and videos
-          of the night. Decline takes your name off {name}'s check-in.
+          Accept and it's on your Been list too — add your photos and
+          videos. Decline takes your name off {name}'s check-in.
         </p>
         <div className="flex gap-2">
           <button

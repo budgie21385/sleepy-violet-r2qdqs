@@ -153,7 +153,7 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
               🔔
             </span>
             <h1 className="mt-4 text-2xl font-semibold tracking-tight">
-              Don't miss the night
+              Don't miss a thing
             </h1>
             <p className="mt-1.5 text-sm text-neutral-600">
               When friends check in, react or check you in — it lands on your

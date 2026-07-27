@@ -57,7 +57,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [thread, setThread] = useState(null);
   const [reloadTick, setReloadTick] = useState(0); // refetch after leave/changes
-  // "+ Add a night" — backdated check-in for a night you didn't check in.
+  // "+ Add a past check-in" — backdated check-in for a night you didn't check in.
   // The cluster merge does the magic afterwards: if friends checked in that
   // night, your backdated card shows their photos/comments too.
   const [addOpen, setAddOpen] = useState(false);
@@ -296,7 +296,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             onClick={() => setAddOpen(true)}
             className="ml-auto rounded-full bg-[#455d3b] text-white text-xs font-medium px-3.5 py-2 active:scale-95 transition"
           >
-            + Add a night
+            + Add a past check-in
           </button>
         </div>
 
@@ -382,7 +382,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             }}
           >
             <div className="flex items-start justify-between mb-1">
-              <p className="text-sm font-semibold">Add a past night</p>
+              <p className="text-sm font-semibold">Add a past check-in</p>
               <button
                 type="button"
                 aria-label="Close"
