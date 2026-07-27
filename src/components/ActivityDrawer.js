@@ -1182,6 +1182,14 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     })();
 
     // Everything lands together — one concurrent wave instead of a waterfall.
+    // Each block is FUSED (July 25: one failing block was blanking the whole
+    // drawer — Promise.all rejects as a unit). A failure logs its name and
+    // contributes nothing; everyone else still renders.
+    const fuse = (p, name, empty = []) =>
+      p.catch((e) => {
+        console.error(`Drawer block failed: ${name}`, e);
+        return empty;
+      });
     const [
       [incomingItems, acceptedItems],
       submittedItems,
@@ -1199,21 +1207,21 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       guestUploadItems,
       meetPeopleItems,
     ] = await Promise.all([
-      requestsP,
-      submittedP,
-      decidedP,
-      connectP,
-      checkinP,
-      tagNudgeP,
-      commentP,
-      inviteP,
-      photoNudgeP,
-      sessionNudgeP,
-      friendNewsP,
-      joinReqP,
-      venueShareP,
-      guestUploadP,
-      meetPeopleP,
+      fuse(requestsP, "requests", [[], []]),
+      fuse(submittedP, "submitted"),
+      fuse(decidedP, "decided"),
+      fuse(connectP, "connect"),
+      fuse(checkinP, "checkins"),
+      fuse(tagNudgeP, "tagNudges"),
+      fuse(commentP, "comments", [[], []]),
+      fuse(inviteP, "invites"),
+      fuse(photoNudgeP, "photoNudges"),
+      fuse(sessionNudgeP, "sessionNudges"),
+      fuse(friendNewsP, "friendNews"),
+      fuse(joinReqP, "joinReqs"),
+      fuse(venueShareP, "venueShares"),
+      fuse(guestUploadP, "guestUploads"),
+      fuse(meetPeopleP, "meetPeople"),
     ]);
 
     const all = [
