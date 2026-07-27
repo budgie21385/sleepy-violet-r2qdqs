@@ -937,7 +937,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       const { data: rawTags } = await supabase
         .from("activity_tags")
         .select("tagged_user_id, status, requested_by")
-        .eq("activity_id", thread.activityId)
+        .in(
+          "activity_id",
+          Array.from(
+            new Set([thread.activityId, uploadTargetId].filter(Boolean))
+          )
+        )
         .neq("status", "removed");
       // Pending SELF-requests (joiner asking on) render nowhere until the
       // owner accepts — their card, their consent.
@@ -973,7 +978,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     return () => {
       cancelled = true;
     };
-  }, [thread.activityId, tagRefresh]);
+  }, [thread.activityId, uploadTargetId, tagRefresh]);
 
   // Owner can tag friends FROM the card — serves "+ Add a night" and any
   // check-in where tagging was skipped in the moment. Same consent flow:
@@ -1007,6 +1012,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   }
 
   async function toggleTag(friendId) {
+    // Tags land on MY shard (July 25): activity_tags RLS is "tag into your
+    // OWN check-in", so a participant tagging the anchor shard was always
+    // rejected. Tagging my own shard invites my friend into the NIGHT —
+    // they accept, their twin joins the graph, they appear on this card.
+    const tagTarget = uploadTargetId || thread.activityId;
     const isTagged = taggedIds.has(friendId);
     setTaggedIds((prev) => {
       const next = new Set(prev);
@@ -1018,19 +1028,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       await supabase
         .from("activity_tags")
         .delete()
-        .eq("activity_id", thread.activityId)
+        .eq("activity_id", tagTarget)
         .eq("tagged_user_id", friendId);
     } else {
       const { error } = await supabase
         .from("activity_tags")
-        .insert({ activity_id: thread.activityId, tagged_user_id: friendId });
+        .insert({ activity_id: tagTarget, tagged_user_id: friendId });
       if (error && error.code === "23505") {
         // They already self-requested (joined) — your tag is the second
         // consent. Complete it, no nudges either way.
         await supabase
           .from("activity_tags")
           .update({ status: "accepted", responded_at: new Date().toISOString() })
-          .eq("activity_id", thread.activityId)
+          .eq("activity_id", tagTarget)
           .eq("tagged_user_id", friendId);
         sendPush(friendId, "You're on the check-in 🎉", `Added at ${thread.venueName}`);
       } else if (error) {
@@ -1261,7 +1271,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   >
                     View all
                   </button>
-                  {isOwner && (
+                  {(isOwner || uploadTargetId) && (
                     <button
                       type="button"
                       onClick={openTagPicker}
@@ -1284,7 +1294,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
 
         {/* Add-people view (Mark's mock): friends as ROWS with Add buttons,
             not a chip cloud. Collect link section lands here in Stage 2. */}
-        {view === "add" && isOwner && (
+        {view === "add" && (isOwner || uploadTargetId) && (
           <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
             <button
               type="button"

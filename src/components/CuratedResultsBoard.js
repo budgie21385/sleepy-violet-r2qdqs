@@ -8,6 +8,7 @@ import { supabase } from "../supabaseClient";
 import { Check } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
+import { sendPush } from "../lib/push";
 
 export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile }) {
   const [results, setResults] = useState(null);
@@ -87,6 +88,17 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
     }
     setDecidedVenueId(venueId);
     if (showToast) showToast("Locked it in");
+    // Tell everyone in the session where they're going (July 25 — the
+    // curated board was the last silent decide path; concurrent already
+    // did this). Everyone who JOINED, not just voters. Anon guests have no
+    // subscription so it's a no-op for them — they get the in-app
+    // "You're going to [venue]" item when they return.
+    const vName = venueById[venueId]?.name || "the spot";
+    for (const p of participantsList || []) {
+      if (p.user_id && p.user_id !== userId) {
+        sendPush(p.user_id, `${vName} it is 🎉`, "The plan is locked — see you there");
+      }
+    }
     // Pop the venue card so the picker (and viewers) see the spot + can share it.
     const v = venueById[venueId];
     if (v) setDetailVenue(v);
