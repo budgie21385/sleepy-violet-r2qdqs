@@ -826,6 +826,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       0,
       Math.max(0, MAX_PHOTOS_PER_CHECKIN - myPhotoCount - pending.length)
     );
+    const promises = [];
     for (const file of files) {
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const isVideo = (file.type || "").startsWith("video/");
@@ -839,7 +840,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             ? "Videos can be up to 50MB"
             : "Couldn't upload that"
         );
+        return null; // count only landed uploads for the push
       });
+      promises.push(promise);
       trackUpload({ key, activityId: uploadTargetId, isVideo, preview }, promise);
       if (isVideo) {
         // Frame grab lands in ~a second — long before the bytes do.
@@ -847,6 +850,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           .then((url) => updateUploadPreview(key, url))
           .catch(() => {});
       }
+    }
+    // Tell the night (July 25 — in-app adds were silent while via-link
+    // uploads pushed): once the batch lands, everyone else on the night
+    // hears about it.
+    if (promises.length > 0 && nightPeople.length > 1) {
+      Promise.all(promises).then((rows) => {
+        const landed = rows.filter(Boolean).length;
+        if (landed === 0) return;
+        const meProfile = nightPeople.find((p) => p.id === userId);
+        const nm = meProfile?.display_name || "Someone";
+        const body = `${nm} added ${landed} ${
+          landed === 1 ? "photo" : "photos"
+        } at ${thread.venueName}`;
+        for (const p of nightPeople) {
+          if (p.id !== userId) sendPush(p.id, "📸 New photos", body);
+        }
+      });
     }
   }
 

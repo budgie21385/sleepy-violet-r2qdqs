@@ -980,33 +980,92 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         }));
     })();
 
-    // ---- Guest uploads (collect links, July 25): "[Name] added N photos
-    // to your night" — items for MY shards (other participants get the
-    // push; their card shows the photos regardless). ----
+    // ---- New photos on MY nights (July 25 v2): "[Name] added N photos at
+    // [venue]". Covers BOTH via-link guests (photos parked on my shard) and
+    // participants uploading from the card (photos on THEIR shard in my
+    // night) — the in-app path was silent (Mark's field test). Night = my
+    // shard's root + one level, same walk as meet-people. ----
     const guestUploadP = (async () => {
       const since = new Date(Date.now() - 7 * 864e5).toISOString();
+      const { data: mineRows } = await supabase
+        .from("activities")
+        .select("id, venue_id, label, joined_from, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .gte("created_at", new Date(Date.now() - 30 * 864e5).toISOString())
+        .order("created_at", { ascending: false })
+        .limit(10);
+      const myShards = mineRows || [];
+      if (myShards.length === 0) return [];
+      const guRootIds = Array.from(
+        new Set(myShards.map((a) => a.joined_from || a.id))
+      );
+      const [guRootsRes, guKidsRes] = await Promise.all([
+        supabase
+          .from("activities")
+          .select("id, user_id, joined_from")
+          .in("id", guRootIds),
+        supabase
+          .from("activities")
+          .select("id, user_id, joined_from")
+          .in("joined_from", guRootIds),
+      ]);
+      const gActById = {};
+      for (const a of [
+        ...(guRootsRes.data || []),
+        ...(guKidsRes.data || []),
+        ...myShards,
+      ])
+        gActById[a.id] = a;
+      const nightIds = Object.keys(gActById).map(Number);
       const { data: ph } = await supabase
         .from("activity_photos")
         .select("id, activity_id, user_id, created_at")
-        .eq("via_link", true)
+        .in("activity_id", nightIds)
         .neq("user_id", userId)
         .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(30);
       if (!ph || ph.length === 0) return [];
-      const actIds = Array.from(new Set(ph.map((r) => r.activity_id)));
-      const { data: acts } = await supabase
-        .from("activities")
-        .select("id, user_id, venue_id, label")
-        .in("id", actIds)
-        .eq("user_id", userId);
-      if (!acts || acts.length === 0) return [];
-      const gActById = Object.fromEntries(acts.map((a) => [a.id, a]));
-      const mine = ph.filter((r) => gActById[r.activity_id]);
-      if (mine.length === 0) return [];
-      const upIds = Array.from(new Set(mine.map((r) => r.user_id)));
+      const rootOf = (id) => {
+        const a = gActById[id];
+        return a ? a.joined_from || a.id : id;
+      };
+      const myShardByRoot = {};
+      for (const m of myShards) {
+        const r = m.joined_from || m.id;
+        if (!myShardByRoot[r]) myShardByRoot[r] = m;
+      }
+      // One item per (night, uploader): count + newest photo for deep-link.
+      const groups = new Map();
+      for (const r of ph) {
+        const root = rootOf(r.activity_id);
+        if (!myShardByRoot[root]) continue;
+        const k = `${root}_${r.user_id}`;
+        const g =
+          groups.get(k) || {
+            count: 0,
+            latest: r.created_at,
+            photoId: r.id,
+            root,
+            user_id: r.user_id,
+          };
+        g.count += 1;
+        if (r.created_at > g.latest) {
+          g.latest = r.created_at;
+          g.photoId = r.id;
+        }
+        groups.set(k, g);
+      }
+      const list = Array.from(groups.values());
+      if (list.length === 0) return [];
+      const upIds = Array.from(new Set(list.map((g) => g.user_id)));
       const gVenueIds = Array.from(
-        new Set(acts.map((a) => a.venue_id).filter(Boolean))
+        new Set(
+          list
+            .map((g) => myShardByRoot[g.root]?.venue_id)
+            .filter(Boolean)
+        )
       );
       const [profsRes, vRes] = await Promise.all([
         supabase
@@ -1023,39 +1082,20 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const gvById = Object.fromEntries(
         (vRes.data || []).map((v) => [v.id, v])
       );
-      // One item per (shard, uploader): count + newest photo for deep-link.
-      const groups = new Map();
-      for (const r of mine) {
-        const k = `${r.activity_id}_${r.user_id}`;
-        const g =
-          groups.get(k) || {
-            count: 0,
-            latest: r.created_at,
-            photoId: r.id,
-            activity_id: r.activity_id,
-            user_id: r.user_id,
-          };
-        g.count += 1;
-        if (r.created_at > g.latest) {
-          g.latest = r.created_at;
-          g.photoId = r.id;
-        }
-        groups.set(k, g);
-      }
-      return Array.from(groups.values()).map((g) => {
-        const act = gActById[g.activity_id];
+      return list.map((g) => {
+        const shard = myShardByRoot[g.root];
         return {
           kind: "guest_upload",
-          id: `gup_${g.activity_id}_${g.user_id}`,
-          activityId: g.activity_id,
-          ownerId: userId, // my shard — the thread opens as my own card
+          id: `gup_${g.root}_${g.user_id}`,
+          activityId: shard.id, // open the card as MY shard; cluster merges
+          ownerId: userId,
           photoId: g.photoId,
           count: g.count,
           profile: gpById[g.user_id] || null,
-          venueId: act.venue_id,
-          venueName: gvById[act.venue_id]?.name || "your night",
-          venueObj: gvById[act.venue_id] || null,
-          label: act.label || null,
+          venueId: shard.venue_id,
+          venueName: gvById[shard.venue_id]?.name || "your check-in",
+          venueObj: gvById[shard.venue_id] || null,
+          label: shard.label || null,
           timestamp: g.latest,
         };
       });
