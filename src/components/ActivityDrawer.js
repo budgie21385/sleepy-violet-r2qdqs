@@ -800,44 +800,119 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 
     // ---- Comments + reactions on MY check-ins ----
     const commentP = (async () => {
+      // Comments + reactions across MY NIGHTS (July 25 doctrine, Mark-
+      // approved): comments are conversation — every participant gets the
+      // item, wherever in the night they landed. Reactions: card-level →
+      // every participant; photo/comment reactions → only the author.
+      // Night = my shard's root + one level (same walk as the photo items).
       let commentItems = [];
       let reactionItems = [];
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: myActs } = await supabase
         .from("activities")
-        .select("id, venue_id, created_at, label")
+        .select("id, venue_id, created_at, label, joined_from")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .gte("created_at", weekAgo);
       if (myActs && myActs.length > 0) {
-        const actIds = myActs.map((a) => a.id);
+        const cRootIds = Array.from(
+          new Set(myActs.map((a) => a.joined_from || a.id))
+        );
+        const [cRootsRes, cKidsRes] = await Promise.all([
+          supabase
+            .from("activities")
+            .select("id, joined_from")
+            .in("id", cRootIds),
+          supabase
+            .from("activities")
+            .select("id, joined_from")
+            .in("joined_from", cRootIds),
+        ]);
+        const cActById = {};
+        for (const a of [
+          ...(cRootsRes.data || []),
+          ...(cKidsRes.data || []),
+          ...myActs,
+        ])
+          cActById[a.id] = a;
+        const cNightIds = Object.keys(cActById).map(Number);
+        const cRootOf = (id) => {
+          const a = cActById[id];
+          return a ? a.joined_from || a.id : id;
+        };
+        const myShardByRoot = {};
+        for (const m of myActs) {
+          const r = m.joined_from || m.id;
+          if (!myShardByRoot[r]) myShardByRoot[r] = m;
+        }
         const [cRes, rRes] = await Promise.all([
           supabase
             .from("activity_comments")
             .select("id, activity_id, user_id, body, created_at, photo_id")
-            .in("activity_id", actIds)
+            .in("activity_id", cNightIds)
             .neq("user_id", userId)
             .order("created_at", { ascending: false })
             .limit(20),
           supabase
             .from("activity_reactions")
-            .select("id, activity_id, photo_id, user_id, emoji, created_at")
-            .in("activity_id", actIds)
+            .select("id, activity_id, photo_id, comment_id, user_id, emoji, created_at")
+            .in("activity_id", cNightIds)
             .neq("user_id", userId)
             .order("created_at", { ascending: false })
-            .limit(20),
+            .limit(30),
         ]);
-        const cRows = cRes.data || [];
-        const rRows = rRes.data || []; // table may predate SQL run → just empty
+        const cRows = (cRes.data || []).filter(
+          (c) => myShardByRoot[cRootOf(c.activity_id)]
+        );
+        let rRows = (rRes.data || []).filter(
+          (r) => myShardByRoot[cRootOf(r.activity_id)]
+        );
+        // Targeted reactions (photo/comment) are applause for the AUTHOR —
+        // keep only the ones on MY content.
+        const targeted = rRows.filter((r) => r.photo_id || r.comment_id);
+        if (targeted.length > 0) {
+          const phIds = Array.from(
+            new Set(targeted.map((r) => r.photo_id).filter(Boolean))
+          );
+          const cmIds = Array.from(
+            new Set(targeted.map((r) => r.comment_id).filter(Boolean))
+          );
+          const [phRes, cmRes] = await Promise.all([
+            phIds.length
+              ? supabase
+                  .from("activity_photos")
+                  .select("id, user_id")
+                  .in("id", phIds)
+              : Promise.resolve({ data: [] }),
+            cmIds.length
+              ? supabase
+                  .from("activity_comments")
+                  .select("id, user_id")
+                  .in("id", cmIds)
+              : Promise.resolve({ data: [] }),
+          ]);
+          const phOwner = Object.fromEntries(
+            (phRes.data || []).map((x) => [x.id, x.user_id])
+          );
+          const cmOwner = Object.fromEntries(
+            (cmRes.data || []).map((x) => [x.id, x.user_id])
+          );
+          rRows = rRows.filter((r) => {
+            if (!r.photo_id && !r.comment_id) return true; // card-level
+            const owner = r.photo_id ? phOwner[r.photo_id] : cmOwner[r.comment_id];
+            return owner === userId;
+          });
+        }
         if (cRows.length > 0 || rRows.length > 0) {
-          const actById = Object.fromEntries(myActs.map((a) => [a.id, a]));
           const personIds = Array.from(
             new Set([...cRows, ...rRows].map((x) => x.user_id))
           );
           const venueIds = Array.from(
             new Set(
               [...cRows, ...rRows]
-                .map((x) => actById[x.activity_id]?.venue_id)
+                .map(
+                  (x) => myShardByRoot[cRootOf(x.activity_id)]?.venue_id
+                )
                 .filter(Boolean)
             )
           );
@@ -846,7 +921,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               .from("profiles")
               .select("id, display_name, username, avatar_url")
               .in("id", personIds),
-            supabase.from("venues").select("*").in("id", venueIds),
+            venueIds.length
+              ? supabase.from("venues").select("*").in("id", venueIds)
+              : Promise.resolve({ data: [] }),
           ]);
           const profById2 = Object.fromEntries(
             (profsRes.data || []).map((p) => [p.id, p])
@@ -854,46 +931,48 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           const vById = Object.fromEntries(
             (venuesRes.data || []).map((v) => [v.id, v])
           );
-          // One item per check-in (latest comment shown), not one per comment.
+          // One item per NIGHT (latest comment shown), not one per comment.
           const seenAct = new Set();
           for (const c of cRows) {
-            if (seenAct.has(c.activity_id)) continue;
-            seenAct.add(c.activity_id);
-            const act = actById[c.activity_id];
+            const root = cRootOf(c.activity_id);
+            if (seenAct.has(root)) continue;
+            seenAct.add(root);
+            const shard = myShardByRoot[root];
             commentItems.push({
               kind: "checkin_comment",
               id: `cmt_${c.id}`,
-              activityId: c.activity_id,
-              ownerId: userId, // it's YOUR check-in — enables add-photos in the card
+              activityId: shard.id, // MY shard — card merges the cluster
+              ownerId: userId,
               profile: profById2[c.user_id] || null,
-              venueName: vById[act?.venue_id]?.name || "your check-in",
-              venueObj: vById[act?.venue_id] || null, // venue link inside the card
+              venueName: vById[shard.venue_id]?.name || "your check-in",
+              venueObj: vById[shard.venue_id] || null,
               body: c.body,
-              photoId: c.photo_id || null, // photo comment → open its lightbox
-              label: act?.label || null,
-              checkinTimestamp: act?.created_at,
+              photoId: c.photo_id || null,
+              label: shard.label || null,
+              checkinTimestamp: shard.created_at,
               timestamp: c.created_at,
             });
           }
-          // Same rule for reactions: latest per check-in.
+          // Same rule for reactions: latest per night.
           const seenRx = new Set();
           for (const r of rRows) {
-            if (seenRx.has(r.activity_id)) continue;
-            seenRx.add(r.activity_id);
-            const act = actById[r.activity_id];
+            const root = cRootOf(r.activity_id);
+            if (seenRx.has(root)) continue;
+            seenRx.add(root);
+            const shard = myShardByRoot[root];
             reactionItems.push({
               kind: "checkin_reaction",
               id: `rx_${r.id}`,
-              activityId: r.activity_id,
+              activityId: shard.id,
               ownerId: userId,
               profile: profById2[r.user_id] || null,
               emoji: r.emoji,
               onPhoto: !!r.photo_id,
-              photoId: r.photo_id || null, // photo reaction → open its lightbox
-              venueName: vById[act?.venue_id]?.name || "your check-in",
-              venueObj: vById[act?.venue_id] || null,
-              label: act?.label || null,
-              checkinTimestamp: act?.created_at,
+              photoId: r.photo_id || null,
+              venueName: vById[shard.venue_id]?.name || "your check-in",
+              venueObj: vById[shard.venue_id] || null,
+              label: shard.label || null,
+              checkinTimestamp: shard.created_at,
               timestamp: r.created_at,
             });
           }
@@ -1702,12 +1781,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2 mb-4">
             {newItems.map((item) => (
-              <div key={item.id} className="relative">
-                {whenLabel(item.timestamp) && (
-                  <span className="pointer-events-none absolute right-3 top-2 z-10 text-[10px] text-neutral-400">
-                    {whenLabel(item.timestamp)}
-                  </span>
-                )}
+              <div key={item.id}>
               <ActivityItem
                 item={item}
                 isNew
@@ -1746,12 +1820,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2">
             {earlierItems.map((item) => (
-              <div key={item.id} className="relative">
-                {whenLabel(item.timestamp) && (
-                  <span className="pointer-events-none absolute right-3 top-2 z-10 text-[10px] text-neutral-400">
-                    {whenLabel(item.timestamp)}
-                  </span>
-                )}
+              <div key={item.id}>
               <ActivityItem
                 item={item}
                 acting={
@@ -1844,6 +1913,10 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
 function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAddAnyFriend, onAcceptAnyFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+  // In-card timestamp (July 25, Mark: 'it should go here') — appended to
+  // each card's own meta line instead of floating in a corner.
+  const when = whenLabel(item.timestamp);
+  const whenSuffix = when ? ` \u00b7 ${when}` : "";
   const name = item.profile?.display_name || "Someone";
   const handle = item.profile?.username ? `@${item.profile.username}` : "";
   const bg = isNew ? "bg-[#455d3b]/8" : "bg-white";
@@ -1862,7 +1935,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               <strong className="font-medium">{name}</strong> sent you a friend request
             </p>
             {handle && (
-              <p className="text-[11px] text-neutral-500 truncate">{handle}</p>
+              <p className="text-[11px] text-neutral-500 truncate">{handle}{whenSuffix}</p>
             )}
           </div>
         </button>
@@ -1901,7 +1974,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             <strong className="font-medium">{name}</strong> accepted your friend request
           </p>
           {handle && (
-            <p className="text-[11px] text-neutral-500 truncate">{handle}</p>
+            <p className="text-[11px] text-neutral-500 truncate">{handle}{whenSuffix}</p>
           )}
         </div>
         <Check size={16} className="text-[#455d3b]" />
@@ -1932,7 +2005,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             <strong className="font-medium">{item.inviterName}</strong> invited you to a session
           </p>
           <p className="text-[11px] text-neutral-500 truncate">
-            {item.sessionName} · tap to join
+            {item.sessionName} · tap to join{whenSuffix}
           </p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
@@ -1954,7 +2027,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-sm text-neutral-900">
             <strong className="font-medium">{item.guestName}</strong> sent their picks
           </p>
-          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}{whenSuffix}</p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
       </button>
@@ -1979,7 +2052,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-sm text-neutral-900">
             You're going to <strong className="font-medium">{item.venueName}</strong>
           </p>
-          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}</p>
+          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}{whenSuffix}</p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
       </button>
@@ -2037,11 +2110,10 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
   if (item.kind === "meet_people") {
     return (
       <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
-        {/* pr clears the corner timestamp overlay. */}
-        <p className="mb-2 pr-12 text-sm text-neutral-900">
+        <p className="mb-2 text-sm text-neutral-900">
           You were at{" "}
           <strong className="font-medium">{item.venueName}</strong> — add the
-          people from it
+          people from it{whenSuffix}
         </p>
         <div className="space-y-2">
           {item.people.map((p) => (
@@ -2112,7 +2184,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               check-in at{" "}
               <strong className="font-medium">{item.venueName}</strong>
             </p>
-            <p className="text-[11px] text-[#455d3b]">Tap to see</p>
+            <p className="text-[11px] text-[#455d3b]">Tap to see{whenSuffix}</p>
           </div>
         </button>
       </div>
@@ -2134,7 +2206,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               <strong className="font-medium">{item.venueName}</strong> with
               you
             </p>
-            <p className="text-[11px] text-[#455d3b]">Tap to have a look</p>
+            <p className="text-[11px] text-[#455d3b]">Tap to have a look{whenSuffix}</p>
           </div>
         </button>
       </div>
@@ -2173,8 +2245,10 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
                 ? ` · with ${item.withNames.join(", ")}`
                 : ""}
             </p>
-            {fresh && (
+            {fresh ? (
               <p className="text-[11px] text-[#455d3b]">Right now · tap to open</p>
+            ) : (
+              when && <p className="text-[11px] text-neutral-400">{when}</p>
             )}
           </div>
         </button>
@@ -2227,7 +2301,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             {item.photoId ? "photo" : "check-in"} at{" "}
             <strong className="font-medium">{item.venueName}</strong>
           </p>
-          <p className="text-[11px] text-neutral-500 truncate">“{item.body}”</p>
+          <p className="text-[11px] text-neutral-500 truncate">“{item.body}”{whenSuffix}</p>
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
       </button>
@@ -2249,7 +2323,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               <strong className="font-medium">{item.venueName}</strong>
             </p>
             <p className="text-[11px] text-neutral-500">
-              Add them to your check-in? Your friends will see you're together.
+              Add them to your check-in? Your friends will see you're together.{whenSuffix}
             </p>
           </div>
         </button>
@@ -2373,6 +2447,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             <strong className="font-medium">{name}</strong> reacted {item.emoji}{" "}
             to your {item.onPhoto ? "photo" : "check-in"} at{" "}
             <strong className="font-medium">{item.venueName}</strong>
+            {whenSuffix}
           </p>
         </div>
         <span className="text-lg shrink-0">{item.emoji}</span>
@@ -2408,7 +2483,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             <strong className="font-medium">{item.venueName}</strong>?
           </p>
           <p className="text-[11px] text-neutral-500">
-            Last night's check-in — while it's still fresh
+            Last night's check-in — while it's still fresh{whenSuffix}
           </p>
         </div>
       </button>
@@ -2436,7 +2511,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm text-neutral-900">
-              <strong className="font-medium">{item.name}</strong> was in your session
+              <strong className="font-medium">{item.name}</strong> was in your session{whenSuffix}
             </p>
             <p className="text-[11px] text-neutral-500">Add them as a friend</p>
           </div>

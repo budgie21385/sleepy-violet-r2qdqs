@@ -478,17 +478,34 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         emoji,
       });
       setReactions(await fetchReactionsMany(contentIds()));
-      // Notify whoever owns the thing that got the emoji.
-      const target = comment
-        ? comment.user_id
-        : photo
-        ? photo.user_id
-        : thread.ownerId;
-      sendPush(
-        target,
-        `${emoji} on your ${comment ? "comment" : photo ? "photo" : "check-in"}`,
-        `Someone reacted ${emoji} at ${thread.venueName}`
-      );
+      // Push doctrine (July 25, Mark-approved): photo/comment reactions are
+      // applause FOR THE AUTHOR — push them alone. A CARD-level reaction has
+      // no single author (the card IS the night) — push every participant.
+      // Never depends on which shard anchored the view (the old bug).
+      if (comment || photo) {
+        const target = comment ? comment.user_id : photo.user_id;
+        if (target && target !== userId) {
+          sendPush(
+            target,
+            `${emoji} on your ${comment ? "comment" : "photo"}`,
+            `Someone reacted ${emoji} at ${thread.venueName}`
+          );
+        }
+      } else {
+        const targets =
+          nightPeople.length > 0
+            ? nightPeople.map((p) => p.id)
+            : [thread.ownerId];
+        for (const t of new Set(targets)) {
+          if (t && t !== userId) {
+            sendPush(
+              t,
+              `${emoji} on the check-in`,
+              `Someone reacted ${emoji} at ${thread.venueName}`
+            );
+          }
+        }
+      }
     } catch (e) {
       console.error("Reaction failed:", e);
       showToast?.("Couldn't react");
@@ -785,11 +802,21 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       ...(prev || []),
       { ...inserted, profile: me || null },
     ]);
-    sendPush(
-      lightbox.user_id,
-      "New comment on your photo",
-      `${(me?.display_name || "Someone").split(" ")[0]}: ${text.slice(0, 80)}`
-    );
+    // Comments are conversation — the whole card hears (July 25 doctrine).
+    {
+      const body = `${(me?.display_name || "Someone").split(" ")[0]}: ${text.slice(0, 80)}`;
+      const targets = new Set(
+        nightPeople.length > 0
+          ? nightPeople.map((p) => p.id)
+          : [lightbox.user_id]
+      );
+      targets.add(lightbox.user_id); // photo owner always included
+      for (const t of targets) {
+        if (t && t !== userId) {
+          sendPush(t, "New comment on a photo", body);
+        }
+      }
+    }
   }
 
   const pending = getInflightFor(
@@ -1079,11 +1106,21 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       .eq("id", userId)
       .maybeSingle();
     setComments((prev) => [...(prev || []), { ...inserted, profile: me || null }]);
-    sendPush(
-      thread.ownerId,
-      "New comment",
-      `${(me?.display_name || "Someone").split(" ")[0]}: ${text.slice(0, 80)}`
-    );
+    // Comments are conversation — the whole card hears (July 25 doctrine).
+    {
+      const body = `${(me?.display_name || "Someone").split(" ")[0]}: ${text.slice(0, 80)}`;
+      const targets = new Set(
+        nightPeople.length > 0
+          ? nightPeople.map((p) => p.id)
+          : [thread.ownerId]
+      );
+      targets.add(thread.ownerId);
+      for (const t of targets) {
+        if (t && t !== userId) {
+          sendPush(t, "New comment", body);
+        }
+      }
+    }
   }
 
   // PORTAL to body: rendered inside a parent overlay (e.g. Been at z-2500)
