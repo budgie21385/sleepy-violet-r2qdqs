@@ -15,10 +15,21 @@ export const SIGNED_URL_TTL = 60 * 60; // seconds
 // (~30-60s of phone footage). Bucket limit raised to match (checkin_videos.sql).
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
+// Force a COMPLETE read of the picked file (July 25 — desktop uploads from
+// cloud-synced folders (OneDrive placeholders) can stream partial bytes;
+// the browser "decodes" the truncated JPEG into a solid green block and
+// both the derivative and the original upload corrupt). arrayBuffer()
+// makes the OS hydrate the file fully, or fail cleanly.
+async function materializeFile(file) {
+  const bytes = await file.arrayBuffer();
+  return new Blob([bytes], { type: file.type || "application/octet-stream" });
+}
+
 // Downscale to a web-friendly JPEG. iOS converts HEIC to JPEG on file input,
 // so canvas decoding is dependable in practice.
 async function makeWebDerivative(file) {
-  const url = URL.createObjectURL(file);
+  const stable = await materializeFile(file);
+  const url = URL.createObjectURL(stable);
   try {
     const img = await new Promise((resolve, reject) => {
       const i = new Image();
@@ -26,13 +37,18 @@ async function makeWebDerivative(file) {
       i.onerror = reject;
       i.src = url;
     });
+    if (!img.width || !img.height) throw new Error("image decoded empty");
     const scale = Math.min(1, WEB_MAX_DIM / Math.max(img.width, img.height));
     const w = Math.max(1, Math.round(img.width * scale));
     const h = Math.max(1, Math.round(img.height * scale));
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
-    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    const ctx = canvas.getContext("2d");
+    // White under transparency — PNG screenshots were going black on JPEG.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
     const blob = await new Promise((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", WEB_QUALITY)
     );
@@ -167,9 +183,11 @@ export async function uploadViaCollectLink(userId, token, activityId, file, onPr
     if (isVideo) {
       await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
     } else {
+      // Same full-read guard as uploadCheckinPhoto.
+      const stableOrig = await materializeFile(file);
       const { error: origErr } = await supabase.storage
         .from(BUCKET)
-        .upload(origPath, file, { contentType: file.type || "image/jpeg" });
+        .upload(origPath, stableOrig, { contentType: file.type || "image/jpeg" });
       if (origErr) throw origErr;
     }
   } catch (origErr) {
@@ -216,6 +234,9 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
   const origPath = `${base}_orig.${extOf(file)}`;
   const webPath = `${base}_web.jpg`;
 
+  // Full-read guard: the ORIGINAL uploads from materialized bytes too, so
+  // a cloud-placeholder file can't send a truncated heirloom copy.
+  const stableOrig = await materializeFile(file);
   const webBlob = await makeWebDerivative(file);
 
   const { error: webErr } = await supabase.storage
@@ -225,7 +246,7 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
 
   const { error: origErr } = await supabase.storage
     .from(BUCKET)
-    .upload(origPath, file, { contentType: file.type || "image/jpeg" });
+    .upload(origPath, stableOrig, { contentType: file.type || "image/jpeg" });
   if (origErr) {
     await supabase.storage.from(BUCKET).remove([webPath]);
     throw origErr;
