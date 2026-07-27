@@ -5430,7 +5430,7 @@ function FriendsScreen({ userId, onBack, showToast, onOpenProfile, onAddFriend }
   });
 
   return (
-    <div className="fixed inset-0 z-[3750] bg-[#fdf6f0] overflow-y-auto pb-24">
+    <div className="fixed inset-0 z-[3400] bg-[#fdf6f0] overflow-y-auto pb-24">
       <div className="max-w-sm mx-auto p-4">
         <div className="flex items-center justify-between mb-4">
           <button
@@ -5747,7 +5747,7 @@ function FindFriendsSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-[3750] bg-[#fdf6f0] overflow-y-auto pb-24">
+    <div className="fixed inset-0 z-[3400] bg-[#fdf6f0] overflow-y-auto pb-24">
       <div className="max-w-sm mx-auto p-4">
         <button
           type="button"
