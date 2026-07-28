@@ -304,16 +304,15 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // night each participant manages their own. null = loading, false = none.
   const [collectLink, setCollectLink] = useState(null);
   const [collectBusy, setCollectBusy] = useState(false);
-  // CHECK-IN SETTINGS (July 25 v2): two guest permissions on the night's
-  // ROOT shard, both default ON, both enforced in RLS (private_nights.sql).
-  // Owner opens them from the cog beside "add more".
-  const [nightPerms, setNightPerms] = useState(null); // {rootId, ownerId, canInvite, canShareLink}
-  const [permBusy, setPermBusy] = useState(null); // which switch is saving
+  // CHECK-IN SETTINGS (July 25): ONE guest permission on the night's ROOT
+  // shard, default ON, enforced in RLS (private_nights.sql). Adding friends
+  // and handing out a collect link are the same act — bringing someone in —
+  // so they share a switch (Mark's call). Owner opens it from the cog.
+  const [nightPerms, setNightPerms] = useState(null); // {rootId, ownerId, canInvite}
+  const [permBusy, setPermBusy] = useState(false);
   const iAmRootOwner = nightPerms?.ownerId === userId;
-  const mayInvite =
-    !nightPerms || iAmRootOwner || nightPerms.canInvite;
-  const mayShareLink =
-    !nightPerms || iAmRootOwner || nightPerms.canShareLink;
+  const mayInvite = !nightPerms || iAmRootOwner || nightPerms.canInvite;
+  const mayShareLink = mayInvite;
 
   useEffect(() => {
     if (view !== "settings" || !uploadTargetId) return;
@@ -450,7 +449,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       }
       const { data: root } = await supabase
         .from("activities")
-        .select("id, user_id, guests_can_invite, guests_can_share_link")
+        .select("id, user_id, guests_can_invite")
         .eq("id", rootId)
         .maybeSingle();
       if (!cancelled && root) {
@@ -458,7 +457,6 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           rootId: root.id,
           ownerId: root.user_id,
           canInvite: root.guests_can_invite !== false,
-          canShareLink: root.guests_can_share_link !== false,
         });
       }
     })();
@@ -467,25 +465,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     };
   }, [thread.activityId, clusterKey]);
 
-  async function togglePerm(key) {
+  async function togglePerm() {
     if (!nightPerms || permBusy || !iAmRootOwner) return;
-    const col =
-      key === "canInvite" ? "guests_can_invite" : "guests_can_share_link";
-    const next = !nightPerms[key];
-    setPermBusy(key);
+    const next = !nightPerms.canInvite;
+    setPermBusy(true);
     const { data: rows, error } = await supabase
       .from("activities")
-      .update({ [col]: next })
+      .update({ guests_can_invite: next })
       .eq("id", nightPerms.rootId)
       .select("id");
-    setPermBusy(null);
+    setPermBusy(false);
     // RLS-filtered updates return success with ZERO rows — check both.
     if (error || !rows || rows.length === 0) {
       console.error("Permission toggle failed:", error);
       showToast?.("Couldn't change that");
       return;
     }
-    setNightPerms((prev) => ({ ...prev, [key]: next }));
+    setNightPerms((prev) => ({ ...prev, canInvite: next }));
   }
 
   // Cap applies per check-in — only count photos on the one I'd upload to.
@@ -1543,38 +1539,33 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 <p className="mb-3 text-xs text-neutral-500">
                   Everyone here can always add photos, comment and react.
                 </p>
-                {[
-                  ["canInvite", "Let guests add people", "They can invite their own friends onto this check-in."],
-                  ["canShareLink", "Let guests share the photo link", "They can hand out their own link for collecting photos."],
-                ].map(([key, title, blurb]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    disabled={permBusy === key}
-                    onClick={() => togglePerm(key)}
-                    className="mb-2 flex w-full items-start gap-3 rounded-2xl border border-neutral-100 bg-white px-3 py-2.5 text-left active:scale-[0.99] transition disabled:opacity-50"
+                <button
+                  type="button"
+                  disabled={permBusy}
+                  onClick={togglePerm}
+                  className="flex w-full items-start gap-3 rounded-2xl border border-neutral-100 bg-white px-3 py-2.5 text-left active:scale-[0.99] transition disabled:opacity-50"
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-neutral-900">
+                      Let guests invite others
+                    </span>
+                    <span className="block text-[11px] text-neutral-500">
+                      They can add their own friends and hand out the photo
+                      link. Turn this off to keep the guest list yours.
+                    </span>
+                  </span>
+                  <span
+                    className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full px-0.5 transition ${
+                      nightPerms?.canInvite ? "bg-[#455d3b]" : "bg-neutral-200"
+                    }`}
                   >
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm text-neutral-900">
-                        {title}
-                      </span>
-                      <span className="block text-[11px] text-neutral-500">
-                        {blurb}
-                      </span>
-                    </span>
                     <span
-                      className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full px-0.5 transition ${
-                        nightPerms?.[key] ? "bg-[#455d3b]" : "bg-neutral-200"
+                      className={`h-4 w-4 rounded-full bg-white transition ${
+                        nightPerms?.canInvite ? "translate-x-4" : ""
                       }`}
-                    >
-                      <span
-                        className={`h-4 w-4 rounded-full bg-white transition ${
-                          nightPerms?.[key] ? "translate-x-4" : ""
-                        }`}
-                      />
-                    </span>
-                  </button>
-                ))}
+                    />
+                  </span>
+                </button>
               </div>
             )}
           </div>
