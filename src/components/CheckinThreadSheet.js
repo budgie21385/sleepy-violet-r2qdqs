@@ -4,7 +4,7 @@
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus } from "lucide-react";
+import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus, Settings } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
@@ -304,9 +304,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // night each participant manages their own. null = loading, false = none.
   const [collectLink, setCollectLink] = useState(null);
   const [collectBusy, setCollectBusy] = useState(false);
+  // CHECK-IN SETTINGS (July 25 v2): two guest permissions on the night's
+  // ROOT shard, both default ON, both enforced in RLS (private_nights.sql).
+  // Owner opens them from the cog beside "add more".
+  const [nightPerms, setNightPerms] = useState(null); // {rootId, ownerId, canInvite, canShareLink}
+  const [permBusy, setPermBusy] = useState(null); // which switch is saving
+  const iAmRootOwner = nightPerms?.ownerId === userId;
+  const mayInvite =
+    !nightPerms || iAmRootOwner || nightPerms.canInvite;
+  const mayShareLink =
+    !nightPerms || iAmRootOwner || nightPerms.canShareLink;
 
   useEffect(() => {
-    if (view !== "add" || !uploadTargetId) return;
+    if (view !== "settings" || !uploadTargetId) return;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
@@ -424,6 +434,60 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       cancelled = true;
     };
   }, [thread.activityId]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // The cluster walk already put the root first in clusterIds.
+      let rootId = thread.activityId;
+      for (let hop = 0; hop < 4; hop++) {
+        const { data: row } = await supabase
+          .from("activities")
+          .select("joined_from")
+          .eq("id", rootId)
+          .maybeSingle();
+        if (row?.joined_from) rootId = row.joined_from;
+        else break;
+      }
+      const { data: root } = await supabase
+        .from("activities")
+        .select("id, user_id, guests_can_invite, guests_can_share_link")
+        .eq("id", rootId)
+        .maybeSingle();
+      if (!cancelled && root) {
+        setNightPerms({
+          rootId: root.id,
+          ownerId: root.user_id,
+          canInvite: root.guests_can_invite !== false,
+          canShareLink: root.guests_can_share_link !== false,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.activityId, clusterKey]);
+
+  async function togglePerm(key) {
+    if (!nightPerms || permBusy || !iAmRootOwner) return;
+    const col =
+      key === "canInvite" ? "guests_can_invite" : "guests_can_share_link";
+    const next = !nightPerms[key];
+    setPermBusy(key);
+    const { data: rows, error } = await supabase
+      .from("activities")
+      .update({ [col]: next })
+      .eq("id", nightPerms.rootId)
+      .select("id");
+    setPermBusy(null);
+    // RLS-filtered updates return success with ZERO rows — check both.
+    if (error || !rows || rows.length === 0) {
+      console.error("Permission toggle failed:", error);
+      showToast?.("Couldn't change that");
+      return;
+    }
+    setNightPerms((prev) => ({ ...prev, [key]: next }));
+  }
+
   // Cap applies per check-in — only count photos on the one I'd upload to.
   const myPhotoCount = photos.filter(
     (p) => p.activity_id === uploadTargetId
@@ -1271,13 +1335,27 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   >
                     View all
                   </button>
-                  {(isOwner || uploadTargetId) && (
+                  {(isOwner || uploadTargetId) && mayInvite && (
                     <button
                       type="button"
                       onClick={openTagPicker}
                       className="ml-auto mr-0.5 inline-flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1 text-xs font-medium text-[#455d3b] active:scale-95 transition"
                     >
                       <UserPlus size={13} /> add more
+                    </button>
+                  )}
+                  {(isOwner || uploadTargetId) && (
+                    <button
+                      type="button"
+                      aria-label="Check-in settings"
+                      onClick={() => setView("settings")}
+                      className={`${
+                        (isOwner || uploadTargetId) && mayInvite
+                          ? "ml-1"
+                          : "ml-auto"
+                      } mr-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 active:scale-95 transition`}
+                    >
+                      <Settings size={13} />
                     </button>
                   )}
                 </div>
@@ -1288,6 +1366,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   ? "your"
                   : `${thread.ownerName}'s`}{" "}
                 friends see this
+
               </p>
           </div>
         </div>
@@ -1365,10 +1444,22 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </p>
               </>
             )}
-            {/* COLLECT LINK — the non-Flanit door (Mark's mock). One link
-                for the group chat; guests land on /c/<token>, name at the
-                door, photos onto THIS night. */}
-            <div className="mt-6 border-t border-neutral-100 pt-4">
+          </div>
+        )}
+        {/* SETTINGS (July 25, Mark: a cog next to "add more") — the photo
+            link lives here, plus the owner's two guest switches. Check-ins
+            are mini-events: most people never open this. */}
+        {view === "settings" && (
+          <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+            <button
+              type="button"
+              onClick={() => setView("card")}
+              className="mb-3 text-xs font-medium text-[#455d3b]"
+            >
+              ‹ Back
+            </button>
+            {mayShareLink ? (
+            <div>
               <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
                 Anyone else — collect photos
               </p>
@@ -1438,6 +1529,54 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </>
               )}
             </div>
+            ) : (
+              <p className="text-xs text-neutral-500">
+                {thread.ownerName} is keeping the photo link to themselves for
+                this one.
+              </p>
+            )}
+            {iAmRootOwner && (
+              <div className="mt-6 border-t border-neutral-100 pt-4">
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                  Guests
+                </p>
+                <p className="mb-3 text-xs text-neutral-500">
+                  Everyone here can always add photos, comment and react.
+                </p>
+                {[
+                  ["canInvite", "Let guests add people", "They can invite their own friends onto this check-in."],
+                  ["canShareLink", "Let guests share the photo link", "They can hand out their own link for collecting photos."],
+                ].map(([key, title, blurb]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={permBusy === key}
+                    onClick={() => togglePerm(key)}
+                    className="mb-2 flex w-full items-start gap-3 rounded-2xl border border-neutral-100 bg-white px-3 py-2.5 text-left active:scale-[0.99] transition disabled:opacity-50"
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-neutral-900">
+                        {title}
+                      </span>
+                      <span className="block text-[11px] text-neutral-500">
+                        {blurb}
+                      </span>
+                    </span>
+                    <span
+                      className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full px-0.5 transition ${
+                        nightPerms?.[key] ? "bg-[#455d3b]" : "bg-neutral-200"
+                      }`}
+                    >
+                      <span
+                        className={`h-4 w-4 rounded-full bg-white transition ${
+                          nightPerms?.[key] ? "translate-x-4" : ""
+                        }`}
+                      />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <input
