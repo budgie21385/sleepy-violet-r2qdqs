@@ -391,6 +391,7 @@ export function SessionResultsView({
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          userId={userId}
         />
       )}
     </>

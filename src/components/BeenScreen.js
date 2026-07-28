@@ -529,6 +529,8 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          userId={userId}
+          onOpenProfile={onOpenProfile}
           zIndex={3700}
         />
       )}

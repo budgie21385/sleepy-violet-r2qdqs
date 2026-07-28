@@ -319,6 +319,8 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          userId={userId}
+          onOpenProfile={onOpenProfile}
         />
       )}
     </div>

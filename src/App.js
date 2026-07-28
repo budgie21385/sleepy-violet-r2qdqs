@@ -4316,6 +4316,7 @@ function ProfileTab({
           onUnsave={onUnsave}
           onHide={onHide}
           onUnhide={onUnhide}
+          userId={session?.user?.id}
         />
       )}
       {showFriends && (
@@ -4676,6 +4677,7 @@ function MyListScreen({
   onUnsave,
   onHide,
   onUnhide,
+  userId,
 }) {
   const [view, setView] = useState("saved");
   const [selectedVenue, setSelectedVenue] = useState(null);
@@ -4840,6 +4842,7 @@ function MyListScreen({
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
+          userId={userId}
         />
       )}
     </div>
