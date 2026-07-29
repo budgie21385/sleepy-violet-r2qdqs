@@ -2048,10 +2048,14 @@ loadAreas();
   // check-in/social surfaces), CURATION is client-side: the swipe/match pool
   // only ever contains verified venues, your own additions, or your saved
   // ones — strangers' manual venues resolve by id but never enter your pool.
+  // THE TIMBER YARD RULE (July 25 fix): being somewhere is not curating it.
+  // A venue you created just to check in (work, a mate's gym, a cinema) must
+  // NOT enter the swipe deck or the map — only VERIFIED venues and ones you
+  // deliberately SAVED do. `created_by === me` used to sneak them back in
+  // here, which is why checking in at work put work in a match session; the
+  // map never had that clause, hence the two disagreed.
   const isPoolVenue = (venue) =>
-    venue.verified === true ||
-    venue.created_by === session?.user?.id ||
-    savedVenueIds.has(venue.id);
+    venue.verified === true || savedVenueIds.has(venue.id);
 
   // Suburb footprints for the selected areas — computed once per change,
   // not per venue (see buildAreaExtents).
@@ -2156,11 +2160,7 @@ loadAreas();
       // venue reads must not leak strangers' manual venues into guest queues.
       if (
         guestSessionData.source_type !== "list" &&
-        !(
-          venue.verified === true ||
-          venue.created_by === session?.user?.id ||
-          savedVenueIds.has(venue.id)
-        )
+        !(venue.verified === true || savedVenueIds.has(venue.id))
       )
         return false;
       if (!venueMatchesAreas(venue, sessionAreas, sessionRadius, sessionExtents))
