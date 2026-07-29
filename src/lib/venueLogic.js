@@ -63,36 +63,46 @@ export function getVenueEmoji(venue) {
   return "📍";
 }
 
-// SUBURB EXTENTS (July 25, Mark's model): picking a suburb should mean the
-// WHOLE suburb, and a radius should extend from its BORDER — not a circle
-// around a centre point (which cut real Melbourne cafés out of sessions
-// while the map, on a fixed 3km circle, still showed them).
+// SUBURBS, NOT CIRCLES (July 25, Mark's model — revised same day).
 //
-// We have no boundary polygons — but every venue carries a `suburb` string,
-// so a suburb's own venues trace its footprint. The extent is how far its
-// furthest venue sits from the area's centre; "+1km" then means 1km beyond
-// that edge. Outliers past 15km are ignored (mislabelled rows).
+// v1 used the suburb's FURTHEST venue as a radius, so a single mislabelled
+// row inflated the circle and "Melbourne" swallowed Fitzroy (~2km away).
+// Now:
+//   radius 0 (default) → EXACT suburb-name match. No geometry, no bleed.
+//   radius > 0        → also anything inside the suburb's bounding box,
+//                       expanded by that many km — a real "past the border"
+//                       without one stray row moving the border.
+// A suburb with no venues of its own falls back to a circle around its
+// centre so a radius still does something.
 export function buildAreaExtents(venues, selectedAreas) {
   const extents = new Map();
   for (const area of selectedAreas || []) {
     const key = (area.name || "").trim().toLowerCase();
     if (!key || extents.has(key)) continue;
-    let max = 0;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    let n = 0;
     for (const v of venues || []) {
       if ((v.suburb || "").trim().toLowerCase() !== key) continue;
       const lat = Number(v.latitude);
       const lng = Number(v.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      const d = getDistanceKm(area.lat, area.lng, lat, lng);
-      if (d > max && d < 15) max = d;
+      // Ignore rows sitting absurdly far from the area centre — they're
+      // mislabelled, and they'd drag the box across half the city.
+      if (getDistanceKm(area.lat, area.lng, lat, lng) > 8) continue;
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      minLng = Math.min(minLng, lng);
+      maxLng = Math.max(maxLng, lng);
+      n++;
     }
-    extents.set(key, max);
+    extents.set(key, n > 0 ? { minLat, maxLat, minLng, maxLng } : null);
   }
   return extents;
 }
 
-// radiusKm = 0 → the suburb itself (name match, or inside its footprint).
-// radiusKm > 0 → that far beyond the suburb's edge.
 export function venueMatchesAreas(venue, selectedAreas, radiusKm = 0, extents = null) {
   if (!selectedAreas || selectedAreas.length === 0) return true;
   const vSuburb = (venue.suburb || "").trim().toLowerCase();
@@ -100,15 +110,28 @@ export function venueMatchesAreas(venue, selectedAreas, radiusKm = 0, extents = 
   const lng = Number(venue.longitude);
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
   const extra = Number(radiusKm) || 0;
+
   for (const area of selectedAreas) {
     const key = (area.name || "").trim().toLowerCase();
-    // Named into the suburb — the plainest possible match.
+    // The suburb itself — the whole point of picking a suburb.
     if (vSuburb && vSuburb === key) return true;
-    if (!hasCoords) continue;
-    // Or geographically within the suburb's footprint (+ any extra radius).
-    // Catches venues whose suburb string is spelled differently.
-    const border = extents?.get(key) ?? 0;
-    if (getDistanceKm(area.lat, area.lng, lat, lng) <= border + extra) return true;
+    if (extra <= 0 || !hasCoords) continue; // radius 0 = name match only
+
+    const box = extents?.get(key);
+    if (box) {
+      const dLat = extra / 111;
+      const dLng =
+        extra / (111 * Math.max(0.2, Math.cos((area.lat * Math.PI) / 180)));
+      if (
+        lat >= box.minLat - dLat &&
+        lat <= box.maxLat + dLat &&
+        lng >= box.minLng - dLng &&
+        lng <= box.maxLng + dLng
+      )
+        return true;
+    } else if (getDistanceKm(area.lat, area.lng, lat, lng) <= extra) {
+      return true; // no venues to trace the suburb — circle from its centre
+    }
   }
   return false;
 }
