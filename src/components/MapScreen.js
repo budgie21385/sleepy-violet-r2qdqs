@@ -14,6 +14,7 @@ import {
   AMENITY_FILTERS,
   getVenueEmoji,
   venueMatchesAreas,
+  buildAreaExtents,
   venueMatchesOccasions,
   venueMatchesPrice,
   venueMatchesAmenities,
@@ -189,7 +190,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const [fPrices, setFPrices] = useState([]); // price_level numbers 1..4
   const [fAmenities, setFAmenities] = useState([]); // amenity column keys
 
-  const MAP_AREA_RADIUS_KM = 3;
+  // Suburb-first, same as sessions (July 25) — was a blunt 3km circle,
+  // which is why the map and a session showed different places.
+  const mapAreaExtents = useMemo(
+    () => buildAreaExtents(venues, fAreas),
+    [venues, fAreas]
+  );
 
   // Uses the cleaned cuisine_bucket (backfilled from the taxonomy), not the raw
   // Google 'cuisine'. Venues with no real cuisine (formats/junk) have a null
@@ -376,7 +382,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             (v) => v.verified === true || (savedIds && savedIds.has(v.id))
           );
     if (fAreas.length > 0)
-      list = list.filter((v) => venueMatchesAreas(v, fAreas, MAP_AREA_RADIUS_KM));
+      list = list.filter((v) =>
+        venueMatchesAreas(v, fAreas, 0, mapAreaExtents)
+      );
     if (fCuisines.length > 0)
       list = list.filter((v) => fCuisines.includes(v.cuisine_bucket));
     if (fOccasions.length > 0)

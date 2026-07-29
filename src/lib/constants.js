@@ -5,7 +5,8 @@ export const ALL = "All";
 
 // 1-3 per Mark (July 9, 2026) — a match target above 3 stops being decisive.
 export const MATCH_OPTIONS = [1, 2, 3];
-export const RADIUS_OPTIONS = [1, 3, 5, 10];
+// 0 = the suburb itself; >0 extends that far past its border.
+export const RADIUS_OPTIONS = [0, 1, 3, 5, 10];
 
 // PARTICIPANT_OPTIONS and TIME_LIMIT_OPTIONS_* removed July 9, 2026 with the
 // dead ParticipantsField / TimeLimitField controls. Sessions now always get

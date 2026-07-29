@@ -10,6 +10,7 @@ import {
   OCCASION_OPTIONS,
   AMENITY_FILTERS,
   venueMatchesAreas,
+  buildAreaExtents,
   getTodayDayKey,
   venueOpenInBand,
   isVenueOpenNow,
@@ -306,7 +307,8 @@ export default function RestaurantSwipeMVP() {
   const [expandedRegions, setExpandedRegions] = useState(() => new Set());
   const [areaSearch, setAreaSearch] = useState("");
   const [selectedAreas, setSelectedAreas] = useState([]);
-  const [radiusKm, setRadiusKm] = useState(1);
+  // 0 = whole suburb (Mark, July 25). Radius extends past the border.
+  const [radiusKm, setRadiusKm] = useState(0);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [openNow, setOpenNow] = useState(false);
   const [selectedTimes, setSelectedTimes] = useState([]);
@@ -2051,12 +2053,24 @@ loadAreas();
     venue.created_by === session?.user?.id ||
     savedVenueIds.has(venue.id);
 
+  // Suburb footprints for the selected areas — computed once per change,
+  // not per venue (see buildAreaExtents).
+  const areaExtents = useMemo(
+    () => buildAreaExtents(venues, selectedAreas),
+    [venues, selectedAreas]
+  );
+
   const filteredVenues = useMemo(() => {
     const todayKey = getTodayDayKey();
     return venues.filter((venue) => {
       if (!isPoolVenue(venue)) return false;
       if (hiddenVenueIds.has(venue.id)) return false;
-      const matchesArea = venueMatchesAreas(venue, selectedAreas, radiusKm);
+      const matchesArea = venueMatchesAreas(
+        venue,
+        selectedAreas,
+        radiusKm,
+        areaExtents
+      );
       if (!matchesArea) return false;
  
       const matchesCuisine =
@@ -2086,6 +2100,7 @@ loadAreas();
     venues,
     selectedAreas,
     radiusKm,
+    areaExtents,
     selectedCuisines,
     openNow,
     selectedTimes,
@@ -2132,7 +2147,9 @@ loadAreas();
     const sessionAreas = filters.selectedAreaIds && areas.length
       ? areas.filter((a) => filters.selectedAreaIds.includes(a.id))
       : [];
-    const sessionRadius = typeof filters.radiusKm === "number" ? filters.radiusKm : 1;
+    const sessionRadius =
+      typeof filters.radiusKm === "number" ? filters.radiusKm : 0;
+    const sessionExtents = buildAreaExtents(pool, sessionAreas);
 
     return pool.filter((venue) => {
       // Same client-side curation as the host pool (see isPoolVenue): open
@@ -2146,7 +2163,8 @@ loadAreas();
         )
       )
         return false;
-      if (!venueMatchesAreas(venue, sessionAreas, sessionRadius)) return false;
+      if (!venueMatchesAreas(venue, sessionAreas, sessionRadius, sessionExtents))
+        return false;
 
       if (filters.selectedCuisines && filters.selectedCuisines.length > 0) {
         if (!filters.selectedCuisines.includes(venue.cuisine_bucket)) return false;
@@ -3241,7 +3259,9 @@ if (authLoading || guestLoading) {
                       onChange={setRadiusKm}
                       options={RADIUS_OPTIONS.map((r) => ({
                         value: r,
-                        label: `${r} km`,
+                        // 0 = just the suburb; anything else reaches that
+                        // far PAST its border.
+                        label: r === 0 ? "Suburb only" : `+${r} km`,
                       }))}
                     />
                     {matchMode !== "curated" && (

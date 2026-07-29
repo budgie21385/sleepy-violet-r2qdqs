@@ -63,14 +63,54 @@ export function getVenueEmoji(venue) {
   return "📍";
 }
 
-export function venueMatchesAreas(venue, selectedAreas, radiusKm) {
+// SUBURB EXTENTS (July 25, Mark's model): picking a suburb should mean the
+// WHOLE suburb, and a radius should extend from its BORDER — not a circle
+// around a centre point (which cut real Melbourne cafés out of sessions
+// while the map, on a fixed 3km circle, still showed them).
+//
+// We have no boundary polygons — but every venue carries a `suburb` string,
+// so a suburb's own venues trace its footprint. The extent is how far its
+// furthest venue sits from the area's centre; "+1km" then means 1km beyond
+// that edge. Outliers past 15km are ignored (mislabelled rows).
+export function buildAreaExtents(venues, selectedAreas) {
+  const extents = new Map();
+  for (const area of selectedAreas || []) {
+    const key = (area.name || "").trim().toLowerCase();
+    if (!key || extents.has(key)) continue;
+    let max = 0;
+    for (const v of venues || []) {
+      if ((v.suburb || "").trim().toLowerCase() !== key) continue;
+      const lat = Number(v.latitude);
+      const lng = Number(v.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const d = getDistanceKm(area.lat, area.lng, lat, lng);
+      if (d > max && d < 15) max = d;
+    }
+    extents.set(key, max);
+  }
+  return extents;
+}
+
+// radiusKm = 0 → the suburb itself (name match, or inside its footprint).
+// radiusKm > 0 → that far beyond the suburb's edge.
+export function venueMatchesAreas(venue, selectedAreas, radiusKm = 0, extents = null) {
   if (!selectedAreas || selectedAreas.length === 0) return true;
+  const vSuburb = (venue.suburb || "").trim().toLowerCase();
   const lat = Number(venue.latitude);
   const lng = Number(venue.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-  return selectedAreas.some(
-    (area) => getDistanceKm(area.lat, area.lng, lat, lng) <= radiusKm
-  );
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  const extra = Number(radiusKm) || 0;
+  for (const area of selectedAreas) {
+    const key = (area.name || "").trim().toLowerCase();
+    // Named into the suburb — the plainest possible match.
+    if (vSuburb && vSuburb === key) return true;
+    if (!hasCoords) continue;
+    // Or geographically within the suburb's footprint (+ any extra radius).
+    // Catches venues whose suburb string is spelled differently.
+    const border = extents?.get(key) ?? 0;
+    if (getDistanceKm(area.lat, area.lng, lat, lng) <= border + extra) return true;
+  }
+  return false;
 }
 
 export function getMapsUrl(venue) {
