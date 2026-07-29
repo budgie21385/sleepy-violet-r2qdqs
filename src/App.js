@@ -1949,11 +1949,11 @@ useEffect(() => {
     ].join(",");
     const CACHE_KEY = "flanit_venues_light_v1";
 
-    let cachedCount = 0;
+    let cachedIds = null; // Set of ids we painted from cache
     try {
       const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
       if (cached?.rows?.length) {
-        cachedCount = cached.rows.length;
+        cachedIds = new Set(cached.rows.map((v) => v.id));
         setVenues([...cached.rows].sort(() => Math.random() - 0.5));
         setLoading(false);
       }
@@ -1966,6 +1966,12 @@ useEffect(() => {
         const { data, error } = await supabase
           .from("venues")
           .select(LIGHT_COLS)
+          // ORDER BY is REQUIRED for correct pagination (July 25): without
+          // it Postgres gives no stable row order, so consecutive .range()
+          // pages can overlap or leave a GAP — venues past the first 1,000
+          // silently disappeared from the deck, map and search, and which
+          // ones changed run to run.
+          .order("id", { ascending: true })
           .range(fromIdx, fromIdx + PAGE - 1);
         if (error) {
           console.error("Error loading venues:", error);
@@ -1981,9 +1987,14 @@ useEffect(() => {
             JSON.stringify({ t: Date.now(), rows: all })
           );
         } catch {}
-        // Don't reshuffle mid-use for a same-size refresh — only swap in the
-        // fresh set when it actually differs (new/removed venues).
-        if (all.length !== cachedCount) {
+        // Don't reshuffle mid-use unless the SET actually changed. Comparing
+        // counts alone missed an add+remove pair that nets to zero (and kept
+        // a stale cache) — compare ids.
+        const changed =
+          !cachedIds ||
+          cachedIds.size !== all.length ||
+          all.some((v) => !cachedIds.has(v.id));
+        if (changed) {
           setVenues([...all].sort(() => Math.random() - 0.5));
         }
       }
