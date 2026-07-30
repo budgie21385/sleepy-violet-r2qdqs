@@ -3027,7 +3027,7 @@ if (authLoading || guestLoading) {
                 onChange={(e) => setGuestName(e.target.value)}
                 placeholder="Your name"
                 maxLength={40}
-                className="mt-2 w-full rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-sm focus:border-neutral-400 focus:outline-none"
+                className="mt-2 w-full rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-base focus:border-neutral-400 focus:outline-none"
               />
               {/* Captcha only required for first-time anon signins. Returning
                   signed-in users (the host visiting their own link) skip it. */}
@@ -5542,7 +5542,7 @@ function FriendsScreen({ userId, onBack, showToast, onOpenProfile, onAddFriend }
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search your friends"
-                className="w-full pl-9 pr-3 py-2 rounded-full border border-neutral-200 bg-white text-sm focus:outline-none focus:border-[#455d3b]"
+                className="w-full pl-9 pr-3 py-2 rounded-full border border-neutral-200 bg-white text-base focus:outline-none focus:border-[#455d3b]"
               />
             </div>
 
@@ -5817,13 +5817,20 @@ function FindFriendsSheet({
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
           />
+          {/* No autoFocus (July 25, Mark): opening Find friends shouldn't
+              throw up the keyboard — the QR and your own code are half the
+              point of this screen. text-base (16px) too: iOS Safari ZOOMS
+              the whole page on focus for anything smaller, which is what
+              made the app look bigger than the screen. */}
           <input
             type="text"
+            inputMode="search"
+            autoCapitalize="none"
+            autoCorrect="off"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search @username or email"
-            className="w-full pl-9 pr-3 py-2.5 rounded-full border border-neutral-200 bg-white text-sm focus:outline-none focus:border-[#455d3b]"
-            autoFocus
+            className="w-full pl-9 pr-3 py-2.5 rounded-full border border-neutral-200 bg-white text-base focus:outline-none focus:border-[#455d3b]"
           />
         </div>
 

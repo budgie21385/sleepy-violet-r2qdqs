@@ -148,7 +148,7 @@ export function MapAreaFilter({ areas, selected, onToggle }) {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search suburb"
-        className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:border-[#455d3b]"
+        className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-base focus:outline-none focus:border-[#455d3b]"
       />
       {ql ? (
         <div className="mt-2 flex flex-col">
