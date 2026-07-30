@@ -7,7 +7,12 @@
 import { supabase } from "../supabaseClient";
 
 const BUCKET = "checkin-photos";
-export const MAX_PHOTOS_PER_CHECKIN = 5; // cap covers photos + videos combined
+// NO LIFETIME CAP (July 25, Mark's call): a night is a night — the camera
+// tile never disappears. This is only a per-BATCH sanity limit, so one
+// accidental "select all" in the picker can't queue 400 uploads at once.
+// The real brake will be the per-user storage quota (bytes are already
+// tracked per uploader in activity_photos).
+export const MAX_PHOTOS_PER_BATCH = 30;
 const WEB_MAX_DIM = 1280;
 const WEB_QUALITY = 0.8;
 export const SIGNED_URL_TTL = 60 * 60; // seconds

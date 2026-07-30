@@ -35,7 +35,7 @@ import {
   updateUploadPreview,
   updateUploadProgress,
   makeVideoPreviewUrl,
-  MAX_PHOTOS_PER_CHECKIN,
+  MAX_PHOTOS_PER_BATCH,
 } from "../lib/photos";
 import {
   REACTION_SET,
@@ -913,10 +913,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // shouldn't make you watch). The store keeps tiles alive across close/reopen.
   function addPhotos(fileList) {
     if (!uploadTargetId) return;
-    const files = Array.from(fileList || []).slice(
-      0,
-      Math.max(0, MAX_PHOTOS_PER_CHECKIN - myPhotoCount - pending.length)
-    );
+    const files = Array.from(fileList || []).slice(0, MAX_PHOTOS_PER_BATCH);
     const promises = [];
     for (const file of files) {
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -1697,9 +1694,8 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   </span>
                 </div>
               ))}
-              {uploadTargetId &&
-                myPhotoCount + pending.length < MAX_PHOTOS_PER_CHECKIN && (
-                  <button
+              {uploadTargetId && (
+                <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     className="aspect-square rounded-lg border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-1 text-neutral-500 active:scale-95 transition"

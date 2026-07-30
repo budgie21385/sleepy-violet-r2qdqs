@@ -15,7 +15,7 @@ import {
   updateUploadPreview,
   updateUploadProgress,
   makeVideoPreviewUrl,
-  MAX_PHOTOS_PER_CHECKIN,
+  MAX_PHOTOS_PER_BATCH,
 } from "../lib/photos";
 
 const SEARCH_THRESHOLD = 8; // chips-only below this many friends
@@ -32,10 +32,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
   const fileInputRef = useRef(null);
 
   async function addPhotos(fileList) {
-    const files = Array.from(fileList || []).slice(
-      0,
-      MAX_PHOTOS_PER_CHECKIN - photos.length
-    );
+    const files = Array.from(fileList || []).slice(0, MAX_PHOTOS_PER_BATCH);
     for (const file of files) {
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const isVideo = (file.type || "").startsWith("video/");
@@ -294,8 +291,7 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
                   )}
                 </div>
               ))}
-              {photos.length < MAX_PHOTOS_PER_CHECKIN && (
-                <button
+              <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="h-16 w-16 shrink-0 rounded-xl border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-0.5 text-neutral-500 active:scale-95 transition"
@@ -305,7 +301,6 @@ export function CheckinSheet({ venue, activity, userId, onClose, showToast }) {
                     {photos.length === 0 ? "Photos" : "More"}
                   </span>
                 </button>
-              )}
             </div>
             <p className="mt-1 px-1 text-[11px] text-neutral-400">
               Photos &amp; videos, original quality — only your friends see them.
