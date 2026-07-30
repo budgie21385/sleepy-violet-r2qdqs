@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { whenAgo } from "../lib/checkins";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
@@ -266,14 +267,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     };
   }, [userId, reloadTick]);
 
-  function when(ts) {
-    const d = new Date(ts);
-    const days = Math.floor((Date.now() - d.getTime()) / (24 * 60 * 60 * 1000));
-    if (days === 0) return "today";
-    if (days === 1) return "yesterday";
-    if (days < 7) return `${days}d ago`;
-    return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-  }
+  const when = whenAgo; // shared ladder — see lib/checkins
 
   return (
     <div className="fixed inset-0 z-[2500] overflow-y-auto bg-[#fdf6f0]">

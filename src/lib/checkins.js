@@ -20,6 +20,33 @@ export function timeAgoShort(ts) {
   return `${Math.floor(hrs / 24)}d`;
 }
 
+// ONE TIME LADDER for "when was this?" (July 25 — Been said "today" for a
+// check-in from 8pm YESTERDAY, because it divided elapsed ms by 24h instead
+// of comparing calendar dates). Rules:
+//   under an hour  → "just now" / "42m ago"
+//   under a day    → "14h ago"   (unambiguous, no calendar guessing)
+//   beyond that    → CALENDAR days: "yesterday" means the previous DATE
+export function whenAgo(ts) {
+  const d = new Date(ts);
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const startOfDay = (x) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round(
+    (startOfDay(new Date()) - startOfDay(d)) / 86400000
+  );
+  if (days <= 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString("en-AU", {
+    day: "numeric",
+    month: "short",
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
 // Check the user in at a venue. Returns:
 //   { activity, already: false }  — fresh check-in created
 //   { activity, already: true }   — recent check-in at this venue already exists

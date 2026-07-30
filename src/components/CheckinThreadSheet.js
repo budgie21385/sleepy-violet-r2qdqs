@@ -10,21 +10,15 @@ const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
 const AVATAR_CAP = 5; // faces shown before "+N"
 
-// "3h" while fresh, then dates (Mark, July 23: "flips to date").
+// Hours while fresh, then calendar-correct days (Mark, July 23: "flips to
+// date"). Shares lib/checkins' ladder so Been, the card and the drawer can't
+// disagree — the old 24/48h arithmetic called yesterday evening "today".
 function whenLine(ts) {
-  const ms = Date.now() - new Date(ts).getTime();
-  if (ms < 24 * 60 * 60 * 1000) return timeAgoShort(ts);
-  const d = new Date(ts);
-  if (ms < 48 * 60 * 60 * 1000) return "yesterday";
-  return d.toLocaleDateString("en-AU", {
-    day: "numeric",
-    month: "short",
-    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
-  });
+  return whenAgo(ts);
 }
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
-import { timeAgoShort, FRESH_MS } from "../lib/checkins";
+import { timeAgoShort, whenAgo, FRESH_MS } from "../lib/checkins";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,

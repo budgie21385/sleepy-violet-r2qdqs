@@ -52,7 +52,7 @@ function afternoonAfter(ts) {
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
-import { timeAgoShort } from "../lib/checkins";
+import { timeAgoShort, whenAgo } from "../lib/checkins";
 
 // Tiny corner timestamp on every Activity card (Mark, July 25): "2h" while
 // fresh, "yesterday", then a date — same ladder as the check-in card.
@@ -60,12 +60,9 @@ function whenLabel(ts) {
   if (!ts) return "";
   const ms = Date.now() - new Date(ts).getTime();
   if (ms < 0) return ""; // future-dated nudge windows — say nothing
-  if (ms < 24 * 3600e3) return timeAgoShort(ts);
-  if (ms < 48 * 3600e3) return "yesterday";
-  return new Date(ts).toLocaleDateString("en-AU", {
-    day: "numeric",
-    month: "short",
-  });
+  // Short form in a corner: "2h", "yesterday", "18 Jul" — same calendar
+  // rules as lib/checkins' whenAgo, minus the "ago".
+  return whenAgo(ts).replace(/ ago$/, "");
 }
 
 // Last loaded items, module-level — reopening the tab paints instantly from
