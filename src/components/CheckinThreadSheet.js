@@ -1882,26 +1882,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           {comments === null && (
             <p className="text-xs text-neutral-400 text-center py-4">Loading…</p>
           )}
+          {/* Empty thread = just the line (July 25, Mark: don't show the
+              owner block at all). It dated from when an empty card was bare;
+              the owner now appears in the header AND the avatar row, and it
+              rendered inconsistently anyway — only some openers passed
+              ownerProfile. */}
           {comments !== null && comments.length === 0 && (
             <div className="py-4 text-center">
-              {thread.ownerProfile ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenProfile?.(thread.ownerId)}
-                  className="inline-flex flex-col items-center gap-2 active:scale-95 transition"
-                >
-                  <FriendAvatar profile={thread.ownerProfile} />
-                  <span className="text-sm font-medium text-neutral-800">
-                    {thread.ownerProfile.display_name || thread.ownerName}
-                  </span>
-                  {thread.ownerProfile.username && (
-                    <span className="-mt-1.5 text-xs text-neutral-500">
-                      @{thread.ownerProfile.username}
-                    </span>
-                  )}
-                </button>
-              ) : null}
-              <p className="text-sm text-neutral-500 mt-2">
+              <p className="text-sm text-neutral-500">
                 No comments yet — say something.
               </p>
             </div>
