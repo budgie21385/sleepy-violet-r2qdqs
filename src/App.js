@@ -3335,6 +3335,21 @@ if (authLoading || guestLoading) {
             showToast={showToast}
             onBack={() => setScreen("filters")}
             onContinue={() => setScreen(matchMode === "curated" ? "curated_results" : "swipe")}
+            onDone={() => {
+              // Curated host's "Done for now" — same exit as the Right Now
+              // waiting card. The decision finds them: everyone's-picks push
+              // + the Activity item, and Profile → Sessions re-opens it.
+              setScreen("session_setup");
+              setMatches([]);
+              setMarkLikes([]);
+              setPartnerLikes([]);
+              setMarkPasses([]);
+              setPartnerPasses([]);
+              setSessionMatches([]);
+              setCurrentSessionId(null);
+              setPicked(null);
+              setCardIndex(0);
+            }}
           />
         )}
         {screen === "swipe" && (
@@ -7005,6 +7020,7 @@ function InviteShareScreen({
   showToast,
   onBack,
   onContinue,
+  onDone,
 }) {
   const [copied, setCopied] = useState(false);
   const [friends, setFriends] = useState([]);
@@ -7189,37 +7205,46 @@ function InviteShareScreen({
           </div>
         )}
 
-        {/* Live match indicator — curated only, since the host's already
-            done swiping and is now waiting for guests. Concurrent host
-            still has the swipe screen for their own progress. */}
-        {isCurated && (
-          <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 mb-4 text-center">
-            <p className="text-xs uppercase tracking-wide text-neutral-500">
-              Waiting for friends
-            </p>
-            <p className="mt-3 text-sm text-neutral-600">
-              Your shortlist is sent. As friends pick the places that work for
-              them, their choices land here — then you make the call.
-            </p>
-          </div>
+        {/* CURATED HOST = a calm waiting state (July 25, Mark: match the
+            Right Now end screen — don't push them at an empty results
+            board). One card, a nudge promise, and an exit. The decision
+            comes to them: everyone's picks push + the Activity item. */}
+        {isCurated ? (
+          <>
+            <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 mb-4 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+                <Check size={28} />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Your shortlist is sent
+              </h2>
+              <p className="mt-2 text-sm text-neutral-600">
+                We'll nudge you as friends pick, then you make the call.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onDone || onContinue}
+              className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
+            >
+              Done for now
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600 mb-4">
+              Your friends will swipe the same places as you. The session ends
+              when everyone submits or time runs out.
+            </div>
+            <button
+              type="button"
+              onClick={onContinue}
+              className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
+            >
+              Start swiping
+            </button>
+          </>
         )}
-
-        <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-600 mb-4">
-          {isCurated
-            ? "Once your friends have picked from your shortlist, you'll see everyone's choices here and can choose where you're going."
-            : "Your friends will swipe the same places as you. The session ends when everyone submits or time runs out."}
-        </div>
-
-        {/* Concurrent host gets a "Start swiping" CTA into their own swipe
-            flow. Curated ("Send options") host has already curated — they get
-            a "See results" CTA to open the votes board when ready. */}
-        <button
-          type="button"
-          onClick={onContinue}
-          className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white active:scale-[0.98] transition"
-        >
-          {isCurated ? "See results" : "Start swiping"}
-        </button>
       </div>
     </div>
   );
