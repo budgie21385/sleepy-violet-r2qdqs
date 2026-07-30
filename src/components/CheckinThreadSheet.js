@@ -298,6 +298,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // night each participant manages their own. null = loading, false = none.
   const [collectLink, setCollectLink] = useState(null);
   const [collectBusy, setCollectBusy] = useState(false);
+  // QR for the collect link (July 25, Mark) — the in-person door: print it
+  // on a table card, stick it on the fridge, hold up your phone. Same lazy
+  // `qrcode` import the install page uses, so it costs nothing until a link
+  // actually exists.
+  const [collectQr, setCollectQr] = useState(null);
   // CHECK-IN SETTINGS (July 25): ONE guest permission on the night's ROOT
   // shard, default ON, enforced in RLS (private_nights.sql). Adding friends
   // and handing out a collect link are the same act — bringing someone in —
@@ -366,6 +371,32 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   function collectUrl() {
     return collectLink ? `https://flanit.co/c/${collectLink.token}` : "";
   }
+
+  useEffect(() => {
+    if (!collectLink?.token) {
+      setCollectQr(null);
+      return;
+    }
+    let cancelled = false;
+    import("qrcode")
+      .then((QR) =>
+        (QR.toDataURL || QR.default.toDataURL)(
+          `https://flanit.co/c/${collectLink.token}`,
+          {
+            width: 320,
+            margin: 1,
+            color: { dark: "#2f3f29", light: "#ffffff" },
+          }
+        )
+      )
+      .then((url) => {
+        if (!cancelled) setCollectQr(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [collectLink?.token]);
 
   function shareCollectLink() {
     if (!collectLink) return;
@@ -1484,6 +1515,27 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       Copy
                     </button>
                   </div>
+                  {/* QR: the in-person door. Long-press saves it on a
+                      phone; "Save image" opens it full-size for printing. */}
+                  {collectQr && (
+                    <div className="mt-3 flex flex-col items-center">
+                      <img
+                        src={collectQr}
+                        alt="QR code for the photo link"
+                        className="h-40 w-40 rounded-2xl border border-neutral-200 bg-white p-2"
+                      />
+                      <a
+                        href={collectQr}
+                        download={`flanit-photos-${collectLink.token.slice(0, 8)}.png`}
+                        className="mt-1.5 text-[11px] font-medium text-[#455d3b] underline underline-offset-2"
+                      >
+                        Save the QR
+                      </a>
+                      <p className="mt-0.5 text-[10px] text-neutral-400 text-center">
+                        Stick it on a table — anyone can scan and add photos.
+                      </p>
+                    </div>
+                  )}
                   <div className="mt-2 flex gap-2">
                     <button
                       type="button"
