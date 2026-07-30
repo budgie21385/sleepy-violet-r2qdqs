@@ -667,9 +667,17 @@ export function CollectScreen({ token }) {
                   </>
                 )}
                 {!me.isAnon && relation === "self" && (
-                  <p className="mt-2 text-xs text-neutral-500">
-                    This is your own link — open Flanit to see the photos.
-                  </p>
+                  <>
+                    <p className="mt-2 text-xs text-neutral-500">
+                      This is your own link.
+                    </p>
+                    <a
+                      href={`/?night=${ctx.activity_id}`}
+                      className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
+                    >
+                      See all the photos
+                    </a>
+                  </>
                 )}
               </div>
             )}
