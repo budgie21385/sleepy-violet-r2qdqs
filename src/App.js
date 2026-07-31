@@ -2537,23 +2537,11 @@ if (authLoading || guestLoading) {
       guestHostProfile?.display_name ||
       (guestHostProfile?.username ? `@${guestHostProfile.username}` : "Someone");
 
-    // Format the event timing.
-    let whenLabel = "Right now";
-    if (guestSessionData.mode === "curated" && guestSessionData.event_at) {
-      try {
-        const eventDate = new Date(guestSessionData.event_at);
-        whenLabel = new Intl.DateTimeFormat(undefined, {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-        }).format(eventDate);
-      } catch {
-        whenLabel = "Later";
-      }
-    } else if (guestSessionData.mode === "curated") {
-      whenLabel = "Later";
-    }
-
+    // The event-timing label that used to live here is gone (July 31). It
+    // formatted `event_at`, which is always null — SessionSetupScreen calls
+    // onPickLater(null), so no date is ever collected — leaving it to render
+    // "Right now" or "Later", i.e. the eyebrow again. The card names the mode
+    // once and says nothing it can't actually know.
     const isClosed = guestSessionData.status === "closed";
     const isHostCurating = guestSessionData.status === "host_curating";
     const isOpen = guestSessionData.status === "open";
@@ -2583,8 +2571,12 @@ if (authLoading || guestLoading) {
           <div className="w-full max-w-sm">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
+                {/* Same leak as the landing card: `name` is the host's own
+                    label ("Send options"), so the guest reads the mode. */}
                 <p className="text-xs text-neutral-500 truncate">
-                  {guestSessionData.name || "Session"}
+                  {guestSessionData.mode === "concurrent"
+                    ? "Right now"
+                    : "Shortlist"}
                   {guestQueue.length > 0 ? ` · ${guestQueue.length} places` : ""}
                 </p>
                 <h1 className="text-lg font-semibold tracking-tight truncate">
@@ -3042,6 +3034,15 @@ if (authLoading || guestLoading) {
           </div>
 
           <div className="mt-6 rounded-2xl bg-white shadow-sm border border-neutral-100 p-5">
+            {/* Copy is literal per mode, NOT `guestSessionData.name` (Mark,
+                July 31). That column is a host-side label the app generates
+                itself — "Right now" / "Send options" — so rendering it under an
+                eyebrow that already says the same thing printed the mode twice,
+                and "Send options" is what the HOST does, meaningless to the
+                person receiving them. Reading it literally also fixes sessions
+                created before today, whose stored name is still the old string.
+                `whenLabel` is gone from this card for the same reason: there is
+                no date picker, so it can only ever repeat the eyebrow. */}
             <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-neutral-500">
               {guestSessionData.mode === "concurrent" ? (
                 <>
@@ -3051,18 +3052,20 @@ if (authLoading || guestLoading) {
               ) : (
                 <>
                   <Calendar size={14} />
-                  Later
+                  Here is my shortlist
                 </>
               )}
             </div>
-            <div className="mt-2 text-lg font-medium">
-              {guestSessionData.name || whenLabel}
-            </div>
-            {guestSessionData.name && whenLabel !== guestSessionData.name && (
-              <div className="text-sm text-neutral-500 mt-0.5">{whenLabel}</div>
+            {guestSessionData.mode !== "concurrent" && (
+              <div className="mt-2 text-lg font-medium">
+                Browse my list and let me know what you are happy with
+              </div>
             )}
 
-            {isOpen && (
+            {/* Concurrent only — "what you both like" describes mutual matching,
+                which isn't what a shortlist does, and the line above already
+                tells a shortlist guest what to do. */}
+            {isOpen && guestSessionData.mode === "concurrent" && (
               <p className="mt-4 text-sm text-neutral-600">
                 You'll swipe through some spots and we'll surface what you both like.
               </p>
