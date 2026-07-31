@@ -469,6 +469,60 @@ export default function RestaurantSwipeMVP() {
       cancelled = true;
     };
   }, [pendingNightId, session?.user?.id, profile, onboardingDismissed]);
+  // VENUE DEEP-LINK (July 31): /?v=<venueId>[&save=1] — set by the CTAs on the
+  // public /v/<id> card. Sending someone a specific bar and landing them on
+  // whatever tab they were last on threw the venue away; this opens the card
+  // they were actually sent, and &save=1 puts it on their list on arrival.
+  //
+  // get_public_venue is SECURITY DEFINER, so host-imported venues outside this
+  // viewer's pool still resolve. Waits on onboarding exactly like the night
+  // deep-link above — the effect re-runs when profile/onboardingDismissed move.
+  const [pendingVenue, setPendingVenue] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const id = p.get("v");
+      return id ? { id: Number(id), save: p.get("save") === "1" } : null;
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    if (!pendingVenue?.id || !session?.user?.id) return;
+    const needsOnboarding =
+      !isGuest &&
+      !cameFromGuestRef.current &&
+      !onboardingDismissed &&
+      session.user.is_anonymous === false &&
+      profile &&
+      !profile.username;
+    if (needsOnboarding) return; // onboarding screen is up — wait for it
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc("get_public_venue", {
+        p_venue_id: pendingVenue.id,
+      });
+      if (cancelled) return;
+      const v = (data && data[0]) || null;
+      if (v) {
+        setCardVenue(v);
+        // Keep it in the pool so the card's save/hide controls read correctly.
+        setVenues((prev) => (prev.some((x) => x.id === v.id) ? prev : [...prev, v]));
+        if (pendingVenue.save) await saveVenue(v.id);
+      }
+      if (cancelled) return;
+      setPendingVenue(null);
+      try {
+        window.history.replaceState({}, "", "/");
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // saveVenue is a stable component function; the deep-link inputs are the
+    // real deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingVenue, session?.user?.id, profile, onboardingDismissed]);
+
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
   // handle to a user_id once session + profile are loaded, then push it into
   // lookupUserId so ProfileLookupScreen takes over. localStorage backs it up
@@ -1517,17 +1571,21 @@ useEffect(() => {
   }
 
   // Known returning users skip the guest "what should we call you?" screen.
-  // If a session link opens while the person is already signed in (non-anon and
-  // not the host) and we have a display name for them, auto-join under their
-  // real account and go straight to the picks. Anonymous/unknown users (incl.
-  // in-app browsers with no session) still see the manual name screen.
+  // If a session link opens while we already know who this is — and they're not
+  // the host — auto-join under that identity and go straight to the picks.
+  //
+  // "Known" is a display name, NOT a real account (Mark, July 31). An anonymous
+  // guest who typed their name at a collect-link door has a profiles row too, so
+  // asking again is us forgetting someone we just met. A fresh anon has no name
+  // and still gets the manual screen, so the name check does the gating on its
+  // own. `handleNotForMe` / "Not you?" is the escape hatch on a shared phone.
   const autoJoinedRef = useRef(false);
   useEffect(() => {
     if (!isGuest || autoJoinedRef.current) return;
     if (guestStage !== "splash") return;
     if (guestSessionData?.status !== "open") return;
     const u = session?.user;
-    if (!u?.id || u.is_anonymous) return;
+    if (!u?.id) return;
     if (u.id === guestSessionData?.host_user_id) return; // host isn't a guest
     if (guestSubmittedAt) return; // already submitted → the restore effect handles it
     const name = profile?.display_name?.trim();
@@ -1588,15 +1646,14 @@ useEffect(() => {
     };
   }, [isGuest, session?.user?.id, guestSessionId]);
 
-  // A known signed-in user (non-anon, not the host, with a display name) will be
-  // auto-joined once the venue pool loads — so we show a "Joining…" state
-  // instead of flashing the "what should we call you?" screen at them.
+  // Anyone we have a name for (not the host) will be auto-joined once the venue
+  // pool loads — so we show a "Joining as <name>…" state instead of flashing the
+  // "what should we call you?" screen at them. Mirrors the effect above.
   const guestWillAutoJoin =
     isGuest &&
     guestStage === "splash" &&
     guestSessionData?.status === "open" &&
     !!session?.user?.id &&
-    session.user.is_anonymous === false &&
     session.user.id !== guestSessionData?.host_user_id &&
     !!profile?.display_name?.trim() &&
     !guestSubmittedAt;
@@ -1605,6 +1662,18 @@ useEffect(() => {
     // Send them to the root — they can sign in and start their own session
     // if they want, or just close the tab.
     window.location.assign("/");
+  }
+
+  // "Not <name>?" — a shared phone auto-joining as whoever it remembers. Only
+  // offered to anonymous sessions: a real account signs out through Profile,
+  // and we shouldn't invite someone to drop a genuine login by accident.
+  // Signing out clears the remembered identity; the reload lands on the same
+  // /s/ link with no session, i.e. the manual name screen.
+  async function handleNotMe() {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    window.location.reload();
   }
 
   // Fire-and-forget DB write for concurrent guest swipes. Mirrors the host's
@@ -3011,10 +3080,21 @@ if (authLoading || guestLoading) {
           </div>
 
           {isOpen && guestWillAutoJoin && (
-            <div className="mt-6 flex items-center justify-center gap-2 text-sm text-neutral-500">
-              <span className="h-4 w-4 rounded-full border-2 border-neutral-300 border-t-[#455d3b] animate-spin" />
-              Joining…
-            </div>
+            <>
+              <div className="mt-6 flex items-center justify-center gap-2 text-sm text-neutral-500">
+                <span className="h-4 w-4 rounded-full border-2 border-neutral-300 border-t-[#455d3b] animate-spin" />
+                Joining as {profile.display_name.trim()}…
+              </div>
+              {session?.user?.is_anonymous && (
+                <button
+                  type="button"
+                  onClick={handleNotMe}
+                  className="mt-5 w-full text-center text-sm text-[#455d3b] underline underline-offset-2"
+                >
+                  Not {profile.display_name.trim()}?
+                </button>
+              )}
+            </>
           )}
           {isOpen && !guestWillAutoJoin && (
             <>
@@ -3051,7 +3131,7 @@ if (authLoading || guestLoading) {
                   !guestName.trim() ||
                   (!session?.user?.id && !guestCaptchaToken)
                 }
-                className="mt-3 w-full rounded-full bg-[#111111] px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
+                className="mt-3 w-full rounded-full bg-[#455d3b] px-5 py-3 text-sm font-medium text-white disabled:opacity-40"
               >
                 {joining ? "Joining..." : "Join"}
               </button>

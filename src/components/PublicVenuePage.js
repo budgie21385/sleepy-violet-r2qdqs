@@ -21,6 +21,23 @@ import { getMapsUrl } from "../lib/venueLogic";
 
 export function PublicVenuePage({ venueId }) {
   const [venue, setVenue] = useState(undefined); // undefined = loading, null = not found
+  // Who's looking? undefined = still asking, null = nobody (or a nameless anon
+  // guest, which for CTA purposes is the same thing — they have no list to save
+  // to). A real account gets the "open it / save it" pair instead of the pitch.
+  // The app never mounts on this route, so this is the only session read here.
+  const [signedIn, setSignedIn] = useState(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
+      const u = data?.session?.user;
+      setSignedIn(!!u?.id && !u.is_anonymous);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,15 +115,40 @@ export function PublicVenuePage({ venueId }) {
               <OpenMapsButton url={getMapsUrl(venue)} />
             </div>
 
-            <a
-              href="/"
-              className="mt-4 block w-full rounded-2xl bg-[#455d3b] py-3 text-center font-medium text-white"
-            >
-              Open in Flanit
-            </a>
-            <p className="mt-3 text-center text-xs text-neutral-500">
-              Shared from Flanit — find a place, together.
-            </p>
+            {/* Carry the venue across so the other side opens THIS card rather
+                than dumping them on whatever tab they were last on. ?save=1
+                adds it to their list on arrival. Both render only once the
+                session resolves — a CTA that changes under the thumb is worse
+                than one that arrives a beat late. */}
+            {signedIn === true && (
+              <>
+                <a
+                  href={`/?v=${venueId}`}
+                  className="mt-4 block w-full rounded-2xl bg-[#455d3b] py-3 text-center font-medium text-white"
+                >
+                  Open in Flanit
+                </a>
+                <a
+                  href={`/?v=${venueId}&save=1`}
+                  className="mt-2 block w-full rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 text-center font-medium text-[#455d3b]"
+                >
+                  Save to my list
+                </a>
+              </>
+            )}
+            {signedIn === false && (
+              <>
+                <a
+                  href={`/?v=${venueId}&save=1`}
+                  className="mt-4 block w-full rounded-2xl bg-[#455d3b] py-3 text-center font-medium text-white"
+                >
+                  Save this place — get Flanit
+                </a>
+                <p className="mt-3 text-center text-xs text-neutral-500">
+                  Shared from Flanit — find a place, together.
+                </p>
+              </>
+            )}
           </>
         )}
       </div>
