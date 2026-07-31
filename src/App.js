@@ -36,6 +36,7 @@ import { ParticipantsStrip } from "./components/ParticipantsStrip";
 import { CuratedResultsBoard } from "./components/CuratedResultsBoard";
 import { SessionResultsView } from "./components/SessionResultsView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
+import { GuestHome } from "./components/GuestHome";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { FriendAvatar } from "./components/FriendAvatar";
@@ -519,8 +520,9 @@ export default function RestaurantSwipeMVP() {
       cancelled = true;
     };
     // saveVenue is a stable component function; the deep-link inputs are the
-    // real deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // real deps. (No eslint-disable here — this project's config has no
+    // react-hooks plugin, so disabling a rule it doesn't define is itself the
+    // error that fails the build.)
   }, [pendingVenue, session?.user?.id, profile, onboardingDismissed]);
 
   // Friend-invite landing — set when the URL is /u/@<handle>. We resolve the
@@ -3164,6 +3166,30 @@ if (authLoading || guestLoading) {
 
   if (!session) {
     return <SignInScreen inviteHandle={friendInviteHandle} />;
+  }
+
+  // THE ANON GATE (July 31, 2026 — Mark: "They shouldn't be able to get through
+  // to the app. Because right now they are.").
+  //
+  // An anonymous session IS a session, so for months the only branch here —
+  // `if (!session)` — waved guests straight into the tab shell. Worse, a guest
+  // who'd typed their name at a collect-link door had a profiles row, so they
+  // arrived looking like a fully paid-up member: avatar, name, tier chip, four
+  // tabs, all of it backed by a session that dies with the browser's storage.
+  //
+  // The two surfaces built FOR strangers return above this line: /s/<uuid>
+  // (the `isGuest` block) and /c/<token> (mounted by index.js — App never runs).
+  // So everything reaching here is an anon at the front door, and gets the wall
+  // instead. Deliberately placed after `!session` and before `loading`: there's
+  // nothing to wait for, since none of the app's data is theirs to see.
+  if (session.user?.is_anonymous) {
+    return (
+      <GuestHome
+        userId={session.user.id}
+        displayName={profile?.display_name}
+        onSignOut={signOut}
+      />
+    );
   }
 
   if (loading) {
