@@ -62,6 +62,11 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   // The cluster merge does the magic afterwards: if friends checked in that
   // night, your backdated card shows their photos/comments too.
   const [addOpen, setAddOpen] = useState(false);
+  // Title leads the form (Mark, July 31): people recall a night by what it was
+  // — "Renasha's birthday" — before they recall the address. Optional, because
+  // most nights are an ordinary Tuesday that doesn't deserve a name; the venue
+  // + date identify those on their own.
+  const [addLabel, setAddLabel] = useState("");
   const [addQ, setAddQ] = useState("");
   const [addResults, setAddResults] = useState([]);
   const [addVenue, setAddVenue] = useState(null);
@@ -125,6 +130,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
 
   function closeAdd() {
     setAddOpen(false);
+    setAddLabel("");
     setAddQ("");
     setAddResults([]);
     setAddGoogle([]);
@@ -152,7 +158,19 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       .gte("created_at", new Date(ts.getTime() - W).toISOString())
       .lte("created_at", new Date(ts.getTime() + W).toISOString())
       .limit(1);
+    const label = addLabel.trim() || null;
     let act = existing?.[0] || null;
+    // Reopening a night you already logged: give it the title if you've just
+    // typed one and it had none. Never overwrite an existing label — that's
+    // yours from the card, and a half-typed retry shouldn't clobber it.
+    if (act && label && !act.label) {
+      const { error: lblErr } = await supabase
+        .from("activities")
+        .update({ label })
+        .eq("id", act.id);
+      if (lblErr) console.error("Add night label update failed:", lblErr);
+      else act = { ...act, label };
+    }
     if (!act) {
       const { data: inserted, error } = await supabase
         .from("activities")
@@ -160,6 +178,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           user_id: userId,
           kind: "checkin",
           venue_id: addVenue.id,
+          label,
           created_at: ts.toISOString(),
         })
         .select("id, created_at, label")
@@ -177,7 +196,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           {
             id: act.id,
             venue_id: addVenue.id,
-            label: null,
+            label: act.label || null,
             created_at: act.created_at,
           },
           ...(prev || []),
@@ -390,14 +409,33 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
               It lands in your Been list — add photos and videos after. If
               friends checked in that night, their moments show up too.
             </p>
+            {/* ONE card, three fields in order (Mark, July 31): title, then
+                location, then date. It used to be two steps — find the venue,
+                then pick a night — which asked for the hardest thing first and
+                never asked for a name at all (the label arrived later, from the
+                card). No autoFocus anywhere: an unrequested keyboard shoves the
+                rest of the form off-screen. */}
+            <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
+              What was it?
+            </label>
+            {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
+            <input
+              value={addLabel}
+              onChange={(e) => setAddLabel(e.target.value)}
+              placeholder="Renasha's birthday (optional)"
+              maxLength={80}
+              className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
+            />
+
+            <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
+              Where were you?
+            </label>
             {!addVenue ? (
               <>
-                {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
                 <input
                   value={addQ}
                   onChange={(e) => setAddQ(e.target.value)}
-                  placeholder="Where were you?"
-                  autoFocus
+                  placeholder="Search for the place"
                   className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
                 />
                 <div className="mt-2 space-y-1">
@@ -455,42 +493,41 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                 </div>
               </>
             ) : (
-              <>
-                <div className="flex items-center gap-2.5 rounded-xl bg-neutral-50 px-3 py-2.5 mb-3">
-                  <MapPin size={15} className="shrink-0 text-[#455d3b]" />
-                  <span className="flex-1 min-w-0 truncate text-sm font-medium text-neutral-900">
-                    {addVenue.name}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setAddVenue(null)}
-                    className="text-xs text-neutral-500 underline shrink-0"
-                  >
-                    Change
-                  </button>
-                </div>
-                <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
-                  Which night?
-                </label>
-                {/* appearance-none + explicit bg: iOS restyles date inputs
-                    into a gray centered pill otherwise. */}
-                <input
-                  type="date"
-                  value={addDate}
-                  max={todayStr}
-                  onChange={(e) => setAddDate(e.target.value)}
-                  className="w-full appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
-                />
+              <div className="flex items-center gap-2.5 rounded-xl bg-neutral-50 px-3 py-2.5">
+                <MapPin size={15} className="shrink-0 text-[#455d3b]" />
+                <span className="flex-1 min-w-0 truncate text-sm font-medium text-neutral-900">
+                  {addVenue.name}
+                </span>
                 <button
                   type="button"
-                  disabled={addSaving || !addDate}
-                  onClick={confirmAddNight}
-                  className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-60"
+                  onClick={() => setAddVenue(null)}
+                  className="text-xs text-neutral-500 underline shrink-0"
                 >
-                  {addSaving ? "Adding…" : "Add to Been"}
+                  Change
                 </button>
-              </>
+              </div>
             )}
+
+            <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
+              Which night?
+            </label>
+            {/* appearance-none + explicit bg: iOS restyles date inputs
+                into a gray centered pill otherwise. */}
+            <input
+              type="date"
+              value={addDate}
+              max={todayStr}
+              onChange={(e) => setAddDate(e.target.value)}
+              className="w-full appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
+            />
+            <button
+              type="button"
+              disabled={addSaving || !addVenue || !addDate}
+              onClick={confirmAddNight}
+              className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-60"
+            >
+              {addSaving ? "Adding…" : "Add to Been"}
+            </button>
           </div>
         </div>,
         document.body
