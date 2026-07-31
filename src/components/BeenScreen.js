@@ -69,7 +69,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   const [addLabel, setAddLabel] = useState("");
   const [addQ, setAddQ] = useState("");
   const [addResults, setAddResults] = useState([]);
-  const [addVenue, setAddVenue] = useState(null);
+  // A night can span several places (Mark, July 31: "This was the night and we
+  // went here, here and here"). Ordered — index 0 is where it started, and the
+  // rest become legs hanging off it via joined_from. `addSearching` is whether
+  // a search box is currently open; it starts true so the empty form shows one.
+  const [addVenues, setAddVenues] = useState([]);
+  const [addSearching, setAddSearching] = useState(true);
   const [addDate, setAddDate] = useState(() =>
     new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   );
@@ -108,9 +113,20 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     return () => clearTimeout(t);
   }, [addQ, addOpen]);
 
+  // Add a picked place to the trail and close the search box. Ignores a repeat
+  // of somewhere already in the list — the same bar twice in one night is real,
+  // but it's far more often a double tap.
+  function pickVenue(v) {
+    if (!v) return;
+    setAddVenues((prev) => (prev.some((x) => x.id === v.id) ? prev : [...prev, v]));
+    setAddSearching(false);
+    setAddQ("");
+    setAddResults([]);
+    setAddGoogle([]);
+  }
+
   // Google pick: create the venue row WITHOUT saving it to their list
-  // (Timber Yard rule — being somewhere ≠ curating it), then flow into the
-  // normal date step.
+  // (Timber Yard rule — being somewhere ≠ curating it), then into the trail.
   async function pickGooglePlace(r) {
     if (addingPlaceId) return;
     setAddingPlaceId(r.place_id);
@@ -120,7 +136,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
         placeId: r.place_id,
         save: false,
       });
-      setAddVenue(venue);
+      pickVenue(venue);
     } catch (e) {
       console.error("Google add-a-night pick failed:", e);
       showToast?.("Couldn't add that place");
@@ -135,12 +151,14 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     setAddResults([]);
     setAddGoogle([]);
     setAddingPlaceId(null);
-    setAddVenue(null);
+    setAddVenues([]);
+    setAddSearching(true);
     setAddSaving(false);
   }
 
   async function confirmAddNight() {
-    if (!addVenue || !addDate || addSaving) return;
+    const first = addVenues[0];
+    if (!first || !addDate || addSaving) return;
     setAddSaving(true);
     // Land it at 8pm local — squarely inside the ±12h same-night window.
     // Picking TODAY before 8pm would timestamp the future → clamp to an hour
@@ -153,7 +171,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       .from("activities")
       .select("id, created_at, label")
       .eq("user_id", userId)
-      .eq("venue_id", addVenue.id)
+      .eq("venue_id", first.id)
       .eq("kind", "checkin")
       .gte("created_at", new Date(ts.getTime() - W).toISOString())
       .lte("created_at", new Date(ts.getTime() + W).toISOString())
@@ -177,7 +195,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
         .insert({
           user_id: userId,
           kind: "checkin",
-          venue_id: addVenue.id,
+          venue_id: first.id,
           label,
           created_at: ts.toISOString(),
         })
@@ -190,12 +208,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       }
       act = inserted;
       // Surface it in the list immediately.
-      setVenueById((prev) => new Map(prev).set(addVenue.id, addVenue));
+      setVenueById((prev) => new Map(prev).set(first.id, first));
       setRows((prev) =>
         [
           {
             id: act.id,
-            venue_id: addVenue.id,
+            venue_id: first.id,
             label: act.label || null,
             created_at: act.created_at,
           },
@@ -203,7 +221,51 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
         ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       );
     }
-    const picked = addVenue;
+
+    // The rest of the trail: one check-in per place, each pointing at the root
+    // through joined_from. That's the SAME edge a tag-accept twin uses, so the
+    // cluster merge folds them into one card with one album and one guest list
+    // for free — no new visibility rules (Mark, July 31: "one night, one guest
+    // list"). Each leg is still its own row, so Been and the map get a proper
+    // entry per place: you did go to three places.
+    //
+    // Spaced an hour apart from the root so the trail keeps its order and the
+    // whole night stays inside the ±12h window the cluster works in.
+    const rest = addVenues.slice(1);
+    if (rest.length > 0) {
+      const legs = rest.map((v, i) => ({
+        user_id: userId,
+        kind: "checkin",
+        venue_id: v.id,
+        label: null, // the title belongs to the night, i.e. the root
+        joined_from: act.id,
+        created_at: new Date(
+          new Date(act.created_at).getTime() + (i + 1) * 60 * 60 * 1000
+        ).toISOString(),
+      }));
+      const { data: legRows, error: legErr } = await supabase
+        .from("activities")
+        .insert(legs)
+        .select("id, venue_id, created_at, label");
+      if (legErr) {
+        // The night itself exists — don't strand the user on a half-failure.
+        console.error("Add night legs failed:", legErr);
+        showToast?.("Added the night, but some places didn't save");
+      } else if (legRows?.length) {
+        setVenueById((prev) => {
+          const next = new Map(prev);
+          rest.forEach((v) => next.set(v.id, v));
+          return next;
+        });
+        setRows((prev) =>
+          [...legRows, ...(prev || [])].sort(
+            (a, b) => new Date(b.created_at) - new Date(a.created_at)
+          )
+        );
+      }
+    }
+
+    const picked = first;
     closeAdd();
     setThread({
       activityId: act.id,
@@ -428,9 +490,45 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             />
 
             <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
-              Where were you?
+              {addVenues.length > 1 ? "Where did you go?" : "Where were you?"}
             </label>
-            {!addVenue ? (
+            {/* Picked places, in order — the night's trail. Each can be pulled
+                back out; the search box reopens on "Add another location". */}
+            {addVenues.map((v, i) => (
+              <div
+                key={v.id}
+                className="flex items-center gap-2.5 rounded-xl bg-neutral-50 px-3 py-2.5 mb-1.5"
+              >
+                <MapPin size={15} className="shrink-0 text-[#455d3b]" />
+                <span className="flex-1 min-w-0 truncate text-sm font-medium text-neutral-900">
+                  {v.name}
+                </span>
+                {i > 0 && (
+                  <span className="text-[11px] text-neutral-400 shrink-0">
+                    then
+                  </span>
+                )}
+                <button
+                  type="button"
+                  aria-label={`Remove ${v.name}`}
+                  onClick={() =>
+                    setAddVenues((prev) => prev.filter((x) => x.id !== v.id))
+                  }
+                  className="text-xs text-neutral-500 underline shrink-0"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {!addSearching ? (
+              <button
+                type="button"
+                onClick={() => setAddSearching(true)}
+                className="mt-1 mb-1 text-xs text-[#455d3b] underline underline-offset-2"
+              >
+                + Add another location
+              </button>
+            ) : (
               <>
                 <input
                   value={addQ}
@@ -438,12 +536,26 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                   placeholder="Search for the place"
                   className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
                 />
+                {addVenues.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddSearching(false);
+                      setAddQ("");
+                      setAddResults([]);
+                      setAddGoogle([]);
+                    }}
+                    className="mt-1.5 text-xs text-neutral-500 underline underline-offset-2"
+                  >
+                    Cancel
+                  </button>
+                )}
                 <div className="mt-2 space-y-1">
                   {addResults.map((v) => (
                     <button
                       key={v.id}
                       type="button"
-                      onClick={() => setAddVenue(v)}
+                      onClick={() => pickVenue(v)}
                       className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
                     >
                       <MapPin size={15} className="shrink-0 text-neutral-400" />
@@ -492,20 +604,6 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                     )}
                 </div>
               </>
-            ) : (
-              <div className="flex items-center gap-2.5 rounded-xl bg-neutral-50 px-3 py-2.5">
-                <MapPin size={15} className="shrink-0 text-[#455d3b]" />
-                <span className="flex-1 min-w-0 truncate text-sm font-medium text-neutral-900">
-                  {addVenue.name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setAddVenue(null)}
-                  className="text-xs text-neutral-500 underline shrink-0"
-                >
-                  Change
-                </button>
-              </div>
             )}
 
             <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
@@ -522,7 +620,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             />
             <button
               type="button"
-              disabled={addSaving || !addVenue || !addDate}
+              disabled={addSaving || addVenues.length === 0 || !addDate}
               onClick={confirmAddNight}
               className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-60"
             >
