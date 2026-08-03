@@ -28,9 +28,12 @@ export function CheckinHistoryRow({ c }) {
   return (
     <div className="flex items-center gap-2 px-1">
       <MapPin size={14} className="shrink-0 text-neutral-400" />
+      {/* Title first, venue second — same rule as the Been list. */}
       <p className="flex-1 min-w-0 text-sm text-neutral-700 truncate">
-        {c.venueName}
-        {c.label ? <span className="text-neutral-500"> · {c.label}</span> : null}
+        {c.label || c.venueName}
+        {c.label ? (
+          <span className="text-neutral-500"> · {c.venueName}</span>
+        ) : null}
       </p>
       <span className="text-xs text-neutral-400">{when}</span>
     </div>
@@ -449,15 +452,19 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                   <MapPin size={16} />
                 </div>
                 <div className="flex-1 min-w-0">
+                  {/* TITLE LEADS (Mark, July 31: "have a focus on the title if
+                      it exists"). A named night is remembered by its name —
+                      "Renasha's birthday", not "Napier Hotel". Where it
+                      happened drops to the line below, which is also where a
+                      multi-venue trail belongs: it's detail, not identity.
+                      Untitled nights are unchanged — the trail is the name. */}
                   <p className="text-sm font-medium text-neutral-900 truncate">
-                    {trail.length > 0 ? trail.join(" → ") : "A spot"}
-                    {n.label ? (
-                      <span className="font-normal text-neutral-500"> · {n.label}</span>
-                    ) : null}
+                    {n.label || (trail.length > 0 ? trail.join(" → ") : "A spot")}
                   </p>
-                  <p className="text-[11px] text-neutral-500">
+                  <p className="text-[11px] text-neutral-500 truncate">
+                    {n.label && trail.length > 0 ? `${trail.join(" → ")} · ` : ""}
                     {when(first.created_at)}
-                    {trail.length > 1 ? ` · ${trail.length} places` : ""}
+                    {!n.label && trail.length > 1 ? ` · ${trail.length} places` : ""}
                     {who.length > 0
                       ? ` · with ${
                           who.length === 1

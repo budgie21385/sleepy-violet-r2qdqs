@@ -1368,8 +1368,113 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           itemWeight(a) - itemWeight(b) ||
           new Date(b.timestamp) - new Date(a.timestamp)
       );
+    await applyNightNames(all);
     drawerCache = { uid: userId, items: all };
     setItems(all);
+  }
+
+  // NAME THE NIGHT, NOT THE LEG (July 31, Mark: "should the notification also
+  // mention the venues and not just one of them?").
+  //
+  // Every block above names an item after the shard the content landed on. On
+  // a night that hopped venues that's the wrong handle: Renasha uploads at the
+  // third bar and you get "Everleigh" — somewhere you may never have been,
+  // since you went home after the first one. Listing the whole trail doesn't
+  // fix it either; a drawer row is one short line and "A → B → C" truncates to
+  // nothing.
+  //
+  // So a night is named by its ROOT: the title if it has one, otherwise where
+  // it started, plus "+N" for the other stops. Short, stable, and it doesn't
+  // change as the night grows.
+  //
+  // Done ONCE here rather than in a dozen builders, and only for shards that
+  // actually have a joined_from — a single-venue night takes no new code path.
+  // Wrapped whole: this is presentation, and it must never be the reason the
+  // drawer comes back empty (the lesson behind fuse()).
+  async function applyNightNames(all) {
+    try {
+      const ids = Array.from(
+        new Set(all.map((i) => i.activityId).filter(Boolean))
+      );
+      if (ids.length === 0) return;
+      const { data: acts } = await supabase
+        .from("activities")
+        .select("id, joined_from, label")
+        .in("id", ids);
+      const actById = new Map((acts || []).map((a) => [a.id, a]));
+      const linked = (acts || []).filter((a) => a.joined_from);
+
+      // night_root is SECURITY DEFINER and walks the chain for us. Only the
+      // linked few, so this stays a handful of calls at most.
+      const rootByAct = new Map();
+      await Promise.all(
+        linked.map(async (a) => {
+          const { data: root } = await supabase.rpc("night_root", {
+            p_activity_id: a.id,
+          });
+          if (root) rootByAct.set(a.id, root);
+        })
+      );
+      const rootIds = Array.from(new Set(rootByAct.values()));
+
+      let rootById = new Map();
+      let vName = new Map();
+      const legCount = new Map();
+      if (rootIds.length > 0) {
+        const [{ data: roots }, { data: legs }] = await Promise.all([
+          supabase
+            .from("activities")
+            .select("id, venue_id, label")
+            .in("id", rootIds),
+          supabase
+            .from("activities")
+            .select("id, joined_from")
+            .in("joined_from", rootIds),
+        ]);
+        rootById = new Map((roots || []).map((r) => [r.id, r]));
+        for (const l of legs || []) {
+          legCount.set(l.joined_from, (legCount.get(l.joined_from) || 0) + 1);
+        }
+        const venueIds = Array.from(
+          new Set((roots || []).map((r) => r.venue_id).filter(Boolean))
+        );
+        if (venueIds.length > 0) {
+          const { data: vens } = await supabase
+            .from("venues")
+            .select("id, name")
+            .in("id", venueIds);
+          vName = new Map((vens || []).map((v) => [v.id, v.name]));
+        }
+      }
+
+      for (const item of all) {
+        if (!item.activityId) continue;
+        const rootId = rootByAct.get(item.activityId);
+        const root = rootId ? rootById.get(rootId) : null;
+
+        // Where the night STARTED, with "+N" for the other stops.
+        if (root) {
+          const base = vName.get(root.venue_id);
+          if (base) {
+            const extra = legCount.get(rootId) || 0;
+            item.venueName = extra > 0 ? `${base} +${extra}` : base;
+          }
+        }
+
+        // TITLE FIRST (Mark, July 31: "prioritise the rest of the app that
+        // way"). These rows read as sentences — "added photos at X" — so the
+        // title has to occupy the venue slot rather than trail after it, or
+        // the sentence names a place when the night has a better name. The
+        // separate label suffix is cleared so it can't print twice.
+        const title = root?.label || actById.get(item.activityId)?.label;
+        if (title) {
+          item.venueName = title;
+          item.label = null;
+        }
+      }
+    } catch (e) {
+      console.error("Night naming skipped:", e);
+    }
   }
 
   // Accept an incoming request by USER (the meet-people rows know uids,
