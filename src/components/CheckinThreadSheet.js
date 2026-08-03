@@ -458,6 +458,45 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       cancelled = true;
     };
   }, [thread.activityId]);
+
+  // THE TRAIL (July 31) — a night can hop venues, so the header names all of
+  // them in the order they happened, not just the root's. Built from the same
+  // cluster: every activity in the tree contributes its venue, deduped, so a
+  // friend's twin at the same place adds nothing while a genuine second stop
+  // does. Empty until it resolves; one venue renders exactly as it always did.
+  const [trail, setTrail] = useState([]);
+  useEffect(() => {
+    if (clusterIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const { data: acts } = await supabase
+        .from("activities")
+        .select("venue_id, created_at")
+        .in("id", clusterIds)
+        .order("created_at", { ascending: true });
+      const ordered = (acts || []).filter((a) => a.venue_id);
+      if (ordered.length === 0) {
+        if (!cancelled) setTrail([]);
+        return;
+      }
+      const vids = Array.from(new Set(ordered.map((a) => a.venue_id)));
+      const { data: vens } = await supabase
+        .from("venues")
+        .select("*")
+        .in("id", vids);
+      if (cancelled) return;
+      const byId = new Map((vens || []).map((v) => [v.id, v]));
+      const out = [];
+      for (const a of ordered) {
+        const v = byId.get(a.venue_id);
+        if (v && !out.some((x) => x.id === v.id)) out.push(v);
+      }
+      setTrail(out);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterKey]);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1297,9 +1336,28 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   </button>
                 </div>
               )}
-              <p className="text-sm font-semibold truncate">
+              <p className="text-sm font-semibold">
                 {thread.ownerName} at{" "}
-                {thread.venueObj && onOpenVenue ? (
+                {trail.length > 1 ? (
+                  trail.map((v, i) => (
+                    <span key={v.id}>
+                      {i > 0 && (
+                        <span className="font-normal text-neutral-400"> → </span>
+                      )}
+                      {onOpenVenue ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenVenue(v)}
+                          className="underline decoration-[#455d3b]/40 underline-offset-2"
+                        >
+                          {v.name}
+                        </button>
+                      ) : (
+                        v.name
+                      )}
+                    </span>
+                  ))
+                ) : thread.venueObj && onOpenVenue ? (
                   <button
                     type="button"
                     onClick={() => onOpenVenue(thread.venueObj)}
