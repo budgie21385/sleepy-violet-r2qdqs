@@ -19,7 +19,11 @@ function whenLine(ts) {
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, whenAgo, FRESH_MS } from "../lib/checkins";
-import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
+import {
+  searchPlaces,
+  addGooglePlace,
+  createPersonalPlace,
+} from "../lib/venueSearch";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,
@@ -1129,7 +1133,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     }
     let cancelled = false;
     const t = setTimeout(async () => {
-      const { venues, google } = await searchPlaces(q);
+      const { venues, google } = await searchPlaces(q, userId);
       if (cancelled) return;
       setPlaceResults(venues);
       setPlaceGoogle(google);
@@ -1423,7 +1427,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       {i > 0 && (
                         <span className="font-normal text-neutral-400"> → </span>
                       )}
-                      {onOpenVenue ? (
+                      {/* Personal places have no address or coords, so there's
+                          no venue card worth opening — plain text. */}
+                      {onOpenVenue && v.source !== "personal" ? (
                         <button
                           type="button"
                           onClick={() => onOpenVenue(v)}
@@ -1436,7 +1442,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       )}
                     </span>
                   ))
-                ) : thread.venueObj && onOpenVenue ? (
+                ) : thread.venueObj &&
+                  onOpenVenue &&
+                  thread.venueObj.source !== "personal" ? (
                   <button
                     type="button"
                     onClick={() => onOpenVenue(thread.venueObj)}
@@ -1687,13 +1695,30 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   ))}
                 </>
               )}
-              {placeQ.trim().length >= 2 &&
-                placeResults.length === 0 &&
-                placeGoogle.length === 0 && (
-                  <p className="text-xs text-neutral-400 px-2 py-2">
-                    Nothing by that name — check the spelling?
-                  </p>
-                )}
+              {/* Name-only place — a house, a park, someone's backyard. */}
+              {placeQ.trim().length >= 2 && (
+                <button
+                  type="button"
+                  disabled={!!placeBusy}
+                  onClick={async () => {
+                    setPlaceBusy("personal");
+                    const v = await createPersonalPlace(placeQ, userId);
+                    setPlaceBusy(null);
+                    if (v) await addPlace(v);
+                    else showToast?.("Couldn't add that place");
+                  }}
+                  className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                >
+                  <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                    {placeBusy === "personal"
+                      ? "Adding…"
+                      : `Use "${placeQ.trim()}"`}
+                  </span>
+                  <span className="text-[11px] text-neutral-400 shrink-0">
+                    not a venue
+                  </span>
+                </button>
+              )}
             </div>
             <p className="mt-3 text-[10px] text-neutral-400">
               It joins this night's album and lands in your Been list.

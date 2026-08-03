@@ -7,7 +7,11 @@ import { createPortal } from "react-dom";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { whenAgo } from "../lib/checkins";
-import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
+import {
+  searchPlaces,
+  addGooglePlace,
+  createPersonalPlace,
+} from "../lib/venueSearch";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
@@ -78,7 +82,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       // Pool + Google — cinemas, bowling alleys, someone's favourite kebab
       // van: anywhere counts as a place you were. Shared with the card's
       // "somewhere else" search (lib/venueSearch).
-      const { venues, google } = await searchPlaces(q);
+      const { venues, google } = await searchPlaces(q, userId);
       setAddResults(venues);
       setAddGoogle(google);
     }, 250);
@@ -624,13 +628,33 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                       ))}
                     </>
                   )}
-                  {addQ.trim().length >= 2 &&
-                    addResults.length === 0 &&
-                    addGoogle.length === 0 && (
-                      <p className="text-xs text-neutral-400 px-2 py-2">
-                        Nothing by that name — check the spelling?
-                      </p>
-                    )}
+                  {/* Not everywhere is a venue (Mark, July 31: "what if we
+                      want it to be a random place, like Mark's place"). A
+                      personal place is name only — no address, no pin. */}
+                  {addQ.trim().length >= 2 && (
+                    <button
+                      type="button"
+                      disabled={addingPlaceId === "personal"}
+                      onClick={async () => {
+                        setAddingPlaceId("personal");
+                        const v = await createPersonalPlace(addQ, userId);
+                        setAddingPlaceId(null);
+                        if (v) pickVenue(v);
+                        else showToast?.("Couldn't add that place");
+                      }}
+                      className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                    >
+                      <MapPin size={15} className="shrink-0 text-neutral-300" />
+                      <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                        {addingPlaceId === "personal"
+                          ? "Adding…"
+                          : `Use "${addQ.trim()}"`}
+                      </span>
+                      <span className="text-[11px] text-neutral-400 shrink-0">
+                        not a venue
+                      </span>
+                    </button>
+                  )}
                 </div>
               </>
             )}
