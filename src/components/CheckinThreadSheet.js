@@ -4,7 +4,7 @@
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus, Settings } from "lucide-react";
+import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus, Settings, Home } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
@@ -1122,6 +1122,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [placeResults, setPlaceResults] = useState([]);
   const [placeGoogle, setPlaceGoogle] = useState([]);
   const [placeBusy, setPlaceBusy] = useState(null); // place_id | "saving"
+  const [placeBlurred, setPlaceBlurred] = useState(false);
 
   useEffect(() => {
     if (view !== "place") return;
@@ -1638,8 +1639,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             </p>
             <input
               value={placeQ}
-              onChange={(e) => setPlaceQ(e.target.value)}
-              placeholder="Search for the place"
+              onChange={(e) => {
+                setPlaceQ(e.target.value);
+                setPlaceBlurred(false);
+              }}
+              onBlur={() => setPlaceBlurred(true)}
+              placeholder="Search for the place, or type your own"
               className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
             />
             <div className="mt-2 space-y-1">
@@ -1695,29 +1700,40 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   ))}
                 </>
               )}
-              {/* Name-only place — a house, a park, someone's backyard. */}
+              {/* Name-only place — a house, a park, someone's backyard. Its own
+                  block, emphasised once they've tapped out with no match. */}
               {placeQ.trim().length >= 2 && (
-                <button
-                  type="button"
-                  disabled={!!placeBusy}
-                  onClick={async () => {
-                    setPlaceBusy("personal");
-                    const v = await createPersonalPlace(placeQ, userId);
-                    setPlaceBusy(null);
-                    if (v) await addPlace(v);
-                    else showToast?.("Couldn't add that place");
-                  }}
-                  className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                <div
+                  className={`mt-2 rounded-xl border p-2.5 transition ${
+                    placeBlurred && placeResults.length === 0
+                      ? "border-[#455d3b] bg-[#edf2eb]"
+                      : "border-neutral-200 bg-white"
+                  }`}
                 >
-                  <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
-                    {placeBusy === "personal"
-                      ? "Adding…"
-                      : `Use "${placeQ.trim()}"`}
-                  </span>
-                  <span className="text-[11px] text-neutral-400 shrink-0">
-                    not a venue
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    disabled={!!placeBusy}
+                    onClick={async () => {
+                      setPlaceBusy("personal");
+                      const v = await createPersonalPlace(placeQ, userId);
+                      setPlaceBusy(null);
+                      if (v) await addPlace(v);
+                      else showToast?.("Couldn't add that place");
+                    }}
+                    className="w-full flex items-center gap-2.5 text-left active:scale-[0.99] transition disabled:opacity-50"
+                  >
+                    <Home size={15} className="shrink-0 text-[#455d3b]" />
+                    <span className="flex-1 min-w-0 truncate text-sm font-medium text-neutral-900">
+                      {placeBusy === "personal"
+                        ? "Adding…"
+                        : `Use "${placeQ.trim()}"`}
+                    </span>
+                  </button>
+                  <p className="mt-1 pl-[25px] text-[11px] leading-snug text-neutral-500">
+                    A place of your own — just a name. No address, and it won't
+                    appear on the map.
+                  </p>
+                </div>
               )}
             </div>
             <p className="mt-3 text-[10px] text-neutral-400">

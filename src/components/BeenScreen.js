@@ -4,7 +4,7 @@
 // the venue name inside the thread. Extracted from App.js (July 13, 2026).
 import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, MapPin } from "lucide-react";
+import { ArrowLeft, MapPin, Home } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { whenAgo } from "../lib/checkins";
 import {
@@ -69,6 +69,10 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
 
   const [addGoogle, setAddGoogle] = useState([]); // Google fallback rows
   const [addingPlaceId, setAddingPlaceId] = useState(null);
+  // Tapping out of the search box means "I've finished typing" — the personal
+  // place option steps forward at that point (Mark, July 31: the "not a venue"
+  // row was too easy to read as a footnote).
+  const [addBlurred, setAddBlurred] = useState(false);
 
   useEffect(() => {
     if (!addOpen) return;
@@ -565,8 +569,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
               <>
                 <input
                   value={addQ}
-                  onChange={(e) => setAddQ(e.target.value)}
-                  placeholder="Search for the place"
+                  onChange={(e) => {
+                    setAddQ(e.target.value);
+                    setAddBlurred(false);
+                  }}
+                  onBlur={() => setAddBlurred(true)}
+                  placeholder="Search for the place, or type your own"
                   className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
                 />
                 {addVenues.length > 0 && (
@@ -629,31 +637,44 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                     </>
                   )}
                   {/* Not everywhere is a venue (Mark, July 31: "what if we
-                      want it to be a random place, like Mark's place"). A
-                      personal place is name only — no address, no pin. */}
+                      want it to be a random place, like Mark's place"). Its own
+                      block rather than a row in the results, because it isn't
+                      the same kind of thing — a name with no address and no pin
+                      shouldn't queue up next to real venues as if it were one.
+                      Emphasised once they tap out of the field: at that point
+                      they've said what they meant and nothing matched it. */}
                   {addQ.trim().length >= 2 && (
-                    <button
-                      type="button"
-                      disabled={addingPlaceId === "personal"}
-                      onClick={async () => {
-                        setAddingPlaceId("personal");
-                        const v = await createPersonalPlace(addQ, userId);
-                        setAddingPlaceId(null);
-                        if (v) pickVenue(v);
-                        else showToast?.("Couldn't add that place");
-                      }}
-                      className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                    <div
+                      className={`mt-2 rounded-xl border p-2.5 transition ${
+                        addBlurred && addResults.length === 0
+                          ? "border-[#455d3b] bg-[#edf2eb]"
+                          : "border-neutral-200 bg-white"
+                      }`}
                     >
-                      <MapPin size={15} className="shrink-0 text-neutral-300" />
-                      <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
-                        {addingPlaceId === "personal"
-                          ? "Adding…"
-                          : `Use "${addQ.trim()}"`}
-                      </span>
-                      <span className="text-[11px] text-neutral-400 shrink-0">
-                        not a venue
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        disabled={addingPlaceId === "personal"}
+                        onClick={async () => {
+                          setAddingPlaceId("personal");
+                          const v = await createPersonalPlace(addQ, userId);
+                          setAddingPlaceId(null);
+                          if (v) pickVenue(v);
+                          else showToast?.("Couldn't add that place");
+                        }}
+                        className="w-full flex items-center gap-2.5 text-left active:scale-[0.99] transition disabled:opacity-50"
+                      >
+                        <Home size={15} className="shrink-0 text-[#455d3b]" />
+                        <span className="flex-1 min-w-0 truncate text-sm font-medium text-neutral-900">
+                          {addingPlaceId === "personal"
+                            ? "Adding…"
+                            : `Use "${addQ.trim()}"`}
+                        </span>
+                      </button>
+                      <p className="mt-1 pl-[25px] text-[11px] leading-snug text-neutral-500">
+                        A place of your own — just a name. No address, and it
+                        won't appear on the map.
+                      </p>
+                    </div>
                   )}
                 </div>
               </>
