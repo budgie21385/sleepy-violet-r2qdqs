@@ -7,27 +7,9 @@ import { createPortal } from "react-dom";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { whenAgo } from "../lib/checkins";
+import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
-
-// Same /api/add-venue caller as AddVenueSheet — the add-a-night search
-// falls back to Google for places not on Flanit (July 25, Mark: "I want to
-// add the cinema I went to yesterday and it won't come up").
-async function callAddVenueApi(body) {
-  const { data } = await supabase.auth.getSession();
-  const token = data?.session?.access_token;
-  const resp = await fetch("/api/add-venue", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(json.error || `HTTP ${resp.status}`);
-  return json;
-}
 
 // One compact history row — also used by ProfileLookupScreen's Recent
 // activity section (a friend's history on their profile).
@@ -93,22 +75,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       return;
     }
     const t = setTimeout(async () => {
-      // Pool + Google in parallel — cinemas, bowling alleys, someone's
-      // favourite kebab van: anywhere counts as a place you were.
-      const [dbRes, gRes] = await Promise.all([
-        supabase.from("venues").select("*").ilike("name", `%${q}%`).limit(12),
-        callAddVenueApi({ action: "search", q }).catch(() => ({
-          results: [],
-        })),
-      ]);
-      const dbRows = dbRes.data || [];
-      const knownPlaceIds = new Set(
-        dbRows.map((v) => v.google_place_id).filter(Boolean)
-      );
-      setAddResults(dbRows);
-      setAddGoogle(
-        (gRes.results || []).filter((r) => !knownPlaceIds.has(r.place_id))
-      );
+      // Pool + Google — cinemas, bowling alleys, someone's favourite kebab
+      // van: anywhere counts as a place you were. Shared with the card's
+      // "somewhere else" search (lib/venueSearch).
+      const { venues, google } = await searchPlaces(q);
+      setAddResults(venues);
+      setAddGoogle(google);
     }, 250);
     return () => clearTimeout(t);
   }, [addQ, addOpen]);
@@ -131,12 +103,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     if (addingPlaceId) return;
     setAddingPlaceId(r.place_id);
     try {
-      const { venue } = await callAddVenueApi({
-        action: "add",
-        placeId: r.place_id,
-        save: false,
-      });
-      pickVenue(venue);
+      pickVenue(await addGooglePlace(r.place_id));
     } catch (e) {
       console.error("Google add-a-night pick failed:", e);
       showToast?.("Couldn't add that place");

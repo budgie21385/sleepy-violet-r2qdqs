@@ -19,6 +19,7 @@ function whenLine(ts) {
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, whenAgo, FRESH_MS } from "../lib/checkins";
+import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,
@@ -465,6 +466,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // friend's twin at the same place adds nothing while a genuine second stop
   // does. Empty until it resolves; one venue renders exactly as it always did.
   const [trail, setTrail] = useState([]);
+  // When the night's most recent leg happened — the anchor "add a place" uses
+  // to decide between "now" and "just after the last stop".
+  const [lastLegAt, setLastLegAt] = useState(null);
   useEffect(() => {
     if (clusterIds.length === 0) return;
     let cancelled = false;
@@ -475,6 +479,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .in("id", clusterIds)
         .order("created_at", { ascending: true });
       const ordered = (acts || []).filter((a) => a.venue_id);
+      if (!cancelled && ordered.length > 0) {
+        setLastLegAt(ordered[ordered.length - 1].created_at);
+      }
       if (ordered.length === 0) {
         if (!cancelled) setTrail([]);
         return;
@@ -1101,6 +1108,78 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     };
   }, [thread.activityId, uploadTargetId, tagRefresh]);
 
+  // ADD A PLACE (July 31) — "we went somewhere else". Creates a check-in at the
+  // new venue owned by WHOEVER TAPS, chained to this night through joined_from,
+  // so the cluster merge folds it into this card and the leg lands in that
+  // person's Been and on their map. Any participant may do it — they were
+  // there, and adding a place isn't an invitation, so guests_can_invite (which
+  // governs bringing PEOPLE in) deliberately doesn't gate it.
+  const [placeQ, setPlaceQ] = useState("");
+  const [placeResults, setPlaceResults] = useState([]);
+  const [placeGoogle, setPlaceGoogle] = useState([]);
+  const [placeBusy, setPlaceBusy] = useState(null); // place_id | "saving"
+
+  useEffect(() => {
+    if (view !== "place") return;
+    const q = placeQ.trim();
+    if (q.length < 2) {
+      setPlaceResults([]);
+      setPlaceGoogle([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const { venues, google } = await searchPlaces(q);
+      if (cancelled) return;
+      setPlaceResults(venues);
+      setPlaceGoogle(google);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [placeQ, view]);
+
+  async function addPlace(venue) {
+    if (!venue || !userId || placeBusy === "saving") return;
+    setPlaceBusy("saving");
+    // Anchor the leg to the NIGHT, not to the tap. Adding it live (you're at
+    // the next bar) means `now` is right; adding it the morning after would
+    // otherwise stamp the leg ~14h adrift, breaking the trail order and making
+    // the card say "yesterday" and "14h ago" about one evening. Beyond a 12h
+    // reach we place it just after the last known leg instead.
+    const base = new Date(lastLegAt || thread.timestamp || Date.now()).getTime();
+    const within12h = Math.abs(Date.now() - base) < 12 * 60 * 60 * 1000;
+    const ts = within12h ? new Date() : new Date(base + 60 * 60 * 1000);
+    const rootId = nightPerms?.rootId || clusterIds[0] || thread.activityId;
+    const { data: inserted, error } = await supabase
+      .from("activities")
+      .insert({
+        user_id: userId,
+        kind: "checkin",
+        venue_id: venue.id,
+        joined_from: rootId,
+        created_at: ts.toISOString(),
+      })
+      .select("id")
+      .single();
+    setPlaceBusy(null);
+    if (error || !inserted) {
+      console.error("Add place failed:", error);
+      showToast?.("Couldn't add that place");
+      return;
+    }
+    setPlaceQ("");
+    setPlaceResults([]);
+    setPlaceGoogle([]);
+    setView("card");
+    // Pull the new leg into the cluster so the trail and album update now.
+    setClusterIds((prev) =>
+      prev.includes(inserted.id) ? prev : [...prev, inserted.id]
+    );
+    showToast?.(`Added ${venue.name} to this night`);
+  }
+
   // Owner can tag friends FROM the card — serves "+ Add a night" and any
   // check-in where tagging was skipped in the moment. Same consent flow:
   // the friend gets the nudge; accepting creates THEIR twin for that night,
@@ -1369,6 +1448,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   thread.venueName
                 )}
               </p>
+              {/* Sits under the trail, not in the crowded avatar row — it's
+                  about places, and that's where the places are. Any
+                  participant, per the rule that adding a place isn't an
+                  invitation. */}
+              {(isOwner || uploadTargetId) && (
+                <button
+                  type="button"
+                  onClick={() => setView("place")}
+                  className="mt-0.5 text-[11px] font-medium text-[#455d3b]"
+                >
+                  + we went somewhere else
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -1520,6 +1612,92 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </p>
               </>
             )}
+          </div>
+        )}
+        {/* ADD A PLACE — same search as the add-a-night form (lib/venueSearch),
+            so anywhere Google knows counts, not just venues already on Flanit. */}
+        {view === "place" && (isOwner || uploadTargetId) && (
+          <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+            <button
+              type="button"
+              onClick={() => setView("card")}
+              className="mb-3 text-xs font-medium text-[#455d3b]"
+            >
+              ‹ Back
+            </button>
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+              Where else did the night go?
+            </p>
+            <input
+              value={placeQ}
+              onChange={(e) => setPlaceQ(e.target.value)}
+              placeholder="Search for the place"
+              className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
+            />
+            <div className="mt-2 space-y-1">
+              {placeResults.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  disabled={placeBusy === "saving"}
+                  onClick={() => addPlace(v)}
+                  className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                >
+                  <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                    {v.name}
+                  </span>
+                  {v.suburb && (
+                    <span className="text-[11px] text-neutral-400 shrink-0">
+                      {v.suburb}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {placeGoogle.length > 0 && (
+                <>
+                  <p className="px-2 pt-2 text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                    More places
+                  </p>
+                  {placeGoogle.map((r) => (
+                    <button
+                      key={r.place_id}
+                      type="button"
+                      disabled={!!placeBusy}
+                      onClick={async () => {
+                        setPlaceBusy(r.place_id);
+                        try {
+                          const v = await addGooglePlace(r.place_id);
+                          setPlaceBusy(null);
+                          await addPlace(v);
+                        } catch (e) {
+                          console.error("Google place add failed:", e);
+                          setPlaceBusy(null);
+                          showToast?.("Couldn't add that place");
+                        }
+                      }}
+                      className="w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-50"
+                    >
+                      <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                        {r.name}
+                      </span>
+                      <span className="text-[11px] text-neutral-400 shrink-0 truncate max-w-[110px]">
+                        {placeBusy === r.place_id ? "Adding…" : r.address || ""}
+                      </span>
+                    </button>
+                  ))}
+                </>
+              )}
+              {placeQ.trim().length >= 2 &&
+                placeResults.length === 0 &&
+                placeGoogle.length === 0 && (
+                  <p className="text-xs text-neutral-400 px-2 py-2">
+                    Nothing by that name — check the spelling?
+                  </p>
+                )}
+            </div>
+            <p className="mt-3 text-[10px] text-neutral-400">
+              It joins this night's album and lands in your Been list.
+            </p>
           </div>
         )}
         {/* SETTINGS (July 25, Mark: a cog next to "add more") — the photo
