@@ -2,7 +2,7 @@
 // Rows: venue · label · when; tapping a row opens the CHECK-IN (its own
 // object: label, companions, thread) — the venue card is one tap deeper via
 // the venue name inside the thread. Extracted from App.js (July 13, 2026).
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
@@ -285,7 +285,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     (async () => {
       const { data } = await supabase
         .from("activities")
-        .select("id, venue_id, label, created_at")
+        .select("id, venue_id, label, created_at, joined_from")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
@@ -350,6 +350,56 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
 
   const when = whenAgo; // shared ladder — see lib/checkins
 
+  // BEEN IS GROUPED BY NIGHT, NOT BY ROW (Mark, July 31: "there are now 2
+  // check-in cards, one for venue 1 and one for venue 2"). A night that hopped
+  // three venues is three activities rows — right for the map, wrong for a
+  // history: it read as three separate nights.
+  //
+  // The group key is the row's root, walked through joined_from WITHIN the
+  // loaded set. If the chain leaves the set — a tag-accept twin whose parent is
+  // a friend's check-in — the key becomes that foreign id, which still groups
+  // all your legs of that night together without needing to read their row.
+  //
+  // Known and accepted (Mark: "that edge case is fine"): your own check-in and
+  // a leg you were tagged into that same night have different roots, so they
+  // stay two entries. Linking them would mean inferring a night from time
+  // proximity, which is the coincidence rule we deliberately don't use.
+  const nights = useMemo(() => {
+    if (!rows) return null;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const rootOf = (row) => {
+      let cur = row;
+      for (let hop = 0; hop < 6; hop++) {
+        if (!cur.joined_from) return cur.id;
+        const parent = byId.get(cur.joined_from);
+        if (!parent) return cur.joined_from; // outside my rows — key on the id
+        cur = parent;
+      }
+      return cur.id;
+    };
+    const groups = new Map();
+    for (const r of rows) {
+      const key = rootOf(r);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    return Array.from(groups.values())
+      .map((legs) => {
+        // Oldest first: that's the order the night actually happened in.
+        const ordered = [...legs].sort(
+          (a, b) => new Date(a.created_at) - new Date(b.created_at)
+        );
+        return {
+          key: ordered[0].id,
+          legs: ordered,
+          // The title lives on the root; fall back to any leg that carries one.
+          label: ordered.find((l) => l.label)?.label || null,
+          startedAt: ordered[0].created_at,
+        };
+      })
+      .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+  }, [rows]);
+
   return (
     <div className="fixed inset-0 z-[2500] overflow-y-auto bg-[#fdf6f0]">
       <div className="mx-auto w-full max-w-sm p-4 pb-24">
@@ -387,22 +437,35 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           </div>
         )}
         <div className="space-y-2">
-          {(rows || []).map((r) => {
-            const venue = venueById.get(r.venue_id) || null;
+          {(nights || []).map((n) => {
+            const first = n.legs[0];
+            const venue = venueById.get(first.venue_id) || null;
+            // The trail, in order, duplicates collapsed — going back to the
+            // first bar at 2am shouldn't print its name twice.
+            const trail = [];
+            for (const leg of n.legs) {
+              const nm = venueById.get(leg.venue_id)?.name;
+              if (nm && trail[trail.length - 1] !== nm) trail.push(nm);
+            }
+            // Companions are per-leg; the night shows everyone who was on any
+            // part of it.
+            const who = Array.from(
+              new Set(n.legs.flatMap((l) => withByAct.get(l.id) || []))
+            );
             return (
               <button
-                key={r.id}
+                key={n.key}
                 type="button"
                 onClick={() =>
                   setThread({
-                    activityId: r.id,
+                    activityId: first.id,
                     ownerId: userId,
                     ownerName: "You",
                     ownerProfile: null,
                     venueName: venue?.name || "a spot",
-                    label: r.label || null,
+                    label: n.label,
                     venueObj: venue,
-                    timestamp: r.created_at,
+                    timestamp: first.created_at,
                   })
                 }
                 className="w-full rounded-2xl bg-white border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
@@ -412,22 +475,21 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-neutral-900 truncate">
-                    {venue?.name || "A spot"}
-                    {r.label ? (
-                      <span className="font-normal text-neutral-500"> · {r.label}</span>
+                    {trail.length > 0 ? trail.join(" → ") : "A spot"}
+                    {n.label ? (
+                      <span className="font-normal text-neutral-500"> · {n.label}</span>
                     ) : null}
                   </p>
                   <p className="text-[11px] text-neutral-500">
-                    {when(r.created_at)}
-                    {(() => {
-                      const names = withByAct.get(r.id);
-                      if (!names || names.length === 0) return null;
-                      const who =
-                        names.length === 1
-                          ? names[0]
-                          : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-                      return ` · with ${who}`;
-                    })()}
+                    {when(first.created_at)}
+                    {trail.length > 1 ? ` · ${trail.length} places` : ""}
+                    {who.length > 0
+                      ? ` · with ${
+                          who.length === 1
+                            ? who[0]
+                            : `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]}`
+                        }`
+                      : ""}
                   </p>
                 </div>
                 <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
