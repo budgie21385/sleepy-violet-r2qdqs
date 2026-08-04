@@ -4,7 +4,7 @@
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus, Settings, Home } from "lucide-react";
+import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus, Settings, Home, Download } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
@@ -256,6 +256,30 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [photoComments, setPhotoComments] = useState(null); // null = loading
   const [photoBody, setPhotoBody] = useState("");
   const [photoSending, setPhotoSending] = useState(false);
+  // Full-quality download. Supabase signs with a Content-Disposition when you
+  // pass `download`, so the browser saves the file instead of navigating to
+  // it — no fetch, no blob, no CORS. If RLS says no (not a participant) the
+  // sign fails and we say so rather than handing over a broken link.
+  const [downloading, setDownloading] = useState(false);
+  async function downloadOriginal(row) {
+    if (!row?.orig_path || downloading) return;
+    setDownloading(true);
+    try {
+      const ext = row.orig_path.split(".").pop() || "jpg";
+      const { data, error } = await supabase.storage
+        .from("checkin-photos")
+        .createSignedUrl(row.orig_path, 60, {
+          download: `flanit-${row.id}.${ext}`,
+        });
+      if (error || !data?.signedUrl) throw error || new Error("no url");
+      window.location.assign(data.signedUrl);
+    } catch (e) {
+      console.error("Download original failed:", e);
+      showToast?.("Couldn't download that one");
+    }
+    setDownloading(false);
+  }
+
   const touchX = useRef(null); // lightbox swipe start
   // Flip between the night's photos without leaving the lightbox — comments
   // and reactions re-key off lightbox.id automatically.
@@ -2397,6 +2421,25 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               >
                 <X size={16} />
               </button>
+              {/* DOWNLOAD THE ORIGINAL (July 31, Mark's call: "make it explicit
+                  and useful"). Storage RLS has always allowed a night
+                  participant to read orig_path — the same clause covers both
+                  paths — but nothing in the app ever asked for it, so people
+                  got the 1280px derivative via long-press and no way to the
+                  full file. That's the worst of both: permitted but hidden,
+                  and 1280px is only ~4in at 300dpi, which fails exactly the
+                  print case (weddings, parties) this album is for. */}
+              {lightbox.orig_path && (
+                <button
+                  type="button"
+                  aria-label="Download original"
+                  disabled={downloading}
+                  onClick={() => downloadOriginal(lightbox)}
+                  className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition disabled:opacity-50"
+                >
+                  <Download size={16} />
+                </button>
+              )}
               {photos.length > 1 && (
                 <>
                   <span className="absolute top-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
