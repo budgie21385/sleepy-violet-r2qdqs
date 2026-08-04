@@ -256,26 +256,66 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [photoComments, setPhotoComments] = useState(null); // null = loading
   const [photoBody, setPhotoBody] = useState("");
   const [photoSending, setPhotoSending] = useState(false);
-  // Full-quality download. Supabase signs with a Content-Disposition when you
-  // pass `download`, so the browser saves the file instead of navigating to
-  // it — no fetch, no blob, no CORS. If RLS says no (not a participant) the
-  // sign fails and we say so rather than handing over a broken link.
+  // SAVE THE ORIGINAL TO THE CAMERA ROLL (Mark, July 31: "I want it to
+  // download as an image and save in Photos on iPhone and Android").
+  //
+  // A Content-Disposition download does NOT do that. On iOS it lands in Files,
+  // never Photos; on Android it goes to the Downloads folder. The only web API
+  // that reaches the camera roll is the SHARE SHEET with a File attached —
+  // navigator.share({ files }) gives iOS "Save Image" and Android "Save to
+  // Photos". So: sign → fetch the bytes → wrap in a File → share, with an
+  // <a download> fallback for desktop and any browser without file sharing.
+  //
+  // Two things to know if this misbehaves. (1) iOS requires share() to happen
+  // under transient user activation, which survives a short await but can
+  // lapse on a big video — hence the fallback on NotAllowedError rather than
+  // an error message. (2) A cancelled share sheet throws AbortError; that's
+  // the user changing their mind, not a failure, so it stays silent.
   const [downloading, setDownloading] = useState(false);
   async function downloadOriginal(row) {
     if (!row?.orig_path || downloading) return;
     setDownloading(true);
     try {
-      const ext = row.orig_path.split(".").pop() || "jpg";
+      const ext = (row.orig_path.split(".").pop() || "jpg").toLowerCase();
+      const filename = `flanit-${row.id}.${ext}`;
       const { data, error } = await supabase.storage
         .from("checkin-photos")
-        .createSignedUrl(row.orig_path, 60, {
-          download: `flanit-${row.id}.${ext}`,
-        });
+        .createSignedUrl(row.orig_path, 60);
       if (error || !data?.signedUrl) throw error || new Error("no url");
-      window.location.assign(data.signedUrl);
+
+      const resp = await fetch(data.signedUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const type =
+        blob.type ||
+        (row.kind === "video" ? "video/mp4" : "image/jpeg");
+      const file = new File([blob], filename, { type });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file] });
+          setDownloading(false);
+          return;
+        } catch (shareErr) {
+          if (shareErr?.name === "AbortError") {
+            setDownloading(false);
+            return; // they closed the sheet
+          }
+          console.warn("Share failed, falling back to download:", shareErr);
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
-      console.error("Download original failed:", e);
-      showToast?.("Couldn't download that one");
+      console.error("Save original failed:", e);
+      showToast?.("Couldn't save that one");
     }
     setDownloading(false);
   }
@@ -2432,7 +2472,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               {lightbox.orig_path && (
                 <button
                   type="button"
-                  aria-label="Download original"
+                  aria-label="Save to your photos"
                   disabled={downloading}
                   onClick={() => downloadOriginal(lightbox)}
                   className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition disabled:opacity-50"
