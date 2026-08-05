@@ -271,13 +271,34 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // lapse on a big video — hence the fallback on NotAllowedError rather than
   // an error message. (2) A cancelled share sheet throws AbortError; that's
   // the user changing their mind, not a failure, so it stays silent.
+  // iOS is the only platform that NEEDS the sheet, so it's the only one that
+  // gets it. Android's <a download> writes to Downloads, which the media
+  // scanner surfaces in Gallery and Photos — a real one-tap save, no sheet.
+  const isIOS =
+    typeof navigator !== "undefined" &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      // iPadOS 13+ reports as a Mac; the touch points give it away.
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
+  // The filename is the sheet's header — the ONE part of that system view we
+  // control — so it says what the file is rather than "flanit-74". Also what
+  // lands in Files or Downloads, where a row id would be useless.
+  function saveFilename(row) {
+    const ext = (row.orig_path.split(".").pop() || "jpg").toLowerCase();
+    const place = (trail[0]?.name || thread.venueName || "Flanit")
+      .replace(/[\\/:*?"<>|]/g, "") // illegal in filenames
+      .slice(0, 40);
+    const when = new Date(row.created_at || thread.timestamp || Date.now())
+      .toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+    return `${place} — ${when}.${ext}`;
+  }
+
   const [downloading, setDownloading] = useState(false);
   async function downloadOriginal(row) {
     if (!row?.orig_path || downloading) return;
     setDownloading(true);
     try {
-      const ext = (row.orig_path.split(".").pop() || "jpg").toLowerCase();
-      const filename = `flanit-${row.id}.${ext}`;
+      const filename = saveFilename(row);
       const { data, error } = await supabase.storage
         .from("checkin-photos")
         .createSignedUrl(row.orig_path, 60);
@@ -286,12 +307,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       const resp = await fetch(data.signedUrl);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = await resp.blob();
-      const type =
-        blob.type ||
-        (row.kind === "video" ? "video/mp4" : "image/jpeg");
+      const type = blob.type || (row.kind === "video" ? "video/mp4" : "image/jpeg");
       const file = new File([blob], filename, { type });
 
-      if (navigator.canShare?.({ files: [file] })) {
+      if (isIOS && navigator.canShare?.({ files: [file] })) {
         try {
           await navigator.share({ files: [file] });
           setDownloading(false);
@@ -299,8 +318,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         } catch (shareErr) {
           if (shareErr?.name === "AbortError") {
             setDownloading(false);
-            return; // they closed the sheet
+            return; // they closed the sheet — not a failure
           }
+          // Activation can lapse on a big file; fall through to a download
+          // rather than telling them something broke.
           console.warn("Share failed, falling back to download:", shareErr);
         }
       }
@@ -313,6 +334,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
+      if (!isIOS) showToast?.("Saved to your photos");
     } catch (e) {
       console.error("Save original failed:", e);
       showToast?.("Couldn't save that one");
@@ -2472,12 +2494,20 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               {lightbox.orig_path && (
                 <button
                   type="button"
-                  aria-label="Save to your photos"
                   disabled={downloading}
                   onClick={() => downloadOriginal(lightbox)}
-                  className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition disabled:opacity-50"
+                  className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-white active:scale-95 transition disabled:opacity-70"
                 >
-                  <Download size={16} />
+                  {downloading ? (
+                    <>
+                      <span className="h-3 w-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                      Preparing…
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} /> Save image
+                    </>
+                  )}
                 </button>
               )}
               {photos.length > 1 && (
@@ -2508,6 +2538,18 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </>
               )}
             </div>
+            {/* iOS only: the share sheet is coming and it isn't ours, so say
+                what to tap before it lands. Shown while the file downloads —
+                the wait and the instruction share the same beat. Android saves
+                straight to Downloads (Gallery picks it up), no sheet, no hint. */}
+            {downloading && isIOS && (
+              <div className="shrink-0 border-t border-[#cdd9c6] bg-[#edf2eb] px-4 py-2.5">
+                <p className="text-xs leading-snug text-[#2f3f29]">
+                  <strong className="font-medium">Choose "Save Image"</strong> to
+                  put it in your camera roll.
+                </p>
+              </div>
+            )}
             <div className="px-4 pt-3 pb-1">
               <div className="flex items-center gap-2 mb-2">
                 <button
