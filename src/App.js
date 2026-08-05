@@ -37,6 +37,11 @@ import { CuratedResultsBoard } from "./components/CuratedResultsBoard";
 import { SessionResultsView } from "./components/SessionResultsView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { GuestHome } from "./components/GuestHome";
+import {
+  sendFriendRequest,
+  acceptFriendRequest,
+  friendRequestToast,
+} from "./lib/friendships";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { FriendAvatar } from "./components/FriendAvatar";
@@ -6369,45 +6374,24 @@ function ProfileLookupScreen({
   // also lets the new initiator become requester_id even if the original
   // request went the other direction. RLS allows either party to DELETE
   // (delete_party) and the new initiator to INSERT (insert_as_requester).
+  // Shared with the drawer, the participants strip and the album (July 31) —
+  // the write and its push live together in lib/friendships so this path can't
+  // be the quiet one again. It was: adding someone from their PROFILE, the
+  // most obvious route in the app, sent the row and no notification.
   async function sendRequest() {
     setActing(true);
-    if (friendship && status === "declined") {
-      const { error: delError } = await supabase
-        .from("friendships")
-        .delete()
-        .eq("id", friendship.id);
-      if (delError) {
-        setActing(false);
-        showToast?.("Couldn't reset previous decline");
-        console.error(delError);
-        return;
-      }
-    }
-    const { error } = await supabase
-      .from("friendships")
-      .insert({
-        requester_id: viewerUserId,
-        addressee_id: userId,
-        status: "pending",
-      });
+    const result = await sendFriendRequest(viewerUserId, userId);
     setActing(false);
-    if (error) {
-      showToast?.("Couldn't send request");
-      console.error(error);
-      return;
-    }
-    await load();
+    showToast?.(friendRequestToast(result));
+    if (result !== "error") await load();
   }
 
   async function acceptRequest() {
     if (!friendship) return;
     setActing(true);
-    const { error } = await supabase
-      .from("friendships")
-      .update({ status: "accepted" })
-      .eq("id", friendship.id);
+    const ok = await acceptFriendRequest(viewerUserId, userId, friendship.id);
     setActing(false);
-    if (error) {
+    if (!ok) {
       showToast?.("Couldn't accept request");
       return;
     }

@@ -9,6 +9,11 @@
 import { useState, useEffect } from "react";
 import { X, UserPlus, Check, MapPin, MessageCircle, Camera } from "lucide-react";
 import { pushState, enablePush, sendPush } from "../lib/push";
+import {
+  sendFriendRequest,
+  acceptFriendRequest,
+  friendRequestToast,
+} from "../lib/friendships";
 
 // Priority tiers for the Activity list (Mark, July 18): items that deal
 // with the person directly outrank ambient news regardless of age.
@@ -1481,64 +1486,20 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   // not friendship ids). Row-count-checked — a stale request surfaces.
   async function acceptRequestFrom(otherId) {
     setActing(otherId);
-    const { data: rows, error } = await supabase
-      .from("friendships")
-      .update({ status: "accepted" })
-      .eq("requester_id", otherId)
-      .eq("addressee_id", userId)
-      .eq("status", "pending")
-      .select("requester_id");
+    const ok = await acceptFriendRequest(userId, otherId);
     setActing(null);
-    if (error || !rows || rows.length === 0) {
-      console.error("Accept by uid failed:", error);
-      showToast?.("Couldn't accept that");
-      return;
-    }
-    showToast?.("You're friends now");
-    sendPush(otherId, "Request accepted 🎉", "You're now friends on Flanit");
-    await load();
+    showToast?.(ok ? "You're friends now" : "Couldn't accept that");
+    if (ok) await load();
   }
 
+  // Shared with every other surface — see lib/friendships.js. The declined-row
+  // and 23505 handling that used to live here moved there wholesale.
   async function sendRequest(otherId) {
     setActing(otherId);
-    // Declined rows are immutable under RLS and their unique constraint
-    // blocks a fresh insert — DELETE then INSERT, same as
-    // ProfileLookupScreen.sendRequest (the May 25 re-request fix; this
-    // mount never got it — July 25 field test: "Couldn't send request").
-    const { data: existing } = await supabase
-      .from("friendships")
-      .select("id, status")
-      .or(
-        `and(requester_id.eq.${userId},addressee_id.eq.${otherId}),and(requester_id.eq.${otherId},addressee_id.eq.${userId})`
-      )
-      .limit(1);
-    const row = existing?.[0] || null;
-    if (row && row.status === "accepted") {
-      setActing(null);
-      showToast?.("You're already friends");
-      await load();
-      return;
-    }
-    if (row && row.status === "declined") {
-      await supabase.from("friendships").delete().eq("id", row.id);
-    }
-    const { error } = await supabase
-      .from("friendships")
-      .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    const result = await sendFriendRequest(userId, otherId);
     setActing(null);
-    if (error && error.code === "23505") {
-      showToast?.("Request already sent");
-      await load();
-      return;
-    }
-    if (error) {
-      console.error("Drawer add friend failed:", error);
-      showToast?.("Couldn't send request");
-      return;
-    }
-    sendPush(otherId, "New friend request", "Someone wants to add you on Flanit");
-    showToast?.("Request sent");
-    await load();
+    showToast?.(friendRequestToast(result));
+    if (result !== "error") await load();
   }
 
   useEffect(() => {

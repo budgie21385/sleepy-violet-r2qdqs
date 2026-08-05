@@ -24,6 +24,7 @@ import {
   addGooglePlace,
   createPersonalPlace,
 } from "../lib/venueSearch";
+import { acceptFriendRequest } from "../lib/friendships";
 import {
   fetchCheckinPhotosMany,
   uploadCheckinMedia,
@@ -910,21 +911,15 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // consent #1, this tap is #2).
   async function acceptFriendFromAlbum(otherId) {
     setFriendState((prev) => ({ ...prev, [otherId]: "friend" }));
-    const { data: rows, error } = await supabase
-      .from("friendships")
-      .update({ status: "accepted" })
-      .eq("requester_id", otherId)
-      .eq("addressee_id", userId)
-      .eq("status", "pending")
-      .select("requester_id");
-    // RLS-filtered updates return success with ZERO rows — check both.
-    if (error || !rows || rows.length === 0) {
+    // Row-count check lives in acceptFriendRequest — an RLS-filtered update
+    // returns success with ZERO rows, so "no rows" is the real failure.
+    const ok = await acceptFriendRequest(userId, otherId);
+    if (!ok) {
       setFriendState((prev) => ({ ...prev, [otherId]: "pending_in" }));
       showToast?.("Couldn't accept that");
       return;
     }
     showToast?.("You're friends now");
-    sendPush(otherId, "Request accepted 🎉", "You're now friends on Flanit");
   }
 
   // Delete your OWN media (bytes count toward YOUR credit — so you can

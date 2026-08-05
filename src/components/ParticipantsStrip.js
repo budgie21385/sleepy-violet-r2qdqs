@@ -5,6 +5,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { Check } from "lucide-react";
+import {
+  sendFriendRequest,
+  acceptFriendRequest,
+  friendRequestToast,
+} from "../lib/friendships";
 
 export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpenProfile, showToast }) {
   const [friendshipByOtherId, setFriendshipByOtherId] = useState(() => new Map());
@@ -72,51 +77,26 @@ export function ParticipantsStrip({ participants = [], userId, hostUserId, onOpe
     return "none";
   }
 
+  // Shared with the profile, the drawer and the album (July 31) — this mount
+  // didn't even import push, so a request from a session's participants strip
+  // arrived silently.
   async function sendRequestTo(otherId) {
     if (!userId || !otherId) return;
     setChipActingOn(otherId);
-    const existing = friendshipByOtherId.get(otherId);
-    if (existing && existing.status === "declined") {
-      const { error: delError } = await supabase
-        .from("friendships")
-        .delete()
-        .eq("id", existing.id);
-      if (delError) {
-        setChipActingOn(null);
-        console.error("sendRequestTo delete failed:", delError);
-        showToast?.("Couldn't send request");
-        return;
-      }
-    }
-    const { error } = await supabase
-      .from("friendships")
-      .insert({ requester_id: userId, addressee_id: otherId, status: "pending" });
+    const result = await sendFriendRequest(userId, otherId);
     setChipActingOn(null);
-    if (error) {
-      console.error("sendRequestTo failed:", error);
-      showToast?.("Couldn't send request");
-      return;
-    }
-    showToast?.("Request sent");
-    await loadFriendshipState();
+    showToast?.(friendRequestToast(result));
+    if (result !== "error") await loadFriendshipState();
   }
 
   async function acceptRequestFrom(otherId) {
     const row = friendshipByOtherId.get(otherId);
     if (!row) return;
     setChipActingOn(otherId);
-    const { error } = await supabase
-      .from("friendships")
-      .update({ status: "accepted" })
-      .eq("id", row.id);
+    const ok = await acceptFriendRequest(userId, otherId, row.id);
     setChipActingOn(null);
-    if (error) {
-      console.error("acceptRequestFrom failed:", error);
-      showToast?.("Couldn't accept");
-      return;
-    }
-    showToast?.("Friend added");
-    await loadFriendshipState();
+    showToast?.(ok ? "Friend added" : "Couldn't accept");
+    if (ok) await loadFriendshipState();
   }
 
   if (participants.length === 0) return null;

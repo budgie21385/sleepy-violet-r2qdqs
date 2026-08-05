@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import { Check, UserPlus } from "lucide-react";
+import { sendFriendRequest } from "../lib/friendships";
 
 export function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToast }) {
   const [friendship, setFriendship] = useState(null);
@@ -35,31 +36,14 @@ export function AddHostFriendCard({ hostUserId, hostName, viewerUserId, showToas
 
   // See ProfileLookupScreen.sendRequest for why declined rows need DELETE +
   // INSERT (RLS UPDATE policy filters out non-pending rows).
+  // Fifth surface that could send a friend request, and the fifth that pushed
+  // nothing — see lib/friendships (July 31).
   async function handleAdd() {
     if (!viewerUserId || !hostUserId) return;
     setSending(true);
-    if (friendship && friendship.status === "declined") {
-      const { error: delError } = await supabase
-        .from("friendships")
-        .delete()
-        .eq("id", friendship.id);
-      if (delError) {
-        setSending(false);
-        console.error("AddHostFriendCard delete failed:", delError);
-        showToast?.("Couldn't send request");
-        return;
-      }
-    }
-    const { error } = await supabase
-      .from("friendships")
-      .insert({
-        requester_id: viewerUserId,
-        addressee_id: hostUserId,
-        status: "pending",
-      });
+    const result = await sendFriendRequest(viewerUserId, hostUserId);
     setSending(false);
-    if (error) {
-      console.error("AddHostFriendCard insert failed:", error);
+    if (result === "error") {
       showToast?.("Couldn't send request");
       return;
     }
