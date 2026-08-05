@@ -84,6 +84,15 @@ export async function enablePush(userId) {
 
 // Fire-and-forget notify — failures are silent by design (a missed push
 // must never break the interaction that triggered it).
+//
+// `keepalive` is load-bearing (July 31, Mark: "not all notifications are
+// working when a phone is locked"). This fetch is deliberately not awaited, so
+// without the flag the browser CANCELS it the moment the page is hidden or
+// unloaded — locking the phone, switching apps, closing the card. The push was
+// never sent; nothing reached the server to fail, which is why it looked
+// intermittent and left no trace. keepalive lets the request outlive the page,
+// the same guarantee sendBeacon gives. (Cap: 64KB of body across all keepalive
+// requests in flight — these are a few hundred bytes.)
 export async function sendPush(targetUserId, title, body, url = "/") {
   try {
     if (!targetUserId) return;
@@ -92,6 +101,7 @@ export async function sendPush(targetUserId, title, body, url = "/") {
     if (!token) return;
     fetch("/api/send-push", {
       method: "POST",
+      keepalive: true,
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
