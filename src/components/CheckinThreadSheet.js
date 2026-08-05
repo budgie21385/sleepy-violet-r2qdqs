@@ -1263,6 +1263,21 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setClusterIds((prev) =>
       prev.includes(inserted.id) ? prev : [...prev, inserted.id]
     );
+    // The card's content belongs to the whole card (the July 25 doctrine) — a
+    // new venue changes the night's header for everyone on it, so everyone
+    // hears. Note this can reach someone who went home before the last stop:
+    // by "one night, one guest list" they're still on the card, which is the
+    // same reason they can see its photos.
+    const myName = nightPeople.find((p) => p.id === userId)?.display_name;
+    for (const p of nightPeople || []) {
+      if (p.id === userId) continue;
+      sendPush(
+        p.id,
+        "The night moved on 🍸",
+        `${myName || "Someone"} added ${venue.name}`,
+        "/"
+      );
+    }
     showToast?.(`Added ${venue.name} to this night`);
   }
 

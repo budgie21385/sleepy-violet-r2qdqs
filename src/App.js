@@ -3446,6 +3446,7 @@ if (authLoading || guestLoading) {
             matchCount={sessionMatches.length}
             target={matchLimit}
             userId={session?.user?.id}
+            inviterName={profile?.display_name}
             showToast={showToast}
             onBack={() => setScreen("filters")}
             onContinue={() => setScreen(matchMode === "curated" ? "curated_results" : "swipe")}
@@ -7117,6 +7118,7 @@ function InviteShareScreen({
   matchCount = 0,
   target = 0,
   userId,
+  inviterName,
   showToast,
   onBack,
   onContinue,
@@ -7179,6 +7181,18 @@ function InviteShareScreen({
       showToast?.("Couldn't send invite");
       return;
     }
+    // A session invite is the most time-sensitive thing in the app — a Right
+    // Now session is over in ten minutes — and until July 31 it created an
+    // in-app Activity item and NOTHING else, so it only reached people who
+    // happened to open Flanit. Deep-links straight to the join screen.
+    sendPush(
+      friendId,
+      mode === "curated" ? "A shortlist for you" : "Pick a place — right now",
+      inviterName
+        ? `${inviterName} wants you in`
+        : "A friend wants you in",
+      `/s/${sessionId}`
+    );
     setInvitedIds((prev) => new Set([...prev, friendId]));
     showToast?.("Invite sent");
   }
