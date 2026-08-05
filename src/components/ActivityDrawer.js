@@ -373,20 +373,25 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               (countByActivity[c.activity_id] || 0) + 1;
           }
         }
-        // "with [names]" — tags on these check-ins (pending + accepted both
-        // render on the tagger's item; removed never does).
+        // "with [names]" — ACCEPTED tags only (July 31, Mark: SayIdo saw "MB
+        // checked in · with Resha" when Resha hadn't accepted, and isn't
+        // SayIdo's friend).
+        //
+        // These items are shown to a THIRD PARTY — a friend of the check-in's
+        // owner — and this block used to render pending tags too. A pending tag
+        // is an ASK, not a fact: publishing it names someone who never agreed
+        // to appear, to an audience they didn't choose, and it breaks the
+        // promise the tag picker makes ("They'll be asked before their friends
+        // see anything"). Acceptance IS the consent to be named on the card, so
+        // acceptance is the gate.
         const withByActivity = {};
         {
           const { data: rawTRows } = await supabase
             .from("activity_tags")
             .select("activity_id, tagged_user_id, status, requested_by")
             .in("activity_id", checkinRows.map((r) => r.id))
-            .neq("status", "removed");
-          // Pending self-requests (join asks) stay invisible until accepted.
-          const tRows = (rawTRows || []).filter(
-            (t) =>
-              !(t.status === "pending" && t.requested_by === t.tagged_user_id)
-          );
+            .eq("status", "accepted");
+          const tRows = rawTRows || [];
           const taggedIds = Array.from(
             new Set((tRows || []).map((t) => t.tagged_user_id))
           );
