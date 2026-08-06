@@ -29,7 +29,7 @@ import {
 import { getMapsUrl } from "../lib/venueLogic";
 import { useVenueDetails } from "../lib/venueDetails";
 import { sendPush } from "../lib/push";
-import { markBeen, unmarkBeen } from "../lib/been";
+import { markBeen, unmarkBeen, countVisits } from "../lib/been";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
 
@@ -74,16 +74,18 @@ export function MapVenueSheet({
           .select("venue_id", { count: "exact", head: true })
           .eq("user_id", userId)
           .eq("venue_id", venue.id),
+        // Rows, deduped to NIGHTS by countVisits — a mutual tag-accept leaves
+        // two shards at one venue for one morning, and that's one visit.
         supabase
           .from("activities")
-          .select("id", { count: "exact", head: true })
+          .select("venue_id, created_at")
           .eq("user_id", userId)
           .eq("venue_id", venue.id)
           .eq("kind", "checkin"),
       ]);
       if (cancelled) return;
       setBeenMarked((markRes.count ?? 0) > 0);
-      setBeenVisits(visitRes.count ?? 0);
+      setBeenVisits(countVisits(visitRes.data).get(venue.id) || 0);
     })();
     return () => {
       cancelled = true;

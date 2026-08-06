@@ -14,23 +14,48 @@
 // it lets the swipe deck read state per card with zero per-card queries.
 import { supabase } from "../supabaseClient";
 
+// Visits are NIGHTS, not rows (July 31, Mark: "how has this been added to
+// Been 2 times?"). A mutual tag-accept leaves you TWO shard rows at the same
+// venue for one morning — your check-in plus the twin — and counting rows
+// showed "Been ×2" for a single coffee. Dedupe: rows at the same venue within
+// 12h are one visit (the same window the night cluster uses).
+const VISIT_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+export function countVisits(rows) {
+  const visits = new Map();
+  const byVenue = new Map();
+  for (const r of rows || []) {
+    if (!r.venue_id) continue;
+    if (!byVenue.has(r.venue_id)) byVenue.set(r.venue_id, []);
+    byVenue.get(r.venue_id).push(new Date(r.created_at).getTime());
+  }
+  for (const [venueId, times] of byVenue) {
+    times.sort((a, b) => a - b);
+    let count = 0;
+    let lastCounted = -Infinity;
+    for (const t of times) {
+      if (t - lastCounted > VISIT_WINDOW_MS) {
+        count++;
+        lastCounted = t;
+      }
+    }
+    visits.set(venueId, count);
+  }
+  return visits;
+}
+
 export async function fetchBeenState(userId) {
   if (!userId) return { marked: new Set(), visits: new Map() };
   const [marksRes, actsRes] = await Promise.all([
     supabase.from("been_marks").select("venue_id").eq("user_id", userId),
     supabase
       .from("activities")
-      .select("venue_id")
+      .select("venue_id, created_at")
       .eq("user_id", userId)
       .eq("kind", "checkin"),
   ]);
   const marked = new Set((marksRes.data || []).map((r) => r.venue_id));
-  const visits = new Map();
-  for (const r of actsRes.data || []) {
-    if (!r.venue_id) continue;
-    visits.set(r.venue_id, (visits.get(r.venue_id) || 0) + 1);
-  }
-  return { marked, visits };
+  return { marked, visits: countVisits(actsRes.data) };
 }
 
 // Tick. 23505 means the mark already exists — same outcome, not an error.
