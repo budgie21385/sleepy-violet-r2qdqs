@@ -48,7 +48,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   // separate from the been list"). Nights = the event history (grouped by
   // night, trails, companions). Places = the deduped location list: every
   // venue you've visited or marked, one row each, no dates or people.
-  const [beenView, setBeenView] = useState("nights");
+  const beenView = "nights"; // pinned — see the pulled-toggle note below
   const [beenMarkIds, setBeenMarkIds] = useState(() => new Set());
   const [withByAct, setWithByAct] = useState(() => new Map()); // activityId → first names
   const [selectedVenue, setSelectedVenue] = useState(null);
@@ -445,27 +445,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           </button>
         </div>
 
-        {/* Nights = events (what happened); Places = locations (where you've
-            been, deduped, dateless). Same segmented style as With friends. */}
-        <div className="flex bg-white border border-neutral-200 rounded-full p-1 mb-4 text-sm">
-          {[
-            ["nights", "Nights"],
-            ["places", "Places"],
-          ].map(([key, lbl]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setBeenView(key)}
-              className={`flex-1 py-2 rounded-full font-medium transition ${
-                beenView === key ? "bg-[#455d3b] text-white" : "text-neutral-600"
-              }`}
-            >
-              {lbl}
-            </button>
-          ))}
-        </div>
-
-        {beenView === "places" && places !== null && (
+        {/* PLACES VIEW PULLED (July 31, Mark: the Been-list restructure is a
+            conversation we haven't had — I built ahead of it). The `places`
+            memo, the marks fetch and this render block stay dormant behind
+            beenView, which is now pinned to "nights"; when the conversation
+            happens, restoring the segmented toggle here re-enables it. */}
+        {false && places !== null && (
           <div className="space-y-2">
             {places.length === 0 && (
               <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
