@@ -17,6 +17,7 @@ import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
   VenueHeroCarousel,
+  BeenPill,
   VenueRating,
   VenueEditorial,
   VenueVibes,
@@ -28,6 +29,7 @@ import {
 import { getMapsUrl } from "../lib/venueLogic";
 import { useVenueDetails } from "../lib/venueDetails";
 import { sendPush } from "../lib/push";
+import { markBeen, unmarkBeen } from "../lib/been";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
 
@@ -54,6 +56,52 @@ export function MapVenueSheet({
   // bootstrap ships light columns only. All body code below uses `venue`
   // exactly as before.
   const venue = useVenueDetails(venueLight);
+
+  // BEEN PILL (July 31) — self-fetched from userId + venue.id, so all seven
+  // mounts of this sheet get it with no prop changes (the mount-parity lesson,
+  // applied in advance for once). visits = my check-ins here (events, can't be
+  // un-happened); marked = the dateless "I've been here" flag. Untick only
+  // exists while the mark is the only source.
+  const [beenMarked, setBeenMarked] = useState(false);
+  const [beenVisits, setBeenVisits] = useState(0);
+  useEffect(() => {
+    if (!userId || !venue?.id) return;
+    let cancelled = false;
+    (async () => {
+      const [markRes, visitRes] = await Promise.all([
+        supabase
+          .from("been_marks")
+          .select("venue_id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("venue_id", venue.id),
+        supabase
+          .from("activities")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("venue_id", venue.id)
+          .eq("kind", "checkin"),
+      ]);
+      if (cancelled) return;
+      setBeenMarked((markRes.count ?? 0) > 0);
+      setBeenVisits(visitRes.count ?? 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, venue?.id]);
+
+  async function toggleBeen() {
+    if (!userId || !venue?.id) return;
+    if (beenVisits > 0) return; // been from real check-ins — nothing to untick
+    if (beenMarked) {
+      setBeenMarked(false);
+      if (!(await unmarkBeen(userId, venue.id))) setBeenMarked(true);
+    } else {
+      setBeenMarked(true);
+      if (!(await markBeen(userId, venue.id))) setBeenMarked(false);
+    }
+  }
+
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
@@ -422,7 +470,19 @@ export function MapVenueSheet({
         key={venue.id}
         className={`flex-1 overflow-y-auto p-4 space-y-3 ${slideClass}`}
       >
-        <VenueHeroCarousel venue={venue} disableSwipe={navEnabled} />
+        <VenueHeroCarousel
+          venue={venue}
+          disableSwipe={navEnabled}
+          beenPill={
+            userId ? (
+              <BeenPill
+                been={beenMarked || beenVisits > 0}
+                visitCount={beenVisits}
+                onToggle={toggleBeen}
+              />
+            ) : null
+          }
+        />
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
         {strip && !strip.none && strip.live && (

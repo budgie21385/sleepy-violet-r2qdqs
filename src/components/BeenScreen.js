@@ -43,6 +43,13 @@ export function CheckinHistoryRow({ c }) {
 export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile }) {
   const [rows, setRows] = useState(null); // null = loading
   const [venueById, setVenueById] = useState(() => new Map());
+  // NIGHTS vs PLACES (July 31, Mark: "more of a list of locations rather than
+  // your events... something you checked into and added photos should be
+  // separate from the been list"). Nights = the event history (grouped by
+  // night, trails, companions). Places = the deduped location list: every
+  // venue you've visited or marked, one row each, no dates or people.
+  const [beenView, setBeenView] = useState("nights");
+  const [beenMarkIds, setBeenMarkIds] = useState(() => new Set());
   const [withByAct, setWithByAct] = useState(() => new Map()); // activityId → first names
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [thread, setThread] = useState(null);
@@ -268,9 +275,18 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
         .limit(100);
+      // Been marks ride the same load — the Places view unions them with
+      // check-in venues, so marked-only places need their venue rows too.
+      const { data: marks } = await supabase
+        .from("been_marks")
+        .select("venue_id")
+        .eq("user_id", userId);
+      const markIds = new Set((marks || []).map((m) => m.venue_id));
       // Resolve venues directly (not from the curated pool) — open venue
       // reads mean even a check-in at someone else's manual venue resolves.
-      const ids = Array.from(new Set((data || []).map((r) => r.venue_id)));
+      const ids = Array.from(
+        new Set([...(data || []).map((r) => r.venue_id), ...markIds])
+      );
       let vMap = new Map();
       if (ids.length > 0) {
         const { data: vens } = await supabase
@@ -319,6 +335,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       if (cancelled) return;
       setVenueById(vMap);
       setWithByAct(wMap);
+      setBeenMarkIds(markIds);
       setRows(data || []);
     })();
     return () => {
@@ -378,6 +395,31 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
   }, [rows]);
 
+  // PLACES — one row per venue: visit count from check-ins, plus marked-only
+  // venues at the end (they have no recency to sort by).
+  const places = useMemo(() => {
+    if (!rows) return null;
+    const byVenue = new Map();
+    for (const r of rows) {
+      if (!r.venue_id) continue;
+      const cur = byVenue.get(r.venue_id) || { visits: 0, lastAt: null };
+      cur.visits += 1;
+      if (!cur.lastAt || r.created_at > cur.lastAt) cur.lastAt = r.created_at;
+      byVenue.set(r.venue_id, cur);
+    }
+    for (const vid of beenMarkIds) {
+      if (!byVenue.has(vid)) byVenue.set(vid, { visits: 0, lastAt: null });
+    }
+    return Array.from(byVenue.entries())
+      .map(([venueId, s]) => ({ venueId, ...s, venue: venueById.get(venueId) || null }))
+      .sort((a, b) => {
+        if (a.lastAt && b.lastAt) return new Date(b.lastAt) - new Date(a.lastAt);
+        if (a.lastAt) return -1;
+        if (b.lastAt) return 1;
+        return (a.venue?.name || "").localeCompare(b.venue?.name || "");
+      });
+  }, [rows, beenMarkIds, venueById]);
+
   return (
     <div className="fixed inset-0 z-[2500] overflow-y-auto bg-[#fdf6f0]">
       <div className="mx-auto w-full max-w-sm p-4 pb-24">
@@ -403,10 +445,70 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           </button>
         </div>
 
-        {rows === null && (
+        {/* Nights = events (what happened); Places = locations (where you've
+            been, deduped, dateless). Same segmented style as With friends. */}
+        <div className="flex bg-white border border-neutral-200 rounded-full p-1 mb-4 text-sm">
+          {[
+            ["nights", "Nights"],
+            ["places", "Places"],
+          ].map(([key, lbl]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setBeenView(key)}
+              className={`flex-1 py-2 rounded-full font-medium transition ${
+                beenView === key ? "bg-[#455d3b] text-white" : "text-neutral-600"
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+
+        {beenView === "places" && places !== null && (
+          <div className="space-y-2">
+            {places.length === 0 && (
+              <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
+                <p className="text-sm text-neutral-600">No places yet.</p>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Check in, or tap "Not been" on a venue you know.
+                </p>
+              </div>
+            )}
+            {places.map((p) => (
+              <button
+                key={p.venueId}
+                type="button"
+                disabled={!p.venue}
+                onClick={() => p.venue && setSelectedVenue(p.venue)}
+                className="w-full rounded-2xl bg-white border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition disabled:opacity-60"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+                  <MapPin size={16} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-neutral-900 truncate">
+                    {p.venue?.name || "A spot"}
+                  </p>
+                  <p className="text-[11px] text-neutral-500">
+                    {p.visits >= 2
+                      ? `Been ×${p.visits} · last ${when(p.lastAt)}`
+                      : p.visits === 1
+                        ? `Been · ${when(p.lastAt)}`
+                        : "Been"}
+                    {p.venue?.suburb ? ` · ${p.venue.suburb}` : ""}
+                  </p>
+                </div>
+                <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {beenView === "nights" && rows === null && (
           <p className="text-sm text-neutral-500 text-center py-8">Loading…</p>
         )}
-        {rows !== null && rows.length === 0 && (
+        {beenView === "nights" && rows !== null && rows.length === 0 && (
           <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-100 text-center">
             <p className="text-sm text-neutral-600">Nowhere yet.</p>
             <p className="text-xs text-neutral-500 mt-1">
@@ -415,7 +517,8 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           </div>
         )}
         <div className="space-y-2">
-          {(nights || []).map((n) => {
+          {beenView === "nights" &&
+          (nights || []).map((n) => {
             const first = n.legs[0];
             const venue = venueById.get(first.venue_id) || null;
             // The trail, in order, duplicates collapsed — going back to the

@@ -26,7 +26,8 @@ import {
   SearchableChips,
   MapAreaFilter,
 } from "./components/MapFilters";
-import { VenueCard } from "./components/VenueBits";
+import { VenueCard, BeenPill } from "./components/VenueBits";
+import { fetchBeenState, markBeen } from "./lib/been";
 import { EmptyState } from "./components/EmptyState";
 import { MapVenueSheet } from "./components/MapVenueSheet";
 import { MapScreen } from "./components/MapScreen";
@@ -335,6 +336,29 @@ export default function RestaurantSwipeMVP() {
   const [passed, setPassed] = useState([]);
   const [profile, setProfile] = useState(null);
   const [savedVenueIds, setSavedVenueIds] = useState(() => new Set());
+  // BEEN STATE for the swipe deck (July 31) — marks + per-venue check-in
+  // counts, fetched once (own rows only, cheap) so each card reads state with
+  // zero queries. The full venue card self-fetches instead (MapVenueSheet).
+  const [beenState, setBeenState] = useState({ marked: new Set(), visits: new Map() });
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid || session.user.is_anonymous) return;
+    let cancelled = false;
+    fetchBeenState(uid).then((s) => {
+      if (!cancelled) setBeenState(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, session?.user?.is_anonymous]);
+  function deckMarkBeen(venueId) {
+    // Optimistic; one-way. No toast — the pill flipping IS the feedback.
+    setBeenState((prev) => ({
+      ...prev,
+      marked: new Set([...prev.marked, venueId]),
+    }));
+    markBeen(session?.user?.id, venueId);
+  }
   const [hiddenVenueIds, setHiddenVenueIds] = useState(() => new Set());
   const [isGuest, setIsGuest] = useState(false);
   // Lightweight global toast surface. Set the message to render; auto-clears
@@ -3487,7 +3511,25 @@ if (authLoading || guestLoading) {
             </div>
             {currentVenue ? (
               <>
-                <VenueCard venue={currentVenue} />
+                <VenueCard
+                  venue={currentVenue}
+                  beenPill={
+                    <BeenPill
+                      been={beenState.marked.has(currentVenue.id) || (beenState.visits.get(currentVenue.id) || 0) > 0}
+                      visitCount={beenState.visits.get(currentVenue.id) || 0}
+                      // ONE-WAY on the deck (Mark's call): tap marks Been,
+                      // quietly, and never unmarks — a mis-tap is fixed on the
+                      // full card, not by inviting fiddling mid-game. No toast,
+                      // no follow-up; like/pass stays the dominant motion.
+                      onToggle={
+                        beenState.marked.has(currentVenue.id) ||
+                        (beenState.visits.get(currentVenue.id) || 0) > 0
+                          ? undefined
+                          : () => deckMarkBeen(currentVenue.id)
+                      }
+                    />
+                  }
+                />
                 <SwipeActions
                   mode={matchMode}
                   likeCount={markLikes.length}

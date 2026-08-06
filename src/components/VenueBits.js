@@ -21,7 +21,45 @@ import {
 } from "../lib/venueLogic";
 import { useVenueDetails } from "../lib/venueDetails";
 
-export function VenueHeroCarousel({ venue, disableSwipe = false }) {
+// BEEN PILL (July 31, design A/F). Lives beside the rating badge, borrowing
+// its exact pill language so it reads as native. Three states:
+//   not been    → dark glass "✕ Not been" (quiet — the default shouldn't shout)
+//   been        → solid olive "Been" / "Been ×N" (N = real check-in visits)
+//   no viewer   → nothing (anon /v/ readers, guest decks)
+// `onToggle` present = tappable (the card); absent = display-only (the swipe
+// deck passes a ONE-WAY handler instead — see App.js).
+export function BeenPill({ been, visitCount, onToggle }) {
+  const label = visitCount >= 2 ? `Been ×${visitCount}` : "Been";
+  const cls = been
+    ? "bg-[#455d3b] text-white"
+    : "bg-black/50 backdrop-blur text-white/85";
+  const body = been ? (
+    <>✓ {label}</>
+  ) : (
+    <>✕ Not been</>
+  );
+  if (!onToggle) {
+    // Display-only: absence IS the not-been state (a "Not been" badge on
+    // every unfamiliar deck card would label the majority case).
+    return been ? (
+      <span className={`rounded-full px-3 py-1 text-xs ${cls}`}>{body}</span>
+    ) : null;
+  }
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation(); // the hero tap advances the carousel
+        onToggle();
+      }}
+      className={`rounded-full px-3 py-1 text-xs active:scale-95 transition ${cls}`}
+    >
+      {body}
+    </button>
+  );
+}
+
+export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null }) {
   // Prefer CDN-cached photos (fast — served from Supabase Storage). Fall back to
   // the live /api/place-photo Google proxy for venues not cached yet.
   const cdn = venue?.image_cdn_urls;
@@ -124,8 +162,11 @@ export function VenueHeroCarousel({ venue, disableSwipe = false }) {
         }}
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
-      <div className="absolute left-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
-        ⭐ {venue.rating}
+      <div className="absolute left-4 top-4 flex items-center gap-1.5">
+        <div className="rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
+          ⭐ {venue.rating}
+        </div>
+        {beenPill}
       </div>
       {images.length > 1 && (
         <>
@@ -446,13 +487,13 @@ export function OpenMapsButton({ url }) {
   );
 }
 
-export function VenueCard({ venue: venueLight }) {
+export function VenueCard({ venue: venueLight, beenPill = null }) {
   // Hydrate the heavy tail (photos/reviews/editorial) on demand — the
   // bootstrap only ships light columns now. Body below is unchanged.
   const venue = useVenueDetails(venueLight);
   return (
     <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
-      <VenueHeroCarousel venue={venue} />
+      <VenueHeroCarousel venue={venue} beenPill={beenPill} />
       <div className="mb-8 space-y-3">
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
