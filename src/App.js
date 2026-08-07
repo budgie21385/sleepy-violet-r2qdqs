@@ -11,6 +11,7 @@ import {
   AMENITY_FILTERS,
   venueMatchesAreas,
   buildAreaExtents,
+  capGroupDeck,
   getTodayDayKey,
   venueOpenInBand,
   isVenueOpenNow,
@@ -328,6 +329,21 @@ export default function RestaurantSwipeMVP() {
   // Default 1 (Mark, July 24): one match ends a Right Now session — most
   // groups only need the one answer.
   const [matchLimit, setMatchLimit] = useState(1);
+  // GROUP MATCH RULES (July 31, Mark). expectedOthers is "how many friends are
+  // joining" — the first input in setup, and it DRIVES the rules: a match is
+  // unanimous (expected_others + 1 likers, enforced in get_session_matches),
+  // groups of 3+ swipe a deterministic 30-venue deck, and the Matches target
+  // is forced to 1 (one unanimous venue IS the plan). Pairs keep today's
+  // behaviour exactly.
+  const [expectedOthers, setExpectedOthers] = useState(1);
+  // Session time limit (default 30 min, up to ~72h, in See-more filters).
+  // Timeout is how a group session that never reaches unanimity ends: the
+  // likes go to the host to make the call.
+  const [sessionTimeoutMins, setSessionTimeoutMins] = useState(30);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(null);
+  useEffect(() => {
+    if (expectedOthers >= 2 && matchLimit !== 1) setMatchLimit(1);
+  }, [expectedOthers, matchLimit]);
   // Setup filters: Suburbs / Time of day / What are you after lead;
   // everything else folds into "See more" (Cuisine on top).
   const [showMoreFilters, setShowMoreFilters] = useState(false);
@@ -663,7 +679,7 @@ useEffect(() => {
     let cancelled = false;
     supabase
       .from("match_sessions")
-      .select("id, host_user_id, mode, source_type, filters, target_matches, event_at, expires_at, status, name, created_at")
+      .select("id, host_user_id, mode, source_type, filters, target_matches, expected_others, event_at, expires_at, status, name, created_at")
       .eq("id", sessionId)
       .maybeSingle()
       .then(({ data, error }) => {
@@ -899,6 +915,31 @@ useEffect(() => {
     // host opens the results board manually via the "See results" CTA.
   }, [matchMode, screen, matchLimit, sessionMatches.length]);
 
+  // TIME'S UP (July 31) — Right Now runs on a clock now (default 30 min).
+  // A group that never reaches unanimity has to end SOMEHOW, and the timeout
+  // is how: at expiry the host's game flips to the matches screen, where the
+  // likes (fetched below as near-misses when there's no unanimous match) are
+  // theirs to decide from. Checked every 15s while the host is swiping.
+  useEffect(() => {
+    if (matchMode !== "concurrent" || screen !== "swipe") return;
+    if (!sessionExpiresAt || !currentSessionId) return;
+    const check = async () => {
+      if (Date.now() < new Date(sessionExpiresAt).getTime()) return;
+      // No unanimous match? Pull every liked venue (best-supported first) so
+      // the decide board has something to decide from.
+      if (sessionMatches.length === 0) {
+        const { data } = await supabase.rpc("get_session_likes", {
+          p_session_id: currentSessionId,
+        });
+        if (data?.length) setSessionMatches(data);
+      }
+      setScreen("matches");
+    };
+    const t = setInterval(check, 15000);
+    check();
+    return () => clearInterval(t);
+  }, [matchMode, screen, sessionExpiresAt, currentSessionId, sessionMatches.length]);
+
   // Refetch reconciliation when the guest hits the submitted screen. Two
   // reasons: (1) curated guests don't get live polling so this is their
   // only fetch; (2) concurrent guests had polling but their last polled
@@ -951,6 +992,18 @@ useEffect(() => {
     };
   }, [matchMode, screen, currentSessionId]);
 
+  // Clock tick so the joined-guest effect below re-evaluates expiry — its
+  // other deps only change on swipes, and a guest who stops swiping would
+  // otherwise never notice time ran out.
+  const [expiryTick, setExpiryTick] = useState(0);
+  useEffect(() => {
+    if (!isGuest || guestStage !== "joined") return;
+    if (guestSessionData?.mode !== "concurrent") return;
+    if (!guestSessionData?.expires_at) return;
+    const t = setInterval(() => setExpiryTick((n) => n + 1), 15000);
+    return () => clearInterval(t);
+  }, [isGuest, guestStage, guestSessionData?.mode, guestSessionData?.expires_at]);
+
   useEffect(() => {
     if (!isGuest || guestStage !== "joined") return;
     const target = guestSessionData?.target_matches || 0;
@@ -960,14 +1013,19 @@ useEffect(() => {
     if (mode === "concurrent") {
       // Flip when the match target is reached OR the guest finishes the queue —
       // so a Right now guest always lands on the matches / sign-up screen and
-      // never dead-ends on a blank card at end of list.
+      // never dead-ends on a blank card at end of list. Expiry counts too
+      // (July 31): time's up means picks are in, wherever you were in the deck.
       const queueEmpty = guestQueue.length === 0 && guestCardIndex === 0;
       const reachedEnd =
         guestQueue.length > 0 && guestCardIndex >= guestQueue.length;
+      const expired =
+        guestSessionData?.expires_at &&
+        Date.now() > new Date(guestSessionData.expires_at).getTime();
       shouldFlip =
         (target > 0 && sessionMatches.length >= target) ||
         reachedEnd ||
-        queueEmpty;
+        queueEmpty ||
+        !!expired;
     } else if (mode === "curated") {
       // "Send options": the guest votes the WHOLE shortlist — no target-based
       // early stop (that was the old mutual-match model). Flip only when they
@@ -1025,6 +1083,7 @@ useEffect(() => {
     sessionMatches.length,
     guestLikes.length,
     guestCardIndex,
+    expiryTick,
     session?.user?.id,
     guestSessionId,
   ]);
@@ -2222,16 +2281,21 @@ loadAreas();
       : [...partnerLikes, ...partnerPasses];
  
   const swipeQueue = useMemo(() => {
+    let q;
     if (matchSource === "my_list") {
-      return filteredVenues.filter((v) => savedVenueIds.has(v.id));
+      q = filteredVenues.filter((v) => savedVenueIds.has(v.id));
+    } else if (matchMode === "solo") {
+      q = filteredVenues.filter((v) => !savedVenueIds.has(v.id));
+    } else {
+      q = filteredVenues;
     }
-    if (matchMode === "solo") {
-      return filteredVenues.filter((v) => !savedVenueIds.has(v.id));
-    }
-    return filteredVenues;
-  }, [filteredVenues, matchSource, matchMode, savedVenueIds]);
+    // Groups of 3+ swipe the SAME bounded deck (capGroupDeck is
+    // deterministic — guests apply the identical cap to the identical pool).
+    if (matchMode === "concurrent" && expectedOthers >= 2) q = capGroupDeck(q);
+    return q;
+  }, [filteredVenues, matchSource, matchMode, savedVenueIds, expectedOthers]);
 
-  const guestQueue = useMemo(() => {
+  const guestQueueRaw = useMemo(() => {
     if (!isGuest || !guestSessionData) return [];
 
     // Curated: vote the host's shortlist (RPC rows, bypass venues RLS so
@@ -2298,6 +2362,14 @@ loadAreas();
       return true;
     });
   }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues, guestListVenues, savedVenueIds, session?.user?.id]);
+  // Groups of 3+ hold the SAME bounded deck as the host — capGroupDeck is
+  // deterministic over the same filtered pool, which is the entire point:
+  // unanimity needs overlapping decks, not 30-random-each.
+  const guestQueue =
+    guestSessionData?.mode === "concurrent" &&
+    (guestSessionData?.expected_others || 0) >= 2
+      ? capGroupDeck(guestQueueRaw)
+      : guestQueueRaw;
 
   const currentVenue = swipeQueue.find(
     (venue) => !currentUserSwipedIds.includes(venue.id)
@@ -2377,12 +2449,15 @@ loadAreas();
       (matchMode === "concurrent" || matchMode === "curated") &&
       session?.user?.id
     ) {
-      // expires_at: always the 24h default. The host-facing time-limit
-      // selector was removed July 9, 2026 — nothing enforced expiry, so the
-      // control promised something the app didn't do. The column write stays
-      // so the schema seam (and its index) is ready if enforcement lands.
+      // expires_at: the chosen session time limit (July 31). Right Now
+      // defaults to 30 minutes — this is now ENFORCED: at expiry both sides
+      // land in the decide flow, which is how a group session that never
+      // reaches unanimity ends. Curated keeps the 24h default (no live clock).
       const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + 60 * 24);
+      expiresAt.setMinutes(
+        expiresAt.getMinutes() +
+          (matchMode === "concurrent" ? sessionTimeoutMins : 60 * 24)
+      );
 
       const sessionFilters = {
         selectedAreaIds: selectedAreas.map((a) => a.id),
@@ -2414,6 +2489,7 @@ loadAreas();
           filters: sessionFilters,
           list_id: null,
           target_matches: matchMode === "curated" ? null : matchLimit || null,
+          expected_others: matchMode === "concurrent" ? expectedOthers : null,
           event_at: eventDate ? eventDate.toISOString() : null,
           expires_at: expiresAt.toISOString(),
           status: matchMode === "curated" ? "host_curating" : "open",
@@ -2426,6 +2502,7 @@ loadAreas();
         console.error("Failed to create session:", error);
         return;
       }
+      setSessionExpiresAt(data.expires_at || expiresAt.toISOString());
 
       newSessionId = data.id;
       setCurrentSessionId(data.id);
@@ -2573,7 +2650,12 @@ if (authLoading || guestLoading) {
     // onPickLater(null), so no date is ever collected — leaving it to render
     // "Right now" or "Later", i.e. the eyebrow again. The card names the mode
     // once and says nothing it can't actually know.
-    const isClosed = guestSessionData.status === "closed";
+    // Expired = closed for a NEW arrival (July 31): joining a timed-out game
+    // is pointless, and the picks have already gone to the host.
+    const isClosed =
+      guestSessionData.status === "closed" ||
+      (guestSessionData.expires_at &&
+        Date.now() > new Date(guestSessionData.expires_at).getTime());
     const isHostCurating = guestSessionData.status === "host_curating";
     const isOpen = guestSessionData.status === "open";
     // Post-join stub — B.4.4 replaces this with the guest swipe queue.
@@ -3306,6 +3388,47 @@ if (authLoading || guestLoading) {
               </div>
             </div>
             <div className="space-y-5">
+              {/* WHO'S COMING — first input, above Suburbs (July 31, Mark).
+                  Prominent because it now DRIVES the rules: the match must be
+                  liked by everyone declared here, and groups of 3+ swipe a
+                  bounded 30-venue deck. Right Now only. */}
+              {matchMode === "concurrent" && (
+                <div className="flex items-center justify-between rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-[#2f3f29]">
+                      Who's coming?
+                    </p>
+                    <p className="text-[11px] text-[#455d3b] mt-0.5">
+                      {expectedOthers === 1
+                        ? "You + 1 — first match wins"
+                        : `You + ${expectedOthers} — everyone must like the place`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      aria-label="Fewer people"
+                      disabled={expectedOthers <= 1}
+                      onClick={() => setExpectedOthers((n) => Math.max(1, n - 1))}
+                      className="w-8 h-8 rounded-full bg-white border border-[#cdd9c6] text-[#455d3b] text-lg leading-none disabled:opacity-40 active:scale-95 transition"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center text-base font-semibold text-[#2f3f29]">
+                      {expectedOthers}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="More people"
+                      disabled={expectedOthers >= 12}
+                      onClick={() => setExpectedOthers((n) => Math.min(12, n + 1))}
+                      className="w-8 h-8 rounded-full bg-white border border-[#cdd9c6] text-[#455d3b] text-lg leading-none disabled:opacity-40 active:scale-95 transition"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              )}
               <AreaFilter
                 areaSearch={areaSearch}
                 setAreaSearch={setAreaSearch}
@@ -3402,7 +3525,11 @@ if (authLoading || guestLoading) {
                         label: r === 0 ? "Suburb only" : `+${r} km`,
                       }))}
                     />
-                    {matchMode !== "curated" && (
+                    {/* Matches target: editable for a pair, forced to 1 for
+                        groups (Mark, July 31 — one unanimous venue IS the
+                        plan, so the pill hides rather than showing a locked
+                        control). */}
+                    {matchMode !== "curated" && expectedOthers === 1 && (
                       <DropdownField
                         pill
                         label="Matches"
@@ -3412,6 +3539,24 @@ if (authLoading || guestLoading) {
                           value: n,
                           label: String(n),
                         }))}
+                      />
+                    )}
+                    {/* Session time limit — Right Now runs on a clock now:
+                        at expiry the likes go to the host to decide. */}
+                    {matchMode !== "curated" && (
+                      <DropdownField
+                        pill
+                        label="Time limit"
+                        value={sessionTimeoutMins}
+                        onChange={setSessionTimeoutMins}
+                        options={[
+                          { value: 30, label: "30 min" },
+                          { value: 60, label: "1 hour" },
+                          { value: 180, label: "3 hours" },
+                          { value: 720, label: "12 hours" },
+                          { value: 1440, label: "24 hours" },
+                          { value: 4320, label: "3 days" },
+                        ]}
                       />
                     )}
                   </div>
