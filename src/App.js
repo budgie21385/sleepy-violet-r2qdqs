@@ -2,7 +2,7 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './styles.css';
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   TIME_BANDS,
@@ -4455,10 +4455,11 @@ function AreaFilter({
       ]);
       // Ticking a WHOLE region unrolls its suburbs (July 31, Mark): the person
       // just grabbed a big area sight-unseen — show them what that actually
-      // means and let them deselect the odd one out. Deselecting a region
-      // leaves the expansion alone.
+      // means and let them deselect the odd one out. Accordion rules apply
+      // (any other open region closes); deselecting leaves expansion alone.
       if (region) {
-        setExpandedRegions((prev) => new Set([...prev, region]));
+        anchorTo(region);
+        setExpandedRegions(new Set([region]));
       }
     }
   }
@@ -4469,14 +4470,38 @@ function AreaFilter({
     if (selectedCount === items.length) return "all";
     return "some";
   }
- 
+
+  // ACCORDION + SCROLL ANCHOR (July 31, Mark). One region open at a time —
+  // but closing a region ABOVE the tapped one removes content overhead, which
+  // would yank the list up under the user's finger. So before every expansion
+  // change we note where the tapped region's row sits on screen, and after the
+  // re-render nudge scrollTop so that row hasn't moved. useLayoutEffect, not
+  // useEffect: the correction must land before paint or it reads as a flicker.
+  const listRef = useRef(null);
+  const rowRefs = useRef({});
+  const scrollAnchor = useRef(null); // { region, top } captured pre-update
+  function anchorTo(region) {
+    const el = rowRefs.current[region];
+    if (el && listRef.current) {
+      scrollAnchor.current = { region, top: el.getBoundingClientRect().top };
+    }
+  }
+  useLayoutEffect(() => {
+    const a = scrollAnchor.current;
+    if (!a) return;
+    scrollAnchor.current = null;
+    const el = rowRefs.current[a.region];
+    const list = listRef.current;
+    if (!el || !list) return;
+    const delta = el.getBoundingClientRect().top - a.top;
+    if (delta !== 0) list.scrollTop += delta;
+  }, [expandedRegions]);
+
   function toggleExpand(region) {
-    setExpandedRegions((prev) => {
-      const next = new Set(prev);
-      if (next.has(region)) next.delete(region);
-      else next.add(region);
-      return next;
-    });
+    anchorTo(region);
+    setExpandedRegions((prev) =>
+      prev.has(region) ? new Set() : new Set([region])
+    );
   }
  
   function clearAll() {
@@ -4528,7 +4553,10 @@ function AreaFilter({
       />
 
       {showAreaDropdown && !areasLoading && (
-        <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm">
+        <div
+          ref={listRef}
+          className="mt-3 max-h-80 overflow-y-auto rounded-2xl bg-white border border-neutral-100 shadow-sm"
+        >
           <div className="sticky top-0 z-10 flex items-center justify-end gap-1 bg-white border-b border-neutral-100 px-2 py-2">
             <button
               type="button"
@@ -4592,6 +4620,10 @@ function AreaFilter({
                 return (
                   <li
                     key={region}
+                    ref={(node) => {
+                      if (node) rowRefs.current[region] = node;
+                      else delete rowRefs.current[region];
+                    }}
                     className="border-b border-neutral-100 last:border-b-0"
                   >
                     <div className="flex items-stretch">
