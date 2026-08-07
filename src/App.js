@@ -51,12 +51,11 @@ import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
 import { CheckinSheet } from "./components/CheckinSheet";
 import { BeenScreen, CheckinHistoryRow } from "./components/BeenScreen";
 import { performCheckIn } from "./lib/checkins";
-import {
-  AreaCheckbox,
-  DropdownField,
-} from "./components/SessionFields";
+// DropdownField retired here July 31 (the segmented advanced row replaced the
+// last three) — it lives on in SessionFields for any future consumer.
+import { AreaCheckbox } from "./components/SessionFields";
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
-import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
+import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { prefetchVenueDetails } from "./lib/venueDetails";
 import { sendPush } from "./lib/push";
@@ -341,6 +340,9 @@ export default function RestaurantSwipeMVP() {
   // likes go to the host to make the call.
   const [sessionTimeoutMins, setSessionTimeoutMins] = useState(30);
   const [sessionExpiresAt, setSessionExpiresAt] = useState(null);
+  // Which advanced pill's options are open: "matches" | "radius" | "time" |
+  // null (all collapsed — the segment labels carry the current values).
+  const [advTab, setAdvTab] = useState(null);
   useEffect(() => {
     if (expectedOthers >= 2 && matchLimit !== 1) setMatchLimit(1);
   }, [expectedOthers, matchLimit]);
@@ -601,6 +603,11 @@ export default function RestaurantSwipeMVP() {
   // (one row per venue with like_count + liker_user_ids); sessionParticipants
   // gives us a uid -> display_name map for labelling matches "You + Sarah".
   const [sessionMatches, setSessionMatches] = useState([]);
+  // When a session expires with NO unanimous match, the boards fall back to
+  // get_session_likes (every liked venue, best first). This flag records that
+  // the rows are VOTES, not matches — the reveal copy must not call a 1/3
+  // near-miss "a match" (July 31 end-state matrix).
+  const [resultsAreVotes, setResultsAreVotes] = useState(false);
   const [sessionParticipants, setSessionParticipants] = useState([]);
   // Guest sign-up flow (anon -> email). guestSignupEmail is the field value,
   // guestSignupSent flips to true after updateUser succeeds, guestSignupError
@@ -758,8 +765,10 @@ useEffect(() => {
   // confirmation, so anon guests still on the page see "See you at [venue]"
   // without needing an account.
   useEffect(() => {
+    // Both modes now (July 31): a concurrent session's host can decide from
+    // the votes after a timeout, and the submitted guest deserves to see it.
     if (!isGuest || guestStage !== "submitted") return;
-    if (guestSessionData?.mode !== "curated" || !guestSessionId) return;
+    if (!guestSessionId) return;
     let cancelled = false;
     function poll() {
       supabase
@@ -926,12 +935,15 @@ useEffect(() => {
     const check = async () => {
       if (Date.now() < new Date(sessionExpiresAt).getTime()) return;
       // No unanimous match? Pull every liked venue (best-supported first) so
-      // the decide board has something to decide from.
+      // the decide board has something to decide from — flagged as votes.
       if (sessionMatches.length === 0) {
         const { data } = await supabase.rpc("get_session_likes", {
           p_session_id: currentSessionId,
         });
-        if (data?.length) setSessionMatches(data);
+        if (data?.length) {
+          setSessionMatches(data);
+          setResultsAreVotes(true);
+        }
       }
       setScreen("matches");
     };
@@ -952,20 +964,42 @@ useEffect(() => {
     if (guestStage !== "submitted") return;
     if (!guestSessionId) return;
     let cancelled = false;
-    supabase
-      .rpc("get_session_matches", { p_session_id: guestSessionId })
-      .then(({ data, error }) => {
+    (async () => {
+      const { data, error } = await supabase.rpc("get_session_matches", {
+        p_session_id: guestSessionId,
+      });
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to refetch guest matches:", error);
+        return;
+      }
+      if (data?.length) {
+        setSessionMatches(data);
+        setResultsAreVotes(false);
+        return;
+      }
+      // Nothing unanimous. If time ran out, fall back to the VOTES so the
+      // reveal has something honest to show (flagged — not called matches).
+      const expired =
+        guestSessionData?.expires_at &&
+        Date.now() > new Date(guestSessionData.expires_at).getTime();
+      if (expired) {
+        const { data: likes } = await supabase.rpc("get_session_likes", {
+          p_session_id: guestSessionId,
+        });
         if (cancelled) return;
-        if (error) {
-          console.error("Failed to refetch guest matches:", error);
+        if (likes?.length) {
+          setSessionMatches(likes);
+          setResultsAreVotes(true);
           return;
         }
-        setSessionMatches(data || []);
-      });
+      }
+      setSessionMatches([]);
+    })();
     return () => {
       cancelled = true;
     };
-  }, [isGuest, guestStage, guestSessionId]);
+  }, [isGuest, guestStage, guestSessionId, guestSessionData?.expires_at]);
 
   // Same refetch on the host side when they transition to the matches
   // screen — applies to both concurrent (last polled snapshot could be a
@@ -991,6 +1025,58 @@ useEffect(() => {
       cancelled = true;
     };
   }, [matchMode, screen, currentSessionId]);
+
+  // LATECOMER CONTEXT for the ended splash (July 31 matrix): what a person
+  // arriving after expiry is told depends on what exists — a decided venue
+  // (name resolved for signed-in accounts only), votes awaiting the host, or
+  // nothing. One fetch when the splash shows a closed/expired session.
+  const [splashEnd, setSplashEnd] = useState(null);
+  useEffect(() => {
+    if (!isGuest || guestStage !== "splash" || !guestSessionId) return;
+    const closed =
+      guestSessionData?.status === "closed" ||
+      (guestSessionData?.expires_at &&
+        Date.now() > new Date(guestSessionData.expires_at).getTime());
+    if (!closed) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: sess }, { data: likes }] = await Promise.all([
+        supabase
+          .from("match_sessions")
+          .select("decided_venue_id")
+          .eq("id", guestSessionId)
+          .maybeSingle(),
+        supabase.rpc("get_session_likes", { p_session_id: guestSessionId }),
+      ]);
+      if (cancelled) return;
+      let decidedName = null;
+      if (
+        sess?.decided_venue_id &&
+        session?.user?.id &&
+        session.user.is_anonymous === false
+      ) {
+        const { data: v } = await supabase.rpc("get_public_venue", {
+          p_venue_id: sess.decided_venue_id,
+        });
+        decidedName = (v && v[0]?.name) || null;
+      }
+      if (cancelled) return;
+      setSplashEnd({
+        decidedName: sess?.decided_venue_id ? decidedName || "the spot" : null,
+        likesCount: (likes || []).length,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isGuest,
+    guestStage,
+    guestSessionId,
+    guestSessionData?.status,
+    guestSessionData?.expires_at,
+    session?.user?.id,
+  ]);
 
   // Clock tick so the joined-guest effect below re-evaluates expiry — its
   // other deps only change on swipes, and a guest who stops swiping would
@@ -2393,9 +2479,13 @@ loadAreas();
       const others = (parts || []).filter(
         (p) => p.user_id !== session?.user?.id
       );
+      // Expiry counts as everyone-in (July 31): the clock ended the game, so
+      // the host must not wait forever on participants who never finished.
+      const expired =
+        sessionExpiresAt && Date.now() > new Date(sessionExpiresAt).getTime();
       if (!stop) {
         setAllPartsSubmitted(
-          others.length > 0 && others.every((p) => p.submitted_at)
+          expired || (others.length > 0 && others.every((p) => p.submitted_at))
         );
       }
     }
@@ -2405,7 +2495,7 @@ loadAreas();
       stop = true;
       clearInterval(iv);
     };
-  }, [screen, matchMode, currentSessionId, session?.user?.id]);
+  }, [screen, matchMode, currentSessionId, session?.user?.id, sessionExpiresAt]);
 
   // Warm the heavy tail for the current + next couple of swipe cards so the
   // deck never shows a skeleton mid-swipe.
@@ -2970,8 +3060,46 @@ if (authLoading || guestLoading) {
         (window.location.hostname === "localhost" ||
           window.location.hostname === "127.0.0.1");
       const showGate = isStillAnonymous && !devRevealOverride;
+      const sessionExpired =
+        guestSessionData?.expires_at &&
+        Date.now() > new Date(guestSessionData.expires_at).getTime();
+
+      // ---------- Time's up with NOTHING (July 31 matrix) ----------
+      // No matches, no votes, no decision: there is nothing behind a gate, so
+      // nobody gets one — gating nothing teaches people the gate is noise.
+      // Same plain screen for anon and signed-in.
+      if (
+        sessionExpired &&
+        matchCount === 0 &&
+        !guestDecidedVenueId
+      ) {
+        return (
+          <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+            <div className="w-full max-w-sm text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#f0e6dc] text-[#6b5f54]">
+                <Clock size={22} />
+              </div>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Time's up
+              </h1>
+              <p className="mt-2 text-sm text-neutral-600">
+                No matches this time — not everyone got to swipe.
+              </p>
+              <button
+                type="button"
+                onClick={() => goToMainApp("map")}
+                className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        );
+      }
 
       // ---------- Sign-up gate (anonymous users) ----------
+      // Copy follows what's actually behind the gate (July 31 matrix):
+      // a locked plan, a unanimous match, or the votes after a timeout.
       if (showGate) {
         return (
           <div className="min-h-screen bg-[#fdf6f0] text-[#111111] p-4">
@@ -2981,18 +3109,31 @@ if (authLoading || guestLoading) {
                   Game over, {guestName.trim() || "friend"}
                 </p>
                 <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-                  You matched on {matchCount} place{matchCount === 1 ? "" : "s"}
+                  {guestDecidedVenueId
+                    ? "The plan is locked 🎉"
+                    : resultsAreVotes
+                      ? "Time's up — the votes are in"
+                      : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
                 </h1>
               </div>
               <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
                 {!guestSignupSent ? (
                   <>
                     <h2 className="text-lg font-semibold tracking-tight">
-                      Your matches are ready
+                      {guestDecidedVenueId
+                        ? "See where you're going"
+                        : resultsAreVotes
+                          ? "See what everyone liked"
+                          : "Your matches are ready"}
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
                       Enter your email and we'll send a 6-digit code to reveal
-                      them — works whether you're new or already have an account.
+                      {guestDecidedVenueId
+                        ? " the plan"
+                        : resultsAreVotes
+                          ? " the votes"
+                          : " them"}{" "}
+                      — works whether you're new or already have an account.
                     </p>
                     <form onSubmit={handleGuestSignup} className="mt-4 space-y-3">
                       <input
@@ -3099,9 +3240,20 @@ if (authLoading || guestLoading) {
         );
       }
 
-      // ---------- Done state (signed-in guest, Mark's July 23 simplify) ----
-      // No match reveal, no decide references — picks are in, the decision
-      // arrives as a push/Activity item when the host chooses.
+      // ---------- Done state (signed-in guest, Mark's July 23 simplify,
+      // July 31 matrix on top) ---- The headline states what's actually true:
+      // the plan (decided), the match (unanimous — the game WORKED, and that
+      // deserves its own sentence, not "picks are in"), the votes (timed out,
+      // host picking), or plain picks-are-in while the game runs on.
+      const decidedName =
+        guestDecidedVenueId &&
+        (venues.find((v) => v.id === guestDecidedVenueId)?.name ||
+          guestShortlistVenues.find((v) => v.id === guestDecidedVenueId)?.name ||
+          "the spot");
+      const matchName =
+        !resultsAreVotes && sessionMatches.length > 0
+          ? venues.find((v) => v.id === sessionMatches[0].venue_id)?.name || null
+          : null;
       return (
         <div className="fixed inset-0 bg-[#fdf6f0] text-[#111111] flex flex-col pb-16 overflow-y-auto">
           <div className="w-full max-w-sm mx-auto px-4 pt-14 text-center">
@@ -3109,10 +3261,22 @@ if (authLoading || guestLoading) {
               <Check size={28} />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              Your picks are in
+              {decidedName
+                ? `${decidedName} it is 🎉`
+                : matchName
+                  ? `It's a match — ${matchName}`
+                  : resultsAreVotes
+                    ? "Time's up"
+                    : "Your picks are in"}
             </h1>
             <p className="mt-2 text-sm text-neutral-600">
-              We'll nudge you the moment {hostName} locks in the spot.
+              {decidedName
+                ? "The plan is locked — see you there."
+                : matchName
+                  ? `Everyone liked it. ${hostName} locks it in.`
+                  : resultsAreVotes
+                    ? `${hostName} is picking from what everyone liked.`
+                    : `We'll nudge you the moment ${hostName} locks in the spot.`}
             </p>
             <div className="mt-6 text-left">
               {/* Add-host-as-friend CTA — high-intent moment, hides itself if
@@ -3189,9 +3353,35 @@ if (authLoading || guestLoading) {
               </p>
             )}
             {isClosed && (
-              <p className="mt-4 text-sm text-neutral-600">
-                This session has ended.
-              </p>
+              <div className="mt-4">
+                {splashEnd?.decidedName ? (
+                  // The plan exists — that's the information a latecomer
+                  // actually wants. Anon sees it's locked, not where.
+                  session?.user?.id && session.user.is_anonymous === false ? (
+                    <p className="text-sm text-neutral-700">
+                      It's decided —{" "}
+                      <span className="font-semibold text-[#2f3f29]">
+                        {splashEnd.decidedName}
+                      </span>
+                      . See you there.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-neutral-600">
+                      The plan is locked 🎉 Sign in to see where you're going.
+                    </p>
+                  )
+                ) : splashEnd?.likesCount > 0 ? (
+                  <p className="text-sm text-neutral-600">
+                    Time's up — {hostName} is picking from{" "}
+                    {splashEnd.likesCount} place
+                    {splashEnd.likesCount === 1 ? "" : "s"} people liked.
+                  </p>
+                ) : (
+                  <p className="text-sm text-neutral-600">
+                    This session has ended.
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -3396,7 +3586,7 @@ if (authLoading || guestLoading) {
                 <div className="flex items-center justify-between rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-4 py-3">
                   <div>
                     <p className="text-sm font-medium text-[#2f3f29]">
-                      Who's coming?
+                      How many friends?
                     </p>
                     <p className="text-[11px] text-[#455d3b] mt-0.5">
                       {expectedOthers === 1
@@ -3509,55 +3699,108 @@ if (authLoading || guestLoading) {
                       placeholder="Search cuisines"
                     />
                   </MapFilterSection>
-                  {/* Radius + Matches: pills, one row. Matches is a
-                      stop-after-N target — Right Now only (curated
-                      curates the whole shortlist, no target). */}
-                  <div className="flex gap-2">
-                    <DropdownField
-                      pill
-                      label="Radius"
-                      value={radiusKm}
-                      onChange={setRadiusKm}
-                      options={RADIUS_OPTIONS.map((r) => ({
-                        value: r,
-                        // 0 = just the suburb; anything else reaches that
-                        // far PAST its border.
-                        label: r === 0 ? "Suburb only" : `+${r} km`,
-                      }))}
-                    />
-                    {/* Matches target: editable for a pair, forced to 1 for
-                        groups (Mark, July 31 — one unanimous venue IS the
-                        plan, so the pill hides rather than showing a locked
-                        control). */}
-                    {matchMode !== "curated" && expectedOthers === 1 && (
-                      <DropdownField
-                        pill
-                        label="Matches"
-                        value={matchLimit}
-                        onChange={setMatchLimit}
-                        options={MATCH_OPTIONS.map((n) => ({
-                          value: n,
-                          label: String(n),
-                        }))}
-                      />
+                  {/* MATCHES | RADIUS | TIME LIMIT as one segmented row
+                      (July 31, Mark — three side-by-side dropdown pills ran
+                      off the screen). Tap a segment, the options for it swap
+                      in underneath as chips. Matches hides for groups (forced
+                      to 1 — one unanimous venue IS the plan) and for curated
+                      (no target at all). */}
+                  <div>
+                    <div className="flex bg-neutral-100 rounded-full p-0.5 text-xs font-medium">
+                      {[
+                        ...(matchMode !== "curated" && expectedOthers === 1
+                          ? [["matches", `Matches · ${matchLimit}`]]
+                          : []),
+                        [
+                          "radius",
+                          radiusKm === 0 ? "Suburb only" : `+${radiusKm} km`,
+                        ],
+                        ...(matchMode !== "curated"
+                          ? [
+                              [
+                                "time",
+                                sessionTimeoutMins < 60
+                                  ? `${sessionTimeoutMins} min`
+                                  : sessionTimeoutMins < 1440
+                                    ? `${sessionTimeoutMins / 60}h`
+                                    : `${sessionTimeoutMins / 1440}d`,
+                              ],
+                            ]
+                          : []),
+                      ].map(([key, lbl]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() =>
+                            setAdvTab((t) => (t === key ? null : key))
+                          }
+                          className={`flex-1 rounded-full px-2 py-1.5 transition truncate ${
+                            advTab === key
+                              ? "bg-white text-[#455d3b] shadow-sm"
+                              : "text-neutral-500"
+                          }`}
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                    {advTab === "matches" && (
+                      <div className="mt-2">
+                        <p className="mb-1.5 text-[11px] text-neutral-500">
+                          Number of matches — the game stops when you hit it
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {MATCH_OPTIONS.map((n) => (
+                            <MapFilterChip
+                              key={n}
+                              on={matchLimit === n}
+                              label={String(n)}
+                              onClick={() => setMatchLimit(n)}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     )}
-                    {/* Session time limit — Right Now runs on a clock now:
-                        at expiry the likes go to the host to decide. */}
-                    {matchMode !== "curated" && (
-                      <DropdownField
-                        pill
-                        label="Time limit"
-                        value={sessionTimeoutMins}
-                        onChange={setSessionTimeoutMins}
-                        options={[
-                          { value: 30, label: "30 min" },
-                          { value: 60, label: "1 hour" },
-                          { value: 180, label: "3 hours" },
-                          { value: 720, label: "12 hours" },
-                          { value: 1440, label: "24 hours" },
-                          { value: 4320, label: "3 days" },
-                        ]}
-                      />
+                    {advTab === "radius" && (
+                      <div className="mt-2">
+                        <p className="mb-1.5 text-[11px] text-neutral-500">
+                          Search area — how far past the suburb's border
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {RADIUS_OPTIONS.map((r) => (
+                            <MapFilterChip
+                              key={r}
+                              on={radiusKm === r}
+                              label={r === 0 ? "Suburb only" : `+${r} km`}
+                              onClick={() => setRadiusKm(r)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {advTab === "time" && (
+                      <div className="mt-2">
+                        <p className="mb-1.5 text-[11px] text-neutral-500">
+                          Time to decide — then the votes go to you
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            [30, "30 min"],
+                            [60, "1 hour"],
+                            [180, "3 hours"],
+                            [720, "12 hours"],
+                            [1440, "24 hours"],
+                            [4320, "3 days"],
+                          ].map(([v, lbl]) => (
+                            <MapFilterChip
+                              key={v}
+                              on={sessionTimeoutMins === v}
+                              label={lbl}
+                              onClick={() => setSessionTimeoutMins(v)}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                   <MapFilterGroup title="Must-haves">
