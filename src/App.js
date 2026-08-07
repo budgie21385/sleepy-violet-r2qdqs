@@ -3105,21 +3105,30 @@ if (authLoading || guestLoading) {
 
       // ---------- Sign-up gate (anonymous users) ----------
       // Copy follows what's actually behind the gate (July 31 matrix):
-      // a locked plan, a unanimous match, or the votes after a timeout.
+      // a locked plan, a unanimous match, the votes after a timeout — or the
+      // game STILL RUNNING (the guest finished before the others; Mark's
+      // screenshot showed "You matched on 0 places", a result that didn't
+      // exist yet). That state sells plan-TRACKING, not a reveal.
+      const gateStillRunning =
+        !guestDecidedVenueId && !resultsAreVotes && matchCount === 0;
       if (showGate) {
         return (
           <div className="min-h-screen bg-[#fdf6f0] text-[#111111] p-4">
             <div className="w-full max-w-sm mx-auto pt-10 pb-20">
               <div className="text-center mb-6">
                 <p className="text-sm text-neutral-500">
-                  Game over, {guestName.trim() || "friend"}
+                  {gateStillRunning
+                    ? `All done, ${guestName.trim() || "friend"}`
+                    : `Game over, ${guestName.trim() || "friend"}`}
                 </p>
                 <h1 className="mt-2 text-3xl font-semibold tracking-tight">
                   {guestDecidedVenueId
                     ? "The plan is locked 🎉"
                     : resultsAreVotes
                       ? "Time's up — the votes are in"
-                      : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
+                      : gateStillRunning
+                        ? "Your choices are in"
+                        : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
                 </h1>
               </div>
               <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
@@ -3130,16 +3139,20 @@ if (authLoading || guestLoading) {
                         ? "See where you're going"
                         : resultsAreVotes
                           ? "See what everyone liked"
-                          : "Your matches are ready"}
+                          : gateStillRunning
+                            ? "Keep track of your plan"
+                            : "Your matches are ready"}
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
-                      Enter your email and we'll send a 6-digit code to reveal
-                      {guestDecidedVenueId
-                        ? " the plan"
-                        : resultsAreVotes
-                          ? " the votes"
-                          : " them"}{" "}
-                      — works whether you're new or already have an account.
+                      {gateStillRunning
+                        ? `Add your email and you'll see the plan the moment ${hostName} locks it in — new or existing account, both work.`
+                        : `Enter your email and we'll send a 6-digit code to reveal ${
+                            guestDecidedVenueId
+                              ? "the plan"
+                              : resultsAreVotes
+                                ? "the votes"
+                                : "them"
+                          } — works whether you're new or already have an account.`}
                     </p>
                     <form onSubmit={handleGuestSignup} className="mt-4 space-y-3">
                       <input
@@ -3172,7 +3185,13 @@ if (authLoading || guestLoading) {
                         }
                         className="w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {guestSigningUp ? "Sending..." : "See your matches"}
+                        {guestSigningUp
+                          ? "Sending..."
+                          : gateStillRunning || guestDecidedVenueId
+                            ? "See the plan"
+                            : resultsAreVotes
+                              ? "See the votes"
+                              : "See your matches"}
                       </button>
                       {guestSignupError && (
                         <p className="text-sm text-red-600">{guestSignupError}</p>
