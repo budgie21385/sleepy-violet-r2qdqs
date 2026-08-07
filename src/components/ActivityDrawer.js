@@ -718,6 +718,20 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           "venue_id",
           Array.from(new Set(candidates.map((s) => s.decided_venue_id)))
         );
+      // Venues read DIRECTLY (July 31 — Mark decided on a café at 11:31, no
+      // nudge by 4:30). The old path resolved through the CURATED shortlist
+      // RPC, which returns nothing for a Right Now session — so `type` was
+      // undefined, the café test failed, and every Right Now café quietly
+      // waited for Monday. Open venue reads (July 13) made the RPC workaround
+      // unnecessary for signed-in users anyway.
+      const { data: nudgeVens } = await supabase
+        .from("venues")
+        .select("*")
+        .in(
+          "id",
+          Array.from(new Set(candidates.map((s) => s.decided_venue_id)))
+        );
+      const nudgeVenById = new Map((nudgeVens || []).map((v) => [v.id, v]));
       for (const s of candidates) {
         const ref = new Date(s.event_at || s.updated_at).getTime();
         const went = (myCheckins || []).some(
@@ -727,23 +741,18 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
               48 * 60 * 60 * 1000
         );
         if (went) continue;
-        // Shortlist RPC resolves the venue even if RLS would hide it.
-        let venueName = "the spot you picked";
-        let venueObj = null;
-        const { data: vts } = await supabase.rpc(
-          "get_session_shortlist_venues",
-          { p_session_id: s.id }
-        );
-        const v = (vts || []).find((x) => x.id === s.decided_venue_id);
-        if (v) {
-          venueObj = v;
-          venueName = v.name || venueName;
-        }
+        const v = nudgeVenById.get(s.decided_venue_id) || null;
+        const venueObj = v;
+        const venueName = v?.name || "the spot you picked";
         // Café = same-afternoon ask; everything else waits for Monday.
-        const start =
-          v?.type === "cafe"
-            ? afternoonAfter(ref)
-            : followingMonday(ref).getTime();
+        // Case-INSENSITIVE and loose on purpose: the data holds "cafe",
+        // "Cafe" and could hold "Café" or "Coffee shop" — the second bug
+        // behind the missing nudge was `=== "cafe"` failing on a capital C.
+        const t = (v?.type || "").toLowerCase();
+        const isDaytime = t.includes("caf") || t.includes("coffee");
+        const start = isDaytime
+          ? afternoonAfter(ref)
+          : followingMonday(ref).getTime();
         if (now < start || now >= start + WEEK) continue;
         nudges.push({
           kind: "session_nudge",
