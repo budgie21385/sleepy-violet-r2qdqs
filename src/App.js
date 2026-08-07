@@ -3668,7 +3668,20 @@ if (authLoading || guestLoading) {
                   Cuisine on top, then Radius + Matches as one pill row. */}
               <button
                 type="button"
-                onClick={() => setShowMoreFilters((v) => !v)}
+                onClick={() =>
+                  setShowMoreFilters((v) => {
+                    // Opening advanced lands with a segment already expanded
+                    // (July 31, Mark) — Matches when it exists, else Radius.
+                    if (!v) {
+                      setAdvTab(
+                        matchMode !== "curated" && expectedOthers === 1
+                          ? "matches"
+                          : "radius"
+                      );
+                    }
+                    return !v;
+                  })
+                }
                 className="w-full text-center text-sm font-medium text-[#455d3b]"
               >
                 {showMoreFilters ? "See fewer filters ⌃" : "See more filters ⌄"}
@@ -4423,7 +4436,7 @@ function AreaFilter({
     }
   }
  
-  function toggleRegion(items) {
+  function toggleRegion(items, region) {
     const allSelected = items.every((a) => selectedIds.has(a.id));
     if (allSelected) {
       const itemIds = new Set(items.map((a) => a.id));
@@ -4440,6 +4453,13 @@ function AreaFilter({
           region: a.region,
         })),
       ]);
+      // Ticking a WHOLE region unrolls its suburbs (July 31, Mark): the person
+      // just grabbed a big area sight-unseen — show them what that actually
+      // means and let them deselect the odd one out. Deselecting a region
+      // leaves the expansion alone.
+      if (region) {
+        setExpandedRegions((prev) => new Set([...prev, region]));
+      }
     }
   }
  
@@ -4577,7 +4597,7 @@ function AreaFilter({
                     <div className="flex items-stretch">
                       <button
                         type="button"
-                        onClick={() => toggleRegion(items)}
+                        onClick={() => toggleRegion(items, region)}
                         aria-label={`Select all in ${region}`}
                         className="flex items-center justify-center pl-4 pr-2 hover:bg-neutral-50"
                       >
