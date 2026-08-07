@@ -18,6 +18,7 @@ import { Camera, Check } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { uploadViaCollectLink } from "../lib/photos";
 import { sendPush } from "../lib/push";
+import { realName } from "../lib/names";
 
 // Same public site key as App.js (bot gate on anonymous auth).
 const TURNSTILE_SITE_KEY = "0x4AAAAAADTF1P7KXWBPldrU";
@@ -79,7 +80,10 @@ export function CollectScreen({ token }) {
         .eq("id", session.user.id)
         .maybeSingle();
       if (cancelled) return;
-      const nm = prof?.display_name || "";
+      // realName: the handle_new_user trigger seeds anons with "New user",
+      // which is a placeholder, not a remembered name — it must not skip the
+      // door or the page would greet them "Uploading as New user" (July 31).
+      const nm = realName(prof?.display_name) || "";
       setDisplayName(nm);
       // Anon with no remembered name still gets the door (no captcha —
       // the session already exists, it's just a name update).

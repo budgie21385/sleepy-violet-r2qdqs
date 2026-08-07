@@ -54,6 +54,7 @@ import { performCheckIn } from "./lib/checkins";
 // DropdownField retired here July 31 (the segmented advanced row replaced the
 // last three) — it lives on in SessionFields for any future consumer.
 import { AreaCheckbox } from "./components/SessionFields";
+import { realName } from "./lib/names";
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
 import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -1721,18 +1722,20 @@ useEffect(() => {
         return;
       }
 
-      // Sync the typed name to profile.display_name for anonymous users so
-      // their Profile tab shows the real name instead of the "New user"
-      // default created by the handle_new_user trigger. Skipped for
-      // returning signed-in users (we don't want to clobber their existing
-      // display name).
+      // Sync the typed name to profile.display_name for anonymous users —
+      // this is what makes a RETURNING guest remembered (the auto-join reads
+      // profiles). Via set_guest_name (SECURITY DEFINER), NOT a direct table
+      // update: the participant insert above had to become an RPC because
+      // direct writes from a fresh anon session "consistently failed RLS WITH
+      // CHECK even when auth.uid() matched" — and the old direct update here
+      // was the same pattern, fire-and-forget with no row-count check, so it
+      // failed silently and guests came back as "New user" (July 31, Mark's
+      // report). Skipped for signed-in users (never clobber a real name).
       const isAnon =
         justSignedInAnon || session?.user?.is_anonymous === true;
       if (isAnon) {
         supabase
-          .from("profiles")
-          .update({ display_name: name })
-          .eq("id", userId)
+          .rpc("set_guest_name", { p_name: name })
           .then(({ error }) => {
             if (error) console.error("Failed to sync display_name:", error);
           });
@@ -1764,8 +1767,11 @@ useEffect(() => {
     if (!u?.id) return;
     if (u.id === guestSessionData?.host_user_id) return; // host isn't a guest
     if (guestSubmittedAt) return; // already submitted → the restore effect handles it
-    const name = profile?.display_name?.trim();
-    if (!name) return; // no display name yet → fall back to the manual screen
+    // realName, not raw display_name: the handle_new_user trigger seeds every
+    // anon with "New user", which is a placeholder, not an identity — letting
+    // it through auto-joined a returning guest as "New user" (July 31).
+    const name = realName(profile?.display_name);
+    if (!name) return; // no REAL name yet → fall back to the manual screen
     // Wait until the venue pool the guest will swipe is actually loaded.
     // Otherwise auto-join races ahead of the data, lands on an empty queue, and
     // the concurrent end-game effect instantly flips to "submitted" → an empty
@@ -1831,7 +1837,7 @@ useEffect(() => {
     guestSessionData?.status === "open" &&
     !!session?.user?.id &&
     session.user.id !== guestSessionData?.host_user_id &&
-    !!profile?.display_name?.trim() &&
+    !!realName(profile?.display_name) &&
     !guestSubmittedAt;
 
   function handleNotForMe() {
@@ -3389,7 +3395,7 @@ if (authLoading || guestLoading) {
             <>
               <div className="mt-6 flex items-center justify-center gap-2 text-sm text-neutral-500">
                 <span className="h-4 w-4 rounded-full border-2 border-neutral-300 border-t-[#455d3b] animate-spin" />
-                Joining as {profile.display_name.trim()}…
+                Joining as {realName(profile?.display_name)}…
               </div>
               {session?.user?.is_anonymous && (
                 <button
@@ -3397,7 +3403,7 @@ if (authLoading || guestLoading) {
                   onClick={handleNotMe}
                   className="mt-5 w-full text-center text-sm text-[#455d3b] underline underline-offset-2"
                 >
-                  Not {profile.display_name.trim()}?
+                  Not {realName(profile?.display_name)}?
                 </button>
               )}
             </>
@@ -3487,7 +3493,7 @@ if (authLoading || guestLoading) {
     return (
       <GuestHome
         userId={session.user.id}
-        displayName={profile?.display_name}
+        displayName={realName(profile?.display_name)}
         onSignOut={signOut}
       />
     );

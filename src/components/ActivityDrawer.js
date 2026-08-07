@@ -58,6 +58,7 @@ import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 import { timeAgoShort, whenAgo } from "../lib/checkins";
+import { realName } from "../lib/names";
 
 // Tiny corner timestamp on every Activity card (Mark, July 25): "2h" while
 // fresh, "yesterday", then a date — same ladder as the check-in card.
@@ -313,7 +314,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             kind: signedUp.has(uid) ? "connect_add" : "connect_invite",
             id: `con_${uid}`,
             otherId: uid,
-            name: p.display_name || "Someone",
+            // realName: rows written before the July 31 fix can carry the
+            // trigger's "New user" placeholder — "Someone" reads as intended.
+            name: realName(p.display_name) || "Someone",
             avatar: avatarByUid.get(uid) || null,
             timestamp: p.joined_at,
           };
