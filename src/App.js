@@ -3430,6 +3430,24 @@ if (authLoading || guestLoading) {
             </button>
           </div>
           <BottomTabBar tab={null} setTab={goToMainApp} />
+          {/* ONBOARDING AT THE MOMENT THEY BECOME REAL (July 31, Mark: "it
+              should be on the screen that has the add friend"). A guest who
+              just signed up at the gate lands here — display name, @username,
+              photo get asked NOW, while the session is still warm, instead of
+              whenever they next open the app. Renders over this screen;
+              closing it returns here with Add-friend and Done waiting. */}
+          {!onboardingDismissed &&
+            session?.user?.id &&
+            session.user.is_anonymous === false &&
+            profile &&
+            !profile.username && (
+              <OnboardingScreen
+                userId={session.user.id}
+                profile={profile}
+                setProfile={setProfile}
+                onDone={dismissOnboarding}
+              />
+            )}
         </div>
       );
     }
