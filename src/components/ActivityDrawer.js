@@ -317,7 +317,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const [coPartsRes, myFriendshipsRes] = await Promise.all([
         supabase
           .from("session_participants")
-          .select("user_id, display_name, joined_at")
+          .select("session_id, user_id, display_name, joined_at")
           .in("session_id", myPartRows.map((p) => p.session_id))
           .neq("user_id", userId)
           .order("joined_at", { ascending: false }),
@@ -351,19 +351,40 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         const avatarByUid = new Map(
           (avRows || []).filter((r) => r.avatar_url).map((r) => [r.id, r.avatar_url])
         );
-        connectItems = coIds.map((uid) => {
-          const p = coById.get(uid);
-          return {
-            kind: signedUp.has(uid) ? "connect_add" : "connect_invite",
-            id: `con_${uid}`,
-            otherId: uid,
-            // realName: rows written before the July 31 fix can carry the
-            // trigger's "New user" placeholder — "Someone" reads as intended.
-            name: realName(p.display_name) || "Someone",
-            avatar: avatarByUid.get(uid) || null,
-            timestamp: p.joined_at,
-          };
-        });
+        // A guest who signs up mid-session exists TWICE in the participants —
+        // their abandoned anon uid and their real account, same name, same
+        // session (July 31, Mark: Dama showed as both "Add" and "Invite").
+        // The real account is the person; the anon shell's Invite row is
+        // noise. Dedupe by name-within-session, keeping the signed-up uid.
+        const signedUpNameKeys = new Set(
+          coIds
+            .filter((uid) => signedUp.has(uid))
+            .map((uid) => {
+              const p = coById.get(uid);
+              return `${p.session_id}|${(realName(p.display_name) || "").toLowerCase()}`;
+            })
+            .filter((k) => !k.endsWith("|"))
+        );
+        connectItems = coIds
+          .filter((uid) => {
+            if (signedUp.has(uid)) return true;
+            const p = coById.get(uid);
+            const key = `${p.session_id}|${(realName(p.display_name) || "").toLowerCase()}`;
+            return key.endsWith("|") || !signedUpNameKeys.has(key);
+          })
+          .map((uid) => {
+            const p = coById.get(uid);
+            return {
+              kind: signedUp.has(uid) ? "connect_add" : "connect_invite",
+              id: `con_${uid}`,
+              otherId: uid,
+              // realName: rows written before the July 31 fix can carry the
+              // trigger's "New user" placeholder — "Someone" reads as intended.
+              name: realName(p.display_name) || "Someone",
+              avatar: avatarByUid.get(uid) || null,
+              timestamp: p.joined_at,
+            };
+          });
       }
       return connectItems;
     })();

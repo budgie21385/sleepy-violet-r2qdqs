@@ -6132,6 +6132,40 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                 >
                   End it now
                 </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = new Date(
+                      Math.max(
+                        Date.now(),
+                        new Date(selectedSession.expires_at).getTime()
+                      ) +
+                        30 * 60 * 1000
+                    ).toISOString();
+                    const { error } = await supabase
+                      .from("match_sessions")
+                      .update({ expires_at: next })
+                      .eq("id", selectedSession.id)
+                      .eq("host_user_id", userId);
+                    if (error) {
+                      console.error("Extend failed:", error);
+                      showToast?.("Couldn't extend");
+                      return;
+                    }
+                    showToast?.("Extended 30 minutes");
+                    setSessions((prev) =>
+                      (prev || []).map((x) =>
+                        x.id === selectedSession.id ? { ...x, expires_at: next } : x
+                      )
+                    );
+                    setSelectedSession((prev) =>
+                      prev ? { ...prev, expires_at: next } : prev
+                    );
+                  }}
+                  className="shrink-0 rounded-full border border-[#cdd9c6] bg-white px-4 py-2 text-xs font-medium text-[#455d3b] active:scale-95 transition"
+                >
+                  +30 min
+                </button>
               </div>
             )}
           {selectedSession.mode === "curated" ? (
