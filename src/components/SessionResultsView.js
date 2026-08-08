@@ -5,7 +5,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { sendPush } from "../lib/push";
-import { Check } from "lucide-react";
+import { Check, Shuffle } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 
@@ -148,6 +148,17 @@ export function SessionResultsView({
     setSelectedIds(new Set());
   }, [view]);
 
+  // Pick for us — random selector, relocated from the retired live end-of-game
+  // wrapper (July 31, Mark: one board, in Sessions). Host-only, hidden once
+  // decided: it's a decide tool, so it lives with "We're going here".
+  function pickForUs() {
+    const candidates = (sessionMatches || [])
+      .map((m) => venueById.get(m.venue_id))
+      .filter(Boolean);
+    if (candidates.length === 0) return;
+    setDetailVenue(candidates[Math.floor(Math.random() * candidates.length)]);
+  }
+
   const venueById = useMemo(
     () => new Map(venues.map((v) => [v.id, v])),
     [venues]
@@ -229,6 +240,19 @@ export function SessionResultsView({
         onOpenProfile={onOpenProfile}
         showToast={showToast}
       />
+
+      {/* Pick for us — host shortcut when several places matched. */}
+      {canDecide && !decidedVenueId && matchesCount > 1 && (
+        <div className="bg-white px-4 pt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={pickForUs}
+            className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-700 active:scale-95 transition"
+          >
+            <Shuffle size={14} /> Pick for us
+          </button>
+        </div>
+      )}
 
       {/* Matches / My likes pill toggle */}
       <div className="bg-white border-b border-neutral-100 px-4 py-3 flex justify-center">

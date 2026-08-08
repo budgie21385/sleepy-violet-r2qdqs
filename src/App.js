@@ -910,20 +910,42 @@ useEffect(() => {
     screen,
   ]);
 
-  // Game-end trigger for the host. Concurrent: flip from swipe → matches
-  // when target hit. Curated: flip from invite_share → matches when target
-  // hit (guests writing per-swipe land matches on the host's invite_share
-  // screen, and once reconciliation crosses target_matches we navigate the
-  // host to the unified matches view).
+  // ONE BOARD (July 31, Mark: "I think this board is redundant... send them
+  // directly to the Sessions Board"). The live end-of-game board was the SAME
+  // SessionResultsView the Sessions area mounts, wearing a wrapper (Game over
+  // header + Pick for us + Done). Now every Right Now ending routes the host
+  // to the Sessions detail via the notifSessionId deep-link — the exact door
+  // the Activity drawer and "See the plan" already use. One board, one home.
+  // Also kills the waiting-card flash (its render/poll race dies with it).
+  function finishSessionToBoard() {
+    const sid = currentSessionId;
+    setScreen("session_setup");
+    setMatches([]);
+    setMarkLikes([]);
+    setPartnerLikes([]);
+    setMarkPasses([]);
+    setPartnerPasses([]);
+    setSessionMatches([]);
+    setResultsAreVotes(false);
+    setCurrentSessionId(null);
+    setPicked(null);
+    setCardIndex(0);
+    if (sid) setNotifSessionId(sid);
+  }
+
+  // Game-end trigger for the host. Concurrent: a live match now goes STRAIGHT
+  // to the Sessions board. Curated: no auto-flip — the host opens the results
+  // board manually via the "See results" CTA.
   useEffect(() => {
     const target = matchLimit || 0;
     if (!target || sessionMatches.length < target) return;
     if (matchMode === "concurrent" && screen === "swipe") {
-      setScreen("matches");
+      finishSessionToBoard();
     }
-    // Curated ("Send options") no longer auto-flips on a match count — the
-    // host opens the results board manually via the "See results" CTA.
+    // eslint's exhaustive-deps isn't configured in this repo; the deps below
+    // are the real triggers.
   }, [matchMode, screen, matchLimit, sessionMatches.length]);
+
 
   // TIME'S UP (July 31) — Right Now runs on a clock now (default 30 min).
   // A group that never reaches unanimity has to end SOMEHOW, and the timeout
@@ -933,20 +955,11 @@ useEffect(() => {
   useEffect(() => {
     if (matchMode !== "concurrent" || screen !== "swipe") return;
     if (!sessionExpiresAt || !currentSessionId) return;
-    const check = async () => {
+    const check = () => {
       if (Date.now() < new Date(sessionExpiresAt).getTime()) return;
-      // No unanimous match? Pull every liked venue (best-supported first) so
-      // the decide board has something to decide from — flagged as votes.
-      if (sessionMatches.length === 0) {
-        const { data } = await supabase.rpc("get_session_likes", {
-          p_session_id: currentSessionId,
-        });
-        if (data?.length) {
-          setSessionMatches(data);
-          setResultsAreVotes(true);
-        }
-      }
-      setScreen("matches");
+      // Time's up mid-swipe → the Sessions board, like every other ending.
+      // The board does its own likes-fallback when nothing was unanimous.
+      finishSessionToBoard();
     };
     const t = setInterval(check, 15000);
     check();
@@ -2503,6 +2516,15 @@ loadAreas();
     };
   }, [screen, matchMode, currentSessionId, session?.user?.id, sessionExpiresAt]);
 
+  // Everyone's in while the host sits on the waiting card → the Sessions
+  // board, same door as everyone else. (Lives HERE, below allPartsSubmitted's
+  // declaration — the TDZ rule; an effect above it would throw on render.)
+  useEffect(() => {
+    if (screen !== "matches" || matchMode !== "concurrent") return;
+    if (!allPartsSubmitted || !currentSessionId) return;
+    finishSessionToBoard();
+  }, [screen, matchMode, allPartsSubmitted, currentSessionId]);
+
   // Warm the heavy tail for the current + next couple of swipe cards so the
   // deck never shows a skeleton mid-swipe.
   useEffect(() => {
@@ -4051,11 +4073,16 @@ if (authLoading || guestLoading) {
             setCardIndex(0);
           }
 
-          // Mark's simplified end state (July 23): until everyone's picks are
-          // in, no match reveal, no decide controls — a calm waiting card.
-          // The last submitter's device pushes "Everyone's in"; coming back
-          // here (or staying — the 5s poll flips it live) shows the results.
-          if (matchMode === "concurrent" && !allPartsSubmitted) {
+          // Right Now never renders a board HERE any more (July 31, Mark:
+          // one board, in Sessions). This screen is only the calm waiting
+          // card; every ending — live match, everyone's in, time's up —
+          // routes to the Sessions detail via finishSessionToBoard. The
+          // redirect effects fire post-render, so return null for the one
+          // frame where everyone's-in has landed but the route hasn't.
+          if (matchMode === "concurrent" && allPartsSubmitted) {
+            return null;
+          }
+          if (matchMode === "concurrent") {
             return (
               <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex items-center justify-center p-6 pb-24">
                 <div className="w-full max-w-sm text-center">
@@ -5728,19 +5755,31 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
     setMyLikedIds(null);
     setMatchesError("");
 
-    // Matches (reconciliation RPC — venues with >=2 distinct likers).
-    supabase
-      .rpc("get_session_matches", { p_session_id: selectedSession.id })
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.error("Failed to fetch session matches:", error);
-          setMatchesError("Couldn't load matches.");
-          setSessionMatches([]);
-          return;
-        }
-        setSessionMatches(data || []);
+    // Matches (reconciliation RPC — unanimous under the group rule). When a
+    // session ends with NOTHING unanimous (the timeout case), fall back to
+    // the VOTES (get_session_likes, best-supported first) so the board the
+    // host lands on has something to decide from instead of sitting empty.
+    (async () => {
+      const { data, error } = await supabase.rpc("get_session_matches", {
+        p_session_id: selectedSession.id,
       });
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch session matches:", error);
+        setMatchesError("Couldn't load matches.");
+        setSessionMatches([]);
+        return;
+      }
+      if (data?.length) {
+        setSessionMatches(data);
+        return;
+      }
+      const { data: likes } = await supabase.rpc("get_session_likes", {
+        p_session_id: selectedSession.id,
+      });
+      if (cancelled) return;
+      setSessionMatches(likes || []);
+    })();
 
     // My likes (everything I personally swiped right on in this session).
     if (userId) {
