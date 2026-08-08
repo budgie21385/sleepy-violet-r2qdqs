@@ -420,11 +420,11 @@ export default function RestaurantSwipeMVP() {
   // Venue to show in an app-level MapVenueSheet card — e.g. tapping a
   // "You're going to X" decision notification opens that venue's card directly.
   const [cardVenue, setCardVenue] = useState(null);
-  // Post-signup onboarding (pattern B). cameFromGuestRef = they arrived via a
-  // guest/session flow (claim / venue-share) → defer to the Profile nudge
-  // instead of popping the screen. onboardingDismissed persists once-ever so we
-  // don't re-pop it every session for someone who skipped.
-  const cameFromGuestRef = useRef(false);
+  // Post-signup onboarding (pattern B). Every real account without a username
+  // gets the screen — the old came-from-guest deferral is gone (July 31,
+  // Mark): gate signups were sailing past with an email-local-part name and
+  // no photo. onboardingDismissed persists once-ever so we don't re-pop it
+  // every session for someone who skipped.
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
     try {
       return !!localStorage.getItem("flanit_onboarding_seen");
@@ -463,9 +463,10 @@ export default function RestaurantSwipeMVP() {
   });
   useEffect(() => {
     if (!pendingNightId || !session?.user?.id) return;
+    // Mirrors the onboarding gate exactly (came-from-guest deferral removed
+    // July 31) — if onboarding is up, wait; the effect re-runs when it's done.
     const needsOnboarding =
       !isGuest &&
-      !cameFromGuestRef.current &&
       !onboardingDismissed &&
       session.user.is_anonymous === false &&
       profile &&
@@ -537,9 +538,9 @@ export default function RestaurantSwipeMVP() {
   });
   useEffect(() => {
     if (!pendingVenue?.id || !session?.user?.id) return;
+    // Mirrors the onboarding gate (came-from-guest deferral removed July 31).
     const needsOnboarding =
       !isGuest &&
-      !cameFromGuestRef.current &&
       !onboardingDismissed &&
       session.user.is_anonymous === false &&
       profile &&
@@ -1270,11 +1271,8 @@ useEffect(() => {
     })();
   }, [session?.user?.id, session?.user?.is_anonymous]);
 
-  // Remember if this load ever entered a guest/session flow — those paths
-  // (claim / venue-share) defer onboarding to the Profile nudge.
-  useEffect(() => {
-    if (isGuest) cameFromGuestRef.current = true;
-  }, [isGuest]);
+  // (cameFromGuestRef deleted July 31 — guest-flow arrivals onboard like
+  // everyone else now; see the OnboardingScreen mount.)
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -2026,10 +2024,15 @@ useEffect(() => {
       const email = guestSignupEmail.trim();
       // Existing users verify with type 'email'; brand-new signups may need
       // 'signup'. Try 'email' first, fall back to 'signup' so both work.
-      let { error } = await supabase.auth.verifyOtp({ email, token: code, type: "email" });
+      let { data: vData, error } = await supabase.auth.verifyOtp({
+        email,
+        token: code,
+        type: "email",
+      });
       if (error) {
         const retry = await supabase.auth.verifyOtp({ email, token: code, type: "signup" });
         error = retry.error;
+        vData = retry.data;
       }
       if (error) {
         setGuestSignupError("That code didn't work — check it and try again.");
@@ -2041,6 +2044,23 @@ useEffect(() => {
           p_token: guestClaimToken,
         });
         if (claimErr) console.error("claim_session after code:", claimErr);
+      }
+      // Door name wins for BRAND-NEW accounts (the July 25 collect-door rule,
+      // finally applied to the session gate — fourth surface with this bug
+      // today): the signup trigger seeds display_name from the EMAIL local
+      // part ("mark+event"), so the name they typed at the join door must
+      // overwrite it. Existing accounts are never touched. Local profile
+      // patched too so the onboarding screen prefills the right name instead
+      // of racing the fetch.
+      const doorName = realName(guestName);
+      const isNewAccount =
+        vData?.user?.created_at &&
+        Date.now() - new Date(vData.user.created_at).getTime() < 10 * 60 * 1000;
+      if (doorName && isNewAccount) {
+        await supabase.rpc("set_guest_name", { p_name: doorName });
+        setProfile((prev) =>
+          prev ? { ...prev, display_name: doorName } : prev
+        );
       }
       // The auth state change re-renders the (now non-anon) submitted view.
     } catch (err) {
@@ -4430,10 +4450,14 @@ if (authLoading || guestLoading) {
           zIndex={3700}
         />
       )}
-      {/* Post-signup onboarding (B): real account, no username yet, not arrived
-          via a guest/session flow, not already dismissed. */}
+      {/* Post-signup onboarding (B): real account, no username yet, not
+          already dismissed. The came-from-guest deferral is GONE (July 31,
+          Mark: "there is no onboarding path... we should get Display Name,
+          username and profile image") — a gate signup used to sail past this
+          with an email-local-part name and no photo, and the profile nudge
+          was too weak to catch them. isGuest still guards it, so the reveal
+          moment is never interrupted; this fires when they enter the app. */}
       {!isGuest &&
-        !cameFromGuestRef.current &&
         !onboardingDismissed &&
         session?.user?.id &&
         session.user.is_anonymous === false &&
