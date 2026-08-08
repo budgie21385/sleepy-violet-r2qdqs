@@ -7,7 +7,7 @@
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect } from "react";
-import { X, UserPlus, Check, MapPin, MessageCircle, Camera } from "lucide-react";
+import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock } from "lucide-react";
 import { pushState, enablePush, sendPush } from "../lib/push";
 import {
   sendFriendRequest,
@@ -24,6 +24,7 @@ const KIND_WEIGHT = {
   session_invite: 1,
   session_nudge: 1,
   photo_nudge: 1,
+  session_timeup: 1, // your session ended on the clock — go decide
 };
 function itemWeight(i) {
   return KIND_WEIGHT[i.kind] ?? 2;
@@ -139,10 +140,11 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         .not("responded_at", "is", null)
         .order("responded_at", { ascending: false })
         .limit(20),
-      // Sessions I host — to surface guests who've submitted their picks.
+      // Sessions I host — guests' submissions + time's-up items both need
+      // the clock and decision fields (July 31).
       supabase
         .from("match_sessions")
-        .select("id, name")
+        .select("id, name, mode, expires_at, decided_venue_id, expected_others")
         .eq("host_user_id", userId),
       // Sessions I'm in — to surface a host's final decision.
       supabase
@@ -228,6 +230,47 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         timestamp: r.submitted_at,
       }));
       return submittedItems;
+    })();
+
+    // ---- Host: sessions whose CLOCK ended them, undecided, with votes ----
+    // (July 31, Mark: "session time up — 2 out of 3 submitted, see results").
+    // The push at expiry comes from whichever guest device noticed; this item
+    // is the host's durable record of the same moment. 7-day window; skipped
+    // once decided or when nobody submitted (nothing to decide from).
+    const timeUpP = (async () => {
+      const items = [];
+      const now = Date.now();
+      const WEEK = 7 * 24 * 60 * 60 * 1000;
+      const ended = hostedRows.filter(
+        (s) =>
+          s.mode === "concurrent" &&
+          !s.decided_venue_id &&
+          s.expires_at &&
+          now > new Date(s.expires_at).getTime() &&
+          now - new Date(s.expires_at).getTime() < WEEK
+      );
+      if (ended.length === 0) return items;
+      const { data: parts } = await supabase
+        .from("session_participants")
+        .select("session_id, user_id, submitted_at")
+        .in("session_id", ended.map((s) => s.id));
+      for (const s of ended) {
+        const others = (parts || []).filter(
+          (p) => p.session_id === s.id && p.user_id !== userId
+        );
+        const submitted = others.filter((p) => p.submitted_at).length;
+        if (submitted === 0) continue;
+        items.push({
+          kind: "session_timeup",
+          id: `stu_${s.id}`,
+          sessionId: s.id,
+          sessionName: s.name || "your session",
+          submitted,
+          expected: s.expected_others || others.length,
+          timestamp: s.expires_at,
+        });
+      }
+      return items;
     })();
 
     // ---- Guest: a host's final pick on a session I'm in (not hosting) ----
@@ -1331,6 +1374,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     const [
       [incomingItems, acceptedItems],
       submittedItems,
+      timeUpItems,
       decidedItems,
       connectItems,
       checkinItems,
@@ -1347,6 +1391,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     ] = await Promise.all([
       fuse(requestsP, "requests", [[], []]),
       fuse(submittedP, "submitted"),
+      fuse(timeUpP, "timeUp"),
       fuse(decidedP, "decided"),
       fuse(connectP, "connect"),
       fuse(checkinP, "checkins"),
@@ -1366,6 +1411,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...incomingItems,
       ...acceptedItems,
       ...submittedItems,
+      ...timeUpItems,
       ...decidedItems,
       ...connectItems,
       ...inviteItems,
@@ -2109,6 +2155,30 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           </p>
           <p className="text-[11px] text-neutral-500 truncate">
             See if there's a match{item.sessionName ? ` · ${item.sessionName}` : ""}{whenSuffix}
+          </p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "session_timeup") {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenSession?.(item.sessionId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f0e6dc] text-[#6b5f54]">
+          <Clock size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            Time's up on <strong className="font-medium">{item.sessionName}</strong>
+          </p>
+          <p className="text-[11px] text-neutral-500 truncate">
+            {item.submitted} of {item.expected} sent picks — see the results
+            {whenSuffix}
           </p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>

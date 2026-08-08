@@ -1094,15 +1094,30 @@ useEffect(() => {
 
   // Clock tick so the joined-guest effect below re-evaluates expiry — its
   // other deps only change on swipes, and a guest who stops swiping would
-  // otherwise never notice time ran out.
+  // otherwise never notice time ran out. The tick also RE-READS expires_at
+  // (July 31): the host can now end early or extend from their side, and a
+  // guest holding the join-time value would either swipe into a decided game
+  // (the original "others are just out" complaint) or flip out early.
   const [expiryTick, setExpiryTick] = useState(0);
   useEffect(() => {
     if (!isGuest || guestStage !== "joined") return;
     if (guestSessionData?.mode !== "concurrent") return;
-    if (!guestSessionData?.expires_at) return;
-    const t = setInterval(() => setExpiryTick((n) => n + 1), 15000);
+    if (!guestSessionData?.expires_at || !guestSessionId) return;
+    const t = setInterval(async () => {
+      const { data } = await supabase
+        .from("match_sessions")
+        .select("expires_at")
+        .eq("id", guestSessionId)
+        .maybeSingle();
+      if (data?.expires_at && data.expires_at !== guestSessionData.expires_at) {
+        setGuestSessionData((prev) =>
+          prev ? { ...prev, expires_at: data.expires_at } : prev
+        );
+      }
+      setExpiryTick((n) => n + 1);
+    }, 15000);
     return () => clearInterval(t);
-  }, [isGuest, guestStage, guestSessionData?.mode, guestSessionData?.expires_at]);
+  }, [isGuest, guestStage, guestSessionData?.mode, guestSessionData?.expires_at, guestSessionId]);
 
   useEffect(() => {
     if (!isGuest || guestStage !== "joined") return;
@@ -1110,6 +1125,7 @@ useEffect(() => {
     const mode = guestSessionData?.mode;
     let shouldFlip = false;
 
+    let flipByExpiry = false;
     if (mode === "concurrent") {
       // Flip when the match target is reached OR the guest finishes the queue —
       // so a Right now guest always lands on the matches / sign-up screen and
@@ -1121,11 +1137,9 @@ useEffect(() => {
       const expired =
         guestSessionData?.expires_at &&
         Date.now() > new Date(guestSessionData.expires_at).getTime();
-      shouldFlip =
-        (target > 0 && sessionMatches.length >= target) ||
-        reachedEnd ||
-        queueEmpty ||
-        !!expired;
+      const targetReached = target > 0 && sessionMatches.length >= target;
+      flipByExpiry = !!expired && !targetReached && !reachedEnd && !queueEmpty;
+      shouldFlip = targetReached || reachedEnd || queueEmpty || !!expired;
     } else if (mode === "curated") {
       // "Send options": the guest votes the WHOLE shortlist — no target-based
       // early stop (that was the old mutual-match model). Flip only when they
@@ -1137,6 +1151,17 @@ useEffect(() => {
 
     if (shouldFlip) {
       setGuestStage("submitted");
+      // Time ended this guest's game mid-deck → tell the HOST it's decision
+      // time (no server cron, so a participant's device is the only clock
+      // that can speak up; several guests expiring together may each send
+      // one — rate-limited and better than silence).
+      if (flipByExpiry && guestSessionData?.host_user_id) {
+        sendPush(
+          guestSessionData.host_user_id,
+          "⏰ Time's up on your session",
+          "See the results and make the call"
+        );
+      }
       // Fire-and-forget — failure here doesn't block the end screen.
       if (session?.user?.id && guestSessionId) {
         supabase
@@ -4137,23 +4162,24 @@ if (authLoading || guestLoading) {
                     {waitingOthersLeft > 0
                       ? `Waiting on ${
                           waitingOthersLeft === 1
-                            ? "one more person"
-                            : `${waitingOthersLeft} more people`
-                        } — we'll nudge you when everyone's done, then you choose the spot.`
-                      : "Waiting on the others — we'll nudge you when everyone's done, then you choose the spot."}
+                            ? "one friend"
+                            : `${waitingOthersLeft} friends`
+                        } — we'll nudge you when everyone is done.`
+                      : "Waiting on your friends — we'll nudge you when everyone is done."}
                   </p>
-                  {/* The mis-declared session is the ORDINARY case (July 31,
-                      Mark) — someone doesn't see the link, and unanimity can
-                      never fire. The host shouldn't sit out the clock: end it
-                      and decide from the votes, or buy the missing person
-                      more time. Both write through the same machinery the
-                      timeout uses. */}
+                  {/* No "End it now" HERE (July 31, Mark: the host usually
+                      submits FIRST — ending from this card would cut guests
+                      off mid-swipe). Ending early lives on the Sessions board,
+                      where the host returns once people have had their go.
+                      This card just parks the session: Done for now, with a
+                      quiet Extend for the host who already knows someone
+                      needs longer. */}
                   <button
                     type="button"
-                    onClick={finishSessionToBoard}
+                    onClick={handleDoneSession}
                     className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
                   >
-                    End it now — see the results
+                    Done for now
                   </button>
                   <button
                     type="button"
@@ -4178,16 +4204,9 @@ if (authLoading || guestLoading) {
                       setSessionExpiresAt(next);
                       showToast?.("Extended 30 minutes");
                     }}
-                    className="mt-2 w-full rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 font-medium text-[#455d3b] active:scale-[0.98] transition"
+                    className="mt-3 w-full text-center text-sm text-[#455d3b] underline underline-offset-2"
                   >
-                    Extend 30 minutes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDoneSession}
-                    className="mt-3 w-full text-center text-sm text-neutral-500"
-                  >
-                    Done for now
+                    Extend for 30 mins
                   </button>
                   <p className="mt-3 text-xs text-neutral-400">
                     This session lives under Profile → Sessions
@@ -5739,7 +5758,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
       }
       const { data: sessionRows, error: sErr } = await supabase
         .from("match_sessions")
-        .select("id, name, mode, status, created_at, event_at, host_user_id, target_matches")
+        .select("id, name, mode, status, created_at, event_at, host_user_id, target_matches, expires_at, decided_venue_id, expected_others")
         .in("id", ids);
       if (cancelled) return;
       if (sErr) {
@@ -6067,6 +6086,54 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               {matchesError}
             </div>
           )}
+          {/* STILL-RUNNING BANNER (July 31, Mark: "End it now" belongs on the
+              results board, not the host's post-swipe card — the host usually
+              submits first, and ending from there would cut guests off).
+              Host + Right Now + clock still running + undecided: end it here,
+              once people have had their go. Ending = expires_at → now, the
+              same clock everyone's devices already watch; the detail reloads
+              itself via the selectedSession identity change. */}
+          {selectedSession.mode === "concurrent" &&
+            userId === selectedSession.host_user_id &&
+            !selectedSession.decided_venue_id &&
+            selectedSession.expires_at &&
+            Date.now() < new Date(selectedSession.expires_at).getTime() && (
+              <div className="bg-[#edf2eb] border-b border-[#cdd9c6] px-4 py-3 flex items-center gap-3">
+                <p className="flex-1 text-xs text-[#2f3f29]">
+                  Still running — friends can keep swiping until time's up.
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const nowIso = new Date().toISOString();
+                    const { error } = await supabase
+                      .from("match_sessions")
+                      .update({ expires_at: nowIso })
+                      .eq("id", selectedSession.id)
+                      .eq("host_user_id", userId);
+                    if (error) {
+                      console.error("End now failed:", error);
+                      showToast?.("Couldn't end it");
+                      return;
+                    }
+                    showToast?.("Session ended");
+                    setSessions((prev) =>
+                      (prev || []).map((x) =>
+                        x.id === selectedSession.id
+                          ? { ...x, expires_at: nowIso }
+                          : x
+                      )
+                    );
+                    setSelectedSession((prev) =>
+                      prev ? { ...prev, expires_at: nowIso } : prev
+                    );
+                  }}
+                  className="shrink-0 rounded-full bg-[#455d3b] px-4 py-2 text-xs font-medium text-white active:scale-95 transition"
+                >
+                  End it now
+                </button>
+              </div>
+            )}
           {selectedSession.mode === "curated" ? (
             <CuratedResultsBoard
               sessionId={selectedSession.id}
