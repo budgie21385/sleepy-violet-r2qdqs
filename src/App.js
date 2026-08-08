@@ -2485,6 +2485,9 @@ loadAreas();
   // of the session. Poll whether all non-host participants have submitted —
   // until then the end screen is a simple "we'll let you know" card.
   const [allPartsSubmitted, setAllPartsSubmitted] = useState(false);
+  // How many of the declared party haven't submitted yet — the waiting card's
+  // tally ("Waiting on 2 more"). Fed by the same poll as allPartsSubmitted.
+  const [waitingOthersLeft, setWaitingOthersLeft] = useState(0);
   useEffect(() => {
     if (screen !== "matches" || matchMode !== "concurrent" || !currentSessionId) {
       setAllPartsSubmitted(false);
@@ -2504,9 +2507,19 @@ loadAreas();
       const expired =
         sessionExpiresAt && Date.now() > new Date(sessionExpiresAt).getTime();
       if (!stop) {
+        // "Everyone" means the DECLARED party, not whoever happens to have
+        // joined so far (July 31 field test: the anon finished before anyone
+        // else even joined — others = [anon], all submitted, and the host got
+        // bounced to a board holding one person's likes). Until expected_others
+        // people have joined AND submitted, the game is still on.
+        const submittedOthers = others.filter((p) => p.submitted_at).length;
         setAllPartsSubmitted(
-          expired || (others.length > 0 && others.every((p) => p.submitted_at))
+          expired ||
+            (others.length >= expectedOthers &&
+              others.length > 0 &&
+              others.every((p) => p.submitted_at))
         );
+        setWaitingOthersLeft(Math.max(0, expectedOthers - submittedOthers));
       }
     }
     checkAllIn();
@@ -2515,7 +2528,7 @@ loadAreas();
       stop = true;
       clearInterval(iv);
     };
-  }, [screen, matchMode, currentSessionId, session?.user?.id, sessionExpiresAt]);
+  }, [screen, matchMode, currentSessionId, session?.user?.id, sessionExpiresAt, expectedOthers]);
 
   // Everyone's in while the host sits on the waiting card → the Sessions
   // board, same door as everyone else. (Lives HERE, below allPartsSubmitted's
@@ -2622,6 +2635,22 @@ loadAreas();
         return;
       }
       setSessionExpiresAt(data.expires_at || expiresAt.toISOString());
+      // FRESH GAME STATE AT CREATE (July 31 field test). Swipe history only
+      // reset when a session ENDED through Done — a session abandoned midway
+      // left markLikes/markPasses populated, so the NEXT session's deck read
+      // as fully swiped, currentVenue came up empty, AutoRoute skipped the
+      // host past swiping, and one early-finished anon tripped everyone's-in:
+      // "clicked Start swiping and it went straight to results". One-shot bug
+      // (the bounce itself reset the state), hence unreplicable.
+      setMatches([]);
+      setMarkLikes([]);
+      setPartnerLikes([]);
+      setMarkPasses([]);
+      setPartnerPasses([]);
+      setSessionMatches([]);
+      setResultsAreVotes(false);
+      setPicked(null);
+      setCardIndex(0);
 
       newSessionId = data.id;
       setCurrentSessionId(data.id);
@@ -3338,7 +3367,18 @@ if (authLoading || guestLoading) {
             </div>
             <button
               type="button"
-              onClick={() => goToMainApp("map")}
+              onClick={() => {
+                // A match or a locked plan has a home — the Sessions board
+                // (July 31, Mark: "after they click done it should go to the
+                // sessions board"). A still-running game just exits to the map.
+                if (decidedName || matchName || resultsAreVotes) {
+                  const sid = guestSessionId;
+                  goToMainApp("matches");
+                  setNotifSessionId(sid);
+                } else {
+                  goToMainApp("map");
+                }
+              }}
               className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
             >
               Done
@@ -4094,13 +4134,58 @@ if (authLoading || guestLoading) {
                     Your picks are in
                   </h1>
                   <p className="mt-2 text-sm text-neutral-600">
-                    Waiting on the others — we'll nudge you when everyone's
-                    done, then you choose the spot.
+                    {waitingOthersLeft > 0
+                      ? `Waiting on ${
+                          waitingOthersLeft === 1
+                            ? "one more person"
+                            : `${waitingOthersLeft} more people`
+                        } — we'll nudge you when everyone's done, then you choose the spot.`
+                      : "Waiting on the others — we'll nudge you when everyone's done, then you choose the spot."}
                   </p>
+                  {/* The mis-declared session is the ORDINARY case (July 31,
+                      Mark) — someone doesn't see the link, and unanimity can
+                      never fire. The host shouldn't sit out the clock: end it
+                      and decide from the votes, or buy the missing person
+                      more time. Both write through the same machinery the
+                      timeout uses. */}
+                  <button
+                    type="button"
+                    onClick={finishSessionToBoard}
+                    className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                  >
+                    End it now — see the results
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const next = new Date(
+                        Math.max(
+                          Date.now(),
+                          new Date(sessionExpiresAt || Date.now()).getTime()
+                        ) +
+                          30 * 60 * 1000
+                      ).toISOString();
+                      const { error } = await supabase
+                        .from("match_sessions")
+                        .update({ expires_at: next })
+                        .eq("id", currentSessionId)
+                        .eq("host_user_id", session?.user?.id);
+                      if (error) {
+                        console.error("Extend failed:", error);
+                        showToast?.("Couldn't extend");
+                        return;
+                      }
+                      setSessionExpiresAt(next);
+                      showToast?.("Extended 30 minutes");
+                    }}
+                    className="mt-2 w-full rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 font-medium text-[#455d3b] active:scale-[0.98] transition"
+                  >
+                    Extend 30 minutes
+                  </button>
                   <button
                     type="button"
                     onClick={handleDoneSession}
-                    className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                    className="mt-3 w-full text-center text-sm text-neutral-500"
                   >
                     Done for now
                   </button>

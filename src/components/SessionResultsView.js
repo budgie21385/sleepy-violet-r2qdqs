@@ -169,6 +169,29 @@ export function SessionResultsView({
   const likeCountById = new Map(
     (sessionMatches || []).map((m) => [m.venue_id, m.like_count])
   );
+  // WHO liked it, by first name (July 31, Mark: "I want this to read the
+  // names" — ×3 says how many, not who, and who is the information). Names
+  // resolve through the participants strip's rows; anyone we can't name
+  // stays a count so the chip never lies.
+  const nameByUid = new Map(
+    (participants || []).map((p) => [
+      p.user_id,
+      (p.display_name || "").trim().split(" ")[0],
+    ])
+  );
+  function likerNames(venueId) {
+    const m = (sessionMatches || []).find((x) => x.venue_id === venueId);
+    if (!m?.liker_user_ids?.length) return null;
+    const named = [];
+    let unnamed = 0;
+    for (const uid of m.liker_user_ids) {
+      const n = uid === userId ? "You" : nameByUid.get(uid);
+      if (n) named.push(n);
+      else unnamed++;
+    }
+    if (named.length === 0) return null;
+    return unnamed > 0 ? `${named.join(", ")} +${unnamed}` : named.join(", ");
+  }
 
   let rows;
   let loading;
@@ -364,9 +387,9 @@ export function SessionResultsView({
                     >
                       <div className="flex items-center gap-2">
                         <p className="font-medium truncate">{venue.name}</p>
-                        {likeCount > 2 && isMatch && (
-                          <span className="inline-flex items-center rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#3f5a3a] border border-[#c5d4c2] shrink-0">
-                            ×{likeCount}
+                        {likeCount >= 2 && isMatch && (
+                          <span className="inline-flex items-center rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#3f5a3a] border border-[#c5d4c2] shrink-0 max-w-[140px] truncate">
+                            {likerNames(venue.id) || `×${likeCount}`}
                           </span>
                         )}
                         {view === "my_likes" && isMatch && (

@@ -2107,7 +2107,9 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-sm text-neutral-900">
             <strong className="font-medium">{item.guestName}</strong> sent their picks
           </p>
-          <p className="text-[11px] text-neutral-500 truncate">{item.sessionName}{whenSuffix}</p>
+          <p className="text-[11px] text-neutral-500 truncate">
+            See if there's a match{item.sessionName ? ` · ${item.sessionName}` : ""}{whenSuffix}
+          </p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
       </button>
