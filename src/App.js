@@ -11,7 +11,7 @@ import {
   AMENITY_FILTERS,
   venueMatchesAreas,
   buildAreaExtents,
-  capGroupDeck,
+  orderGroupDeck,
   getTodayDayKey,
   venueOpenInBand,
   isVenueOpenNow,
@@ -2394,9 +2394,10 @@ loadAreas();
     } else {
       q = filteredVenues;
     }
-    // Groups of 3+ swipe the SAME bounded deck (capGroupDeck is
-    // deterministic — guests apply the identical cap to the identical pool).
-    if (matchMode === "concurrent" && expectedOthers >= 2) q = capGroupDeck(q);
+    // Groups of 3+ swipe the SAME deck in the SAME order (orderGroupDeck is
+    // deterministic — guests apply the identical sort to the identical pool).
+    // No cap: every filtered venue is available (Mark, July 31 evening).
+    if (matchMode === "concurrent" && expectedOthers >= 2) q = orderGroupDeck(q);
     return q;
   }, [filteredVenues, matchSource, matchMode, savedVenueIds, expectedOthers]);
 
@@ -2467,13 +2468,13 @@ loadAreas();
       return true;
     });
   }, [isGuest, guestSessionData, venues, areas, guestShortlistIds, guestShortlistVenues, guestListVenues, savedVenueIds, session?.user?.id]);
-  // Groups of 3+ hold the SAME bounded deck as the host — capGroupDeck is
-  // deterministic over the same filtered pool, which is the entire point:
-  // unanimity needs overlapping decks, not 30-random-each.
+  // Groups of 3+ hold the SAME deck in the SAME order as the host —
+  // orderGroupDeck is deterministic over the same filtered pool, which is the
+  // entire point: unanimity needs overlapping decks. No cap (July 31 evening).
   const guestQueue =
     guestSessionData?.mode === "concurrent" &&
     (guestSessionData?.expected_others || 0) >= 2
-      ? capGroupDeck(guestQueueRaw)
+      ? orderGroupDeck(guestQueueRaw)
       : guestQueueRaw;
 
   const currentVenue = swipeQueue.find(

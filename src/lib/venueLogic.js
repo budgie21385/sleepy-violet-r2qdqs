@@ -74,21 +74,18 @@ export function getVenueEmoji(venue) {
 //                       without one stray row moving the border.
 // A suburb with no venues of its own falls back to a circle around its
 // centre so a radius still does something.
-// GROUP DECK CAP (July 31) — a group of 3+ swipes a bounded ~30-venue deck.
-// Unanimity across a 200-venue pool is nearly impossible not because tastes
-// differ but because attention does; a bounded deck makes overlap likely.
-// MUST be deterministic and identical for every participant (host and guests
-// both call this on the same filtered pool): rating desc, id as tiebreak. A
-// random 30-per-person would quietly destroy the overlap the cap exists for.
-export const GROUP_DECK_CAP = 30;
-export function capGroupDeck(venues) {
-  if (!venues || venues.length <= GROUP_DECK_CAP) return venues || [];
-  return [...venues]
-    .sort(
-      (a, b) =>
-        (Number(b.rating) || 0) - (Number(a.rating) || 0) || a.id - b.id
-    )
-    .slice(0, GROUP_DECK_CAP);
+// GROUP DECK ORDER (July 31; the hard 30-cap lasted one evening — Mark saw
+// "30 places available" at setup and called it: "All venues should be
+// available"). The cap was only ever a mechanism for OVERLAP — unanimity
+// needs every participant looking at the same venues in the same order, and
+// the deterministic sort does that on its own: everyone's first thirty cards
+// are the same thirty, but nobody hits a wall at 30. Rating desc, id tiebreak;
+// identical for host and guests over the same filtered pool. A per-person
+// random order would quietly destroy the overlap unanimity depends on.
+export function orderGroupDeck(venues) {
+  return [...(venues || [])].sort(
+    (a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0) || a.id - b.id
+  );
 }
 
 export function buildAreaExtents(venues, selectedAreas) {
