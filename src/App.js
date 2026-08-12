@@ -1274,6 +1274,12 @@ useEffect(() => {
   // (cameFromGuestRef deleted July 31 — guest-flow arrivals onboard like
   // everyone else now; see the OnboardingScreen mount.)
 
+  // The identity a gate signup carries across the anon → real account swap
+  // (door-typed name, or the anon profile's name for a returning auto-joined
+  // guest). Read by the profile fetch above as a race guard; null unless a
+  // brand-new account is mid-claim.
+  const pendingDoorNameRef = useRef(null);
+
   useEffect(() => {
     if (!session?.user?.id) {
       setProfile(null);
@@ -1286,7 +1292,19 @@ useEffect(() => {
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
-        if (!cancelled && !error) setProfile(data);
+        if (cancelled || error) return;
+        // Fetch-race guard (July 31): this fetch fires the moment the anon →
+        // real auth swap lands, and can READ the new profile's placeholder
+        // seed BEFORE the gate's set_guest_name write commits — clobbering
+        // the carried name a beat after we patched it in. If a carried name
+        // is pending and the fetched name is still a placeholder, the carried
+        // name wins.
+        const carried = pendingDoorNameRef.current;
+        if (carried && !realName(data?.display_name)) {
+          setProfile({ ...data, display_name: carried });
+        } else {
+          setProfile(data);
+        }
       });
     return () => {
       cancelled = true;
@@ -2022,6 +2040,14 @@ useEffect(() => {
     setGuestSignupError("");
     try {
       const email = guestSignupEmail.trim();
+      // Capture the guest's played-under identity BEFORE verifyOtp swaps the
+      // session to the new account (July 31, Mark's test: onboarding prefilled
+      // "New user"). A RETURNING anon auto-joined, so the door input was never
+      // typed this run — their name lives on the ANON profile, which is about
+      // to stop being `profile`. Door input wins if present, anon profile
+      // otherwise.
+      const carriedName = realName(guestName) || realName(profile?.display_name);
+      pendingDoorNameRef.current = carriedName || null;
       // Existing users verify with type 'email'; brand-new signups may need
       // 'signup'. Try 'email' first, fall back to 'signup' so both work.
       let { data: vData, error } = await supabase.auth.verifyOtp({
@@ -2045,21 +2071,19 @@ useEffect(() => {
         });
         if (claimErr) console.error("claim_session after code:", claimErr);
       }
-      // Door name wins for BRAND-NEW accounts (the July 25 collect-door rule,
-      // finally applied to the session gate — fourth surface with this bug
-      // today): the signup trigger seeds display_name from the EMAIL local
-      // part ("mark+event"), so the name they typed at the join door must
-      // overwrite it. Existing accounts are never touched. Local profile
-      // patched too so the onboarding screen prefills the right name instead
-      // of racing the fetch.
-      const doorName = realName(guestName);
+      // Carried name wins for BRAND-NEW accounts (the July 25 collect-door
+      // rule): the signup trigger seeds the new profile with a placeholder,
+      // so the identity they played under must overwrite it. Existing
+      // accounts are never touched; the ref is cleared so the fetch-race
+      // patch below can't apply to them either.
       const isNewAccount =
         vData?.user?.created_at &&
         Date.now() - new Date(vData.user.created_at).getTime() < 10 * 60 * 1000;
-      if (doorName && isNewAccount) {
-        await supabase.rpc("set_guest_name", { p_name: doorName });
+      if (!isNewAccount) pendingDoorNameRef.current = null;
+      if (carriedName && isNewAccount) {
+        await supabase.rpc("set_guest_name", { p_name: carriedName });
         setProfile((prev) =>
-          prev ? { ...prev, display_name: doorName } : prev
+          prev ? { ...prev, display_name: carriedName } : prev
         );
       }
       // The auth state change re-renders the (now non-anon) submitted view.
