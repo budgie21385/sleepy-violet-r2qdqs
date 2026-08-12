@@ -1301,6 +1301,7 @@ useEffect(() => {
         // name wins.
         const carried = pendingDoorNameRef.current;
         if (carried && !realName(data?.display_name)) {
+          pendingDoorNameRef.current = null; // one shot — never leaks to a later sign-in
           setProfile({ ...data, display_name: carried });
         } else {
           setProfile(data);
@@ -2071,20 +2072,44 @@ useEffect(() => {
         });
         if (claimErr) console.error("claim_session after code:", claimErr);
       }
-      // Carried name wins for BRAND-NEW accounts (the July 25 collect-door
-      // rule): the signup trigger seeds the new profile with a placeholder,
-      // so the identity they played under must overwrite it. Existing
-      // accounts are never touched; the ref is cleared so the fetch-race
-      // patch below can't apply to them either.
-      const isNewAccount =
-        vData?.user?.created_at &&
-        Date.now() - new Date(vData.user.created_at).getTime() < 10 * 60 * 1000;
-      if (!isNewAccount) pendingDoorNameRef.current = null;
-      if (carriedName && isNewAccount) {
-        await supabase.rpc("set_guest_name", { p_name: carriedName });
-        setProfile((prev) =>
-          prev ? { ...prev, display_name: carriedName } : prev
-        );
+      // Carried name wins when the account's name is a PLACEHOLDER (July 31,
+      // second attempt — the created_at "is it new?" inference evaluated
+      // false in Mark's test and silently skipped the whole carry). This
+      // version can't mis-infer: read the account's ACTUAL profile row. A
+      // placeholder name means there's nothing to protect — carry wins. A
+      // real name means an existing account — untouched, ref disarmed.
+      const { data: freshSess } = await supabase.auth.getSession();
+      const newUid = freshSess?.session?.user?.id || vData?.user?.id;
+      if (newUid) {
+        const { data: freshProf, error: profErr } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, tier, avatar_url")
+          .eq("id", newUid)
+          .maybeSingle();
+        if (profErr) console.error("Post-claim profile read failed:", profErr);
+        if (freshProf && realName(freshProf.display_name)) {
+          // Existing account with a real name — never clobber.
+          pendingDoorNameRef.current = null;
+          setProfile(freshProf);
+        } else if (carriedName) {
+          const { error: nameErr } = await supabase.rpc("set_guest_name", {
+            p_name: carriedName,
+          });
+          if (nameErr) console.error("set_guest_name after claim failed:", nameErr);
+          // Disarm AFTER any in-flight profile fetch could land (clearing
+          // immediately would unguard the exact race the ref exists for);
+          // 15s is far past any request, far before any other sign-in.
+          setTimeout(() => {
+            pendingDoorNameRef.current = null;
+          }, 15000);
+          setProfile(
+            freshProf
+              ? { ...freshProf, display_name: carriedName }
+              : (prev) => (prev ? { ...prev, display_name: carriedName } : prev)
+          );
+        } else if (freshProf) {
+          setProfile(freshProf);
+        }
       }
       // The auth state change re-renders the (now non-anon) submitted view.
     } catch (err) {
@@ -3466,6 +3491,10 @@ if (authLoading || guestLoading) {
             profile &&
             !profile.username && (
               <OnboardingScreen
+                // Keyed to the name: the form snapshots its prefill at mount,
+                // and the carried name can land a beat after the placeholder —
+                // a key change remounts the form with the corrected prefill.
+                key={profile.display_name || "onboard"}
                 userId={session.user.id}
                 profile={profile}
                 setProfile={setProfile}
