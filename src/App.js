@@ -1300,7 +1300,13 @@ useEffect(() => {
         // is pending and the fetched name is still a placeholder, the carried
         // name wins.
         const carried = pendingDoorNameRef.current;
-        if (carried && !realName(data?.display_name)) {
+        // Seeded = the trigger's work, not a person's: empty, "New user", or
+        // the gate email's local part (the seed when an email exists).
+        const local = (guestSignupEmail || "").split("@")[0].trim().toLowerCase();
+        const fetched = (data?.display_name || "").trim().toLowerCase();
+        const seeded =
+          !realName(data?.display_name) || (!!local && fetched === local);
+        if (carried && seeded) {
           pendingDoorNameRef.current = null; // one shot — never leaks to a later sign-in
           setProfile({ ...data, display_name: carried });
         } else {
@@ -2087,8 +2093,17 @@ useEffect(() => {
           .eq("id", newUid)
           .maybeSingle();
         if (profErr) console.error("Post-claim profile read failed:", profErr);
-        if (freshProf && realName(freshProf.display_name)) {
-          // Existing account with a real name — never clobber.
+        // A "real name" here must ALSO not be the email's local part — the
+        // handle_new_user trigger seeds display_name from the email when one
+        // exists ("budgie21385+ry"), and only "New user" for email-less anons
+        // (July 31, Mark's third test run caught this). The gate knows the
+        // email, so the seed is detectable exactly here.
+        const localPart = email.split("@")[0].trim().toLowerCase();
+        const profName = (freshProf?.display_name || "").trim().toLowerCase();
+        const hasChosenName =
+          !!realName(freshProf?.display_name) && profName !== localPart;
+        if (freshProf && hasChosenName) {
+          // Existing account with a name someone actually chose — never clobber.
           pendingDoorNameRef.current = null;
           setProfile(freshProf);
         } else if (carriedName) {
