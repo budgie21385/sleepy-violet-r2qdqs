@@ -1,7 +1,9 @@
 // Post-signup onboarding (pattern "B"): one combined screen to set a username
-// and profile photo, shown once after a direct/friend-invite sign-in when the
-// profile is still incomplete. Always skippable — never blocks. Anyone who
-// skips falls into the nudge state (Profile card + Activity item + tab dot).
+// and profile photo, shown after ANY sign-in that leaves the profile without a
+// username (the guest-flow deferral died July 31). The USERNAME step is
+// mandatory as of July 31 (Mark) — handles are load-bearing (invites, search,
+// identity) and the nudge state proved too weak to recover skippers. Photo
+// and the alerts step stay skippable.
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { Camera, Check } from "lucide-react";
@@ -84,10 +86,11 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
 
   const trimmedUsername = username.trim().toLowerCase();
   const usernameValid = status.state === "available" || status.state === "current";
-  // Block Done only if they typed a username that isn't valid/available.
-  const usernameBlocking =
-    !!trimmedUsername && !usernameValid && status.state !== "idle";
-  const canDone = !saving && !uploading && !usernameBlocking;
+  // USERNAME IS REQUIRED (July 31, Mark: "I don't think we should allow them
+  // to skip username — the app will break later"). Handles feed /u/@ invites,
+  // friend search and profile identity; an account without one is half-real.
+  // Photo stays optional. Done is the only exit from this step.
+  const canDone = !saving && !uploading && usernameValid;
 
   // After the profile step: show the alerts step only when it can do good.
   function finishOrAlerts() {
@@ -282,14 +285,15 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
           >
             {saving ? "Saving…" : "Done"}
           </button>
+          {!usernameValid && (
+            <p className="mt-2 text-center text-xs text-neutral-400">
+              Pick a username to continue
+            </p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={finishOrAlerts}
-          className="mt-3 w-full text-center text-sm text-neutral-500"
-        >
-          Skip for now
-        </button>
+        {/* "Skip for now" removed July 31 (Mark) — the username is load-bearing
+            (invites, search, identity) and the nudge state proved too weak to
+            recover skippers. The ALERTS step keeps its own "Not now". */}
       </div>
     </div>
   );
