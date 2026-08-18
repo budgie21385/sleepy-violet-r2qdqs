@@ -540,18 +540,20 @@ export function SessionResultsView({
                   {venueById.get(scheduler.venueId)?.name || "This spot"} it is 🎉
                 </h2>
                 <p className="mt-1 text-sm text-neutral-600">When are you going?</p>
-                {/* App pill language (Mark's call): rounded-full, solid olive
-                    when active — same dialect as the occasion chips. */}
-                <div className="mt-4 flex gap-2">
+                {/* SEGMENTED control (Mark's pick, Aug 1 — same style as the
+                    advanced Matches | Suburb only | 3h row): grey track,
+                    white active segment. Labels stay LITERAL — "Choose date"
+                    never echoes the date; the input below owns that. */}
+                <div className="mt-4 flex bg-neutral-100 rounded-full p-0.5 text-sm font-medium">
                   <button
                     type="button"
                     onClick={() =>
                       setScheduler((s) => ({ ...s, when: "now", dateTime: "" }))
                     }
-                    className={`flex-1 rounded-full py-2.5 text-sm font-medium transition ${
+                    className={`flex-1 rounded-full py-2.5 transition ${
                       scheduler.when === "now"
-                        ? "bg-[#455d3b] text-white"
-                        : "bg-white border border-neutral-200 text-neutral-600"
+                        ? "bg-white text-[#455d3b] shadow-sm"
+                        : "text-neutral-500"
                     }`}
                   >
                     Right now
@@ -575,15 +577,13 @@ export function SessionResultsView({
                         return { ...s, when: "date", dateTime: dt };
                       })
                     }
-                    className={`flex-1 rounded-full py-2.5 text-sm font-medium transition ${
+                    className={`flex-1 rounded-full py-2.5 transition ${
                       scheduler.when === "date"
-                        ? "bg-[#455d3b] text-white"
-                        : "bg-white border border-neutral-200 text-neutral-600"
+                        ? "bg-white text-[#455d3b] shadow-sm"
+                        : "text-neutral-500"
                     }`}
                   >
-                    {scheduler.when === "date" && scheduler.dateTime
-                      ? schedulerWhenText(scheduler)
-                      : "Choose date"}
+                    Choose date
                   </button>
                 </div>
                 {/* Date AND time (Mark's mock note: "this option should also
