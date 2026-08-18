@@ -336,10 +336,21 @@ export default function RestaurantSwipeMVP() {
   // is forced to 1 (one unanimous venue IS the plan). Pairs keep today's
   // behaviour exactly.
   const [expectedOthers, setExpectedOthers] = useState(1);
-  // Session time limit (default 30 min, up to ~72h, in See-more filters).
-  // Timeout is how a group session that never reaches unanimity ends: the
-  // likes go to the host to make the call.
-  const [sessionTimeoutMins, setSessionTimeoutMins] = useState(30);
+  // Session time limit (default 3 HOURS — Aug 1, Mark; the original 30-min
+  // default was his July 31 spec when the clock was purely a dead-session
+  // safety net, but now it drives real end states and 30 min proved twitchy
+  // for how groups actually coordinate). Up to 3 days, in See-more filters.
+  // Timeout is how a session that never reaches unanimity ends: the likes go
+  // to the host to make the call.
+  const SESSION_DURATIONS = [
+    [30, "30 mins"],
+    [120, "2 hours"],
+    [180, "3 hours"],
+    [480, "8 hours"],
+    [1440, "1 day"],
+    [4320, "3 days"],
+  ];
+  const [sessionTimeoutMins, setSessionTimeoutMins] = useState(180);
   const [sessionExpiresAt, setSessionExpiresAt] = useState(null);
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
   // null (all collapsed — the segment labels carry the current values).
@@ -932,6 +943,35 @@ useEffect(() => {
     setPicked(null);
     setCardIndex(0);
     if (sid) setNotifSessionId(sid);
+  }
+
+  // Host-side extend, shared by the waiting card's dropdown (Aug 1) and
+  // anything else that buys a session time. Extends from whichever is later —
+  // now, or the current expiry — so extending an already-expired session
+  // restarts the clock rather than producing a deadline still in the past.
+  async function extendSessionBy(mins) {
+    if (!currentSessionId || !mins) return;
+    const next = new Date(
+      Math.max(
+        Date.now(),
+        new Date(sessionExpiresAt || Date.now()).getTime()
+      ) +
+        mins * 60 * 1000
+    ).toISOString();
+    const { error } = await supabase
+      .from("match_sessions")
+      .update({ expires_at: next })
+      .eq("id", currentSessionId)
+      .eq("host_user_id", session?.user?.id);
+    if (error) {
+      console.error("Extend failed:", error);
+      showToast?.("Couldn't extend");
+      return;
+    }
+    setSessionExpiresAt(next);
+    const lbl =
+      SESSION_DURATIONS.find(([v]) => v === mins)?.[1] || `${mins} mins`;
+    showToast?.(`Extended by ${lbl}`);
   }
 
   // Game-end trigger for the host. Concurrent: a live match now goes STRAIGHT
@@ -4009,14 +4049,7 @@ if (authLoading || guestLoading) {
                           Time to decide — then the votes go to you
                         </p>
                         <div className="flex flex-wrap gap-1.5">
-                          {[
-                            [30, "30 min"],
-                            [60, "1 hour"],
-                            [180, "3 hours"],
-                            [720, "12 hours"],
-                            [1440, "24 hours"],
-                            [4320, "3 days"],
-                          ].map(([v, lbl]) => (
+                          {SESSION_DURATIONS.map(([v, lbl]) => (
                             <MapFilterChip
                               key={v}
                               on={sessionTimeoutMins === v}
@@ -4280,33 +4313,30 @@ if (authLoading || guestLoading) {
                   >
                     Done for now
                   </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const next = new Date(
-                        Math.max(
-                          Date.now(),
-                          new Date(sessionExpiresAt || Date.now()).getTime()
-                        ) +
-                          30 * 60 * 1000
-                      ).toISOString();
-                      const { error } = await supabase
-                        .from("match_sessions")
-                        .update({ expires_at: next })
-                        .eq("id", currentSessionId)
-                        .eq("host_user_id", session?.user?.id);
-                      if (error) {
-                        console.error("Extend failed:", error);
-                        showToast?.("Couldn't extend");
-                        return;
-                      }
-                      setSessionExpiresAt(next);
-                      showToast?.("Extended 30 minutes");
-                    }}
-                    className="mt-3 w-full text-center text-sm text-[#455d3b] underline underline-offset-2"
-                  >
-                    Extend for 30 mins
-                  </button>
+                  {/* Prominent extend (Aug 1, Mark) — a dropdown, not a buried
+                      text link. Uncontrolled with a reset so the same option
+                      can be picked twice in a row. text-base: sub-16px selects
+                      make iOS zoom the page. */}
+                  <div className="mt-3 relative">
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        e.target.value = "";
+                        if (v) extendSessionBy(v);
+                      }}
+                      className="w-full appearance-none rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 px-4 text-center text-base font-medium text-[#455d3b] focus:outline-none"
+                    >
+                      <option value="" disabled>
+                        Extend the session…
+                      </option>
+                      {SESSION_DURATIONS.map(([v, lbl]) => (
+                        <option key={v} value={v}>
+                          + {lbl}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <p className="mt-3 text-xs text-neutral-400">
                     This session lives under Profile → Sessions
                   </p>
