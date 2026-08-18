@@ -540,16 +540,18 @@ export function SessionResultsView({
                   {venueById.get(scheduler.venueId)?.name || "This spot"} it is 🎉
                 </h2>
                 <p className="mt-1 text-sm text-neutral-600">When are you going?</p>
+                {/* App pill language (Mark's call): rounded-full, solid olive
+                    when active — same dialect as the occasion chips. */}
                 <div className="mt-4 flex gap-2">
                   <button
                     type="button"
                     onClick={() =>
                       setScheduler((s) => ({ ...s, when: "now", dateTime: "" }))
                     }
-                    className={`flex-1 rounded-2xl border py-3 text-sm font-medium transition ${
+                    className={`flex-1 rounded-full py-2.5 text-sm font-medium transition ${
                       scheduler.when === "now"
-                        ? "border-[#455d3b] bg-[#edf2eb] text-[#2f3f29]"
-                        : "border-neutral-200 bg-white text-neutral-600"
+                        ? "bg-[#455d3b] text-white"
+                        : "bg-white border border-neutral-200 text-neutral-600"
                     }`}
                   >
                     Right now
@@ -557,12 +559,26 @@ export function SessionResultsView({
                   <button
                     type="button"
                     onClick={() =>
-                      setScheduler((s) => ({ ...s, when: "date" }))
+                      setScheduler((s) => {
+                        if (s.when === "date") return s;
+                        // Never a blank picker (Mark): default to the next
+                        // sensible evening — 7pm today, or tomorrow if 7pm
+                        // has passed. Local time, hand-built (toISOString
+                        // would shift to UTC).
+                        let dt = s.dateTime;
+                        if (!dt) {
+                          const d = new Date();
+                          if (d.getHours() >= 19) d.setDate(d.getDate() + 1);
+                          const pad = (n) => String(n).padStart(2, "0");
+                          dt = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T19:00`;
+                        }
+                        return { ...s, when: "date", dateTime: dt };
+                      })
                     }
-                    className={`flex-1 rounded-2xl border py-3 text-sm font-medium transition ${
+                    className={`flex-1 rounded-full py-2.5 text-sm font-medium transition ${
                       scheduler.when === "date"
-                        ? "border-[#455d3b] bg-[#edf2eb] text-[#2f3f29]"
-                        : "border-neutral-200 bg-white text-neutral-600"
+                        ? "bg-[#455d3b] text-white"
+                        : "bg-white border border-neutral-200 text-neutral-600"
                     }`}
                   >
                     {scheduler.when === "date" && scheduler.dateTime
@@ -605,9 +621,14 @@ export function SessionResultsView({
                             </span>
                             <button
                               type="button"
-                              disabled={scheduler.told.has(p.user_id)}
+                              // No details, no telling (Mark): a "date"
+                              // choice with no date would push wrong info.
+                              disabled={
+                                scheduler.told.has(p.user_id) ||
+                                (scheduler.when === "date" && !scheduler.dateTime)
+                              }
                               onClick={() => tellFriend(p.user_id)}
-                              className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                              className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
                                 scheduler.told.has(p.user_id)
                                   ? "bg-[#edf2eb] text-[#455d3b]"
                                   : "bg-[#455d3b] text-white active:scale-95"
@@ -634,8 +655,9 @@ export function SessionResultsView({
                     </span>
                     <button
                       type="button"
+                      disabled={scheduler.when === "date" && !scheduler.dateTime}
                       onClick={copyPlanLink}
-                      className="shrink-0 rounded-full bg-[#455d3b] px-4 py-2 text-xs font-medium text-white active:scale-95 transition"
+                      className="shrink-0 rounded-full bg-[#455d3b] px-4 py-2 text-xs font-medium text-white active:scale-95 transition disabled:opacity-50"
                     >
                       Copy
                     </button>
