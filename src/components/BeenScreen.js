@@ -146,10 +146,15 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     if (!first || !addDate || addSaving) return;
     setAddSaving(true);
     // Land it at 8pm local — squarely inside the ±12h same-night window.
-    // Picking TODAY before 8pm would timestamp the future → clamp to an hour
-    // ago (also keeps a genuine tonight-pick reading as recent, not phantom).
+    // FUTURE dates are legitimate now (Aug 1, Mark — the old blanket clamp
+    // silently converted a wedding-next-Friday into "an hour ago"): an
+    // upcoming night is a real card, created ahead so the collect link and
+    // QR exist before the event. Only a TODAY pick still clamps backward —
+    // in the Been form, "today" means "earlier today", not "tonight".
     let ts = new Date(`${addDate}T20:00:00`);
-    if (ts.getTime() > Date.now()) ts = new Date(Date.now() - 60 * 60 * 1000);
+    const isToday = addDate === new Date().toISOString().slice(0, 10);
+    if (isToday && ts.getTime() > Date.now())
+      ts = new Date(Date.now() - 60 * 60 * 1000);
     const W = 12 * 60 * 60 * 1000;
     // Already have a check-in that night? Open it instead of a dupe twin.
     const { data: existing } = await supabase
@@ -546,8 +551,15 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                       happened drops to the line below, which is also where a
                       multi-venue trail belongs: it's detail, not identity.
                       Untitled nights are unchanged — the trail is the name. */}
-                  <p className="text-sm font-medium text-neutral-900 truncate">
-                    {n.label || (trail.length > 0 ? trail.join(" → ") : "A spot")}
+                  <p className="text-sm font-medium text-neutral-900 truncate flex items-center gap-1.5">
+                    <span className="truncate">
+                      {n.label || (trail.length > 0 ? trail.join(" → ") : "A spot")}
+                    </span>
+                    {new Date(n.startedAt).getTime() > Date.now() && (
+                      <span className="shrink-0 rounded-full bg-[#edf2eb] border border-[#cdd9c6] px-2 py-0.5 text-[10px] font-medium text-[#3f5a3a]">
+                        Upcoming
+                      </span>
+                    )}
                   </p>
                   <p className="text-[11px] text-neutral-500 truncate">
                     {n.label && trail.length > 0 ? `${trail.join(" → ")} · ` : ""}
@@ -778,15 +790,22 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
               Which night?
             </label>
-            {/* appearance-none + explicit bg: iOS restyles date inputs
-                into a gray centered pill otherwise. */}
+            {/* No max — future dates create an UPCOMING night (Aug 1): the
+                card exists ahead of the event so the photo link and QR can go
+                out before anyone arrives. appearance-none + explicit bg: iOS
+                restyles date inputs into a gray centered pill otherwise. */}
             <input
               type="date"
               value={addDate}
-              max={todayStr}
               onChange={(e) => setAddDate(e.target.value)}
               className="w-full appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
             />
+            {addDate > todayStr && (
+              <p className="-mt-1 mb-3 px-1 text-[11px] text-[#455d3b]">
+                Upcoming night — the card's ready now, so you can share the
+                photo link before the day.
+              </p>
+            )}
             <button
               type="button"
               disabled={addSaving || addVenues.length === 0 || !addDate}

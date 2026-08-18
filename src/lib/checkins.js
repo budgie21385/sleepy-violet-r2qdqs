@@ -29,6 +29,22 @@ export function timeAgoShort(ts) {
 export function whenAgo(ts) {
   const d = new Date(ts);
   const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  // UPCOMING nights exist now (Aug 1 — a planned card for a decided session
+  // or a future wedding/party; the album gets set up ahead). Future
+  // timestamps speak forward, calendar-day based like the past side.
+  if (mins < -30) {
+    const startOfDay = (x) =>
+      new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((startOfDay(d) - startOfDay(new Date())) / 86400000);
+    if (days <= 0) return "later today";
+    if (days === 1) return "tomorrow";
+    if (days < 7) return `in ${days} days`;
+    return d.toLocaleDateString("en-AU", {
+      day: "numeric",
+      month: "short",
+      ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+    });
+  }
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
