@@ -3999,11 +3999,15 @@ if (authLoading || guestLoading) {
                           ? [
                               [
                                 "time",
-                                sessionTimeoutMins < 60
-                                  ? `${sessionTimeoutMins} min`
-                                  : sessionTimeoutMins < 1440
-                                    ? `${sessionTimeoutMins / 60}h`
-                                    : `${sessionTimeoutMins / 1440}d`,
+                                // Named like its siblings (Aug 1, Mark: "is
+                                // 3h descriptive enough?" — it wasn't).
+                                `Duration · ${
+                                  sessionTimeoutMins < 60
+                                    ? `${sessionTimeoutMins}m`
+                                    : sessionTimeoutMins < 1440
+                                      ? `${sessionTimeoutMins / 60}h`
+                                      : `${sessionTimeoutMins / 1440}d`
+                                }`,
                               ],
                             ]
                           : []),
