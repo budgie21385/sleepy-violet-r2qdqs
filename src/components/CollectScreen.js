@@ -422,11 +422,14 @@ export function CollectScreen({ token }) {
           <p className="mt-2 text-sm text-neutral-600">
             Ask whoever sent it for a fresh one.
           </p>
+          {/* "/" not "/install" (July 31): a signed-out visitor lands on
+              sign-in, an anon lands on the GuestHome wall — both are the
+              sign-up road, not a generic install page. */}
           <a
-            href="/install"
+            href="/"
             className="mt-5 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white"
           >
-            Get Flanit
+            Join Flanit
           </a>
         </div>
       </div>
@@ -565,22 +568,19 @@ export function CollectScreen({ token }) {
                     ? "Photo added"
                     : `${landedCount} photos added`}
                 </p>
+                {/* ONE road for anons: sign up (July 31, Mark: "remove this
+                    from anon users at all gates — we want them to sign up").
+                    The old "or get the app" install link let the highest-
+                    intent moment leak into a generic install page with no
+                    identity attached. */}
                 {me.isAnon && claimPhase === null && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setClaimPhase("email")}
-                      className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white active:scale-95 transition"
-                    >
-                      See all the photos
-                    </button>
-                    <a
-                      href="/install"
-                      className="ml-3 text-xs font-medium text-neutral-500 underline underline-offset-2"
-                    >
-                      or get the app
-                    </a>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => setClaimPhase("email")}
+                    className="mt-3 inline-block rounded-full bg-[#455d3b] px-5 py-2.5 text-sm font-medium text-white active:scale-95 transition"
+                  >
+                    See all the photos
+                  </button>
                 )}
                 {me.isAnon && claimPhase === "email" && (
                   <div className="mt-3">

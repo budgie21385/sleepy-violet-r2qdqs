@@ -3134,16 +3134,9 @@ if (authLoading || guestLoading) {
                         No password — we email you a link
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => goToMainApp("map")}
-                      className="mt-3 w-full text-center text-sm text-neutral-500"
-                    >
-                      Just looking?{" "}
-                      <span className="font-medium text-[#455d3b]">
-                        Explore Flanit ›
-                      </span>
-                    </button>
+                    {/* "Just looking? Explore Flanit" removed July 31 (Mark:
+                        no escape hatches for anons at gates — we want them to
+                        sign up). It routed to the anon wall anyway. */}
                   </div>
                 ) : (
                   <div className="mt-6 rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
