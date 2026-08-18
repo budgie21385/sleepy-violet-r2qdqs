@@ -3,6 +3,7 @@
 // the host's "We're going here" decision (shared decided_venue_id mechanism).
 // Includes a one-shot confetti burst on the match reveal. Extracted from App.js.
 import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
 import { sendPush } from "../lib/push";
 import { Check, Shuffle } from "lucide-react";
@@ -491,8 +492,13 @@ export function SessionResultsView({
           userId={userId}
         />
       )}
-      {/* THE SCHEDULER — over the venue card (z above MapVenueSheet's 3100). */}
-      {scheduler && (
+      {/* THE SCHEDULER — over the venue card. PORTALED to body (the card
+          portals too, so an in-tree overlay is trapped in this screen's
+          stacking context and paints UNDERNEATH regardless of z — Mark's
+          field report, and the same class as the July upload-tile bug).
+          pb-28 keeps the CTA clear of the bottom tab bar. */}
+      {scheduler &&
+        createPortal(
         <div className="fixed inset-0 z-[4200] flex items-end justify-center sm:items-center">
           <button
             type="button"
@@ -500,7 +506,7 @@ export function SessionResultsView({
             onClick={() => setScheduler(null)}
             className="absolute inset-0 bg-black/40"
           />
-          <div className="relative w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 shadow-xl">
+          <div className="relative w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 pb-28 sm:pb-5 shadow-xl max-h-[85vh] overflow-y-auto">
             {scheduler.step === 1 ? (
               <>
                 <h2 className="text-xl font-semibold tracking-tight">
@@ -601,7 +607,8 @@ export function SessionResultsView({
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
