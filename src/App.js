@@ -357,12 +357,15 @@ export default function RestaurantSwipeMVP() {
   const [sessionCreatedAt, setSessionCreatedAt] = useState(null);
   // SCHEDULER → ALBUM handoff (Aug 1): "Set up the album" carries the decided
   // venue + chosen date into the Been add form, prefilled. "" date = tonight.
-  const [nightPrefill, setNightPrefill] = useState(null); // {venue, date}
-  function scheduleNight(venue, dateStr) {
+  const [nightPrefill, setNightPrefill] = useState(null); // {venue, date, invitees}
+  function scheduleNight(venue, dateStr, inviteeIds) {
     if (!venue) return;
     setNotifSessionId(null); // close the sessions overlay if we're in it
     setCardVenue(null);
-    setNightPrefill({ venue, date: dateStr || "" });
+    // invitees: session friends to auto-tag onto the created night (Aug 1,
+    // Mark: "when someone creates an album and there is a flanit user on
+    // the post, it should automatically invite that user to the card").
+    setNightPrefill({ venue, date: dateStr || "", invitees: inviteeIds || [] });
     setTab("profile"); // Been lives under Profile; ProfileTab opens it
   }
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
@@ -1615,14 +1618,18 @@ useEffect(() => {
         if (allSessIds.length > 0) {
           const { data: sess } = await supabase
             .from("match_sessions")
-            .select("id, decided_venue_id, event_at, updated_at")
+            .select("id, decided_venue_id, decided_for, event_at, updated_at")
             .in("id", allSessIds)
             .not("decided_venue_id", "is", null);
           const now = Date.now();
           const WEEK = 7 * 24 * 60 * 60 * 1000;
+          // Mirrors ActivityDrawer's nudgeRef: the plan's when beats the
+          // decide moment; upcoming plans stay silent until they happen.
+          const nudgeRef = (s) =>
+            new Date(s.decided_for || s.event_at || s.updated_at).getTime();
           const pre = (sess || []).filter((s) => {
             if (doneSet.has(s.id)) return false;
-            const ref = new Date(s.event_at || s.updated_at).getTime();
+            const ref = nudgeRef(s);
             return ref <= now && now - ref < 16 * 24 * 60 * 60 * 1000;
           });
           let typeById = {};
@@ -1639,11 +1646,31 @@ useEffect(() => {
             );
           }
           const cands = pre.filter((s) => {
-            const ref = new Date(s.event_at || s.updated_at).getTime();
-            const start =
-              typeById[s.decided_venue_id] === "cafe"
-                ? afternoonAfter(ref)
-                : followingMonday(ref);
+            const ref = nudgeRef(s);
+            // Dated plan → the morning after (mirrors the drawer). Café
+            // test made loose here too — the drawer's July 31 fix (case /
+            // "Coffee shop" variants) never reached this mirror.
+            const t = (typeById[s.decided_venue_id] || "").toLowerCase();
+            const dated =
+              s.decided_for &&
+              new Date(s.decided_for).getTime() -
+                new Date(s.updated_at).getTime() >
+                60 * 60 * 1000;
+            const start = dated
+              ? (() => {
+                  const d = new Date(ref);
+                  return new Date(
+                    d.getFullYear(),
+                    d.getMonth(),
+                    d.getDate() + 1,
+                    10,
+                    0,
+                    0
+                  ).getTime();
+                })()
+              : t.includes("caf") || t.includes("coffee")
+              ? afternoonAfter(ref)
+              : followingMonday(ref);
             return now >= start && now < start + WEEK;
           });
           if (cands.length > 0) {

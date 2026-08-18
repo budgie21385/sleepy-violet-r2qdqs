@@ -749,9 +749,16 @@ export function SessionResultsView({
                           scheduler.when === "date" && scheduler.dateTime
                             ? scheduler.dateTime.slice(0, 10)
                             : "";
+                        // AUTO-INVITE (Aug 1, Mark: a flanit user on the
+                        // post is invited to the card automatically) — the
+                        // session's people ride along; BeenScreen tags them
+                        // on the created night (standard consent flow).
+                        const invitees = (participants || [])
+                          .filter((p) => p.user_id && p.user_id !== userId)
+                          .map((p) => p.user_id);
                         setScheduler(null);
                         setDetailVenue(null);
-                        onScheduleNight(v, dateStr);
+                        onScheduleNight(v, dateStr, invitees);
                       }}
                       className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
                     >

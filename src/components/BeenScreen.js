@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, MapPin, Home } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { sendPush } from "../lib/push";
 import { whenAgo } from "../lib/checkins";
 import {
   searchPlaces,
@@ -79,6 +80,10 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
 
   const [addGoogle, setAddGoogle] = useState([]); // Google fallback rows
   const [addingPlaceId, setAddingPlaceId] = useState(null);
+  // Session friends riding the scheduler prefill — auto-tagged onto the
+  // night on save (Aug 1, Mark: a flanit user on the post gets invited to
+  // the card automatically).
+  const [addInvitees, setAddInvitees] = useState([]);
 
   // SCHEDULER PREFILL (Aug 1): "Set up the album" from a decided session
   // opens this form with the venue locked in and the chosen date set ("" =
@@ -89,6 +94,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     setAddSearching(false);
     if (prefillNight.date) setAddDate(prefillNight.date);
     else setAddDate(new Date().toISOString().slice(0, 10));
+    setAddInvitees(prefillNight.invitees || []);
     setAddOpen(true);
     onPrefillConsumed?.();
     // Consumes the prop exactly once per handoff.
@@ -154,6 +160,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     setAddVenues([]);
     setAddSearching(true);
     setAddSaving(false);
+    setAddInvitees([]);
   }
 
   async function confirmAddNight() {
@@ -267,6 +274,37 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             (a, b) => new Date(b.created_at) - new Date(a.created_at)
           )
         );
+      }
+    }
+
+    // AUTO-INVITE the session's people onto the night (Aug 1, Mark). Tags
+    // land on the ROOT check-in — the cluster merge already folds legs and
+    // twins into one card, so one tag covers the whole night. Standard
+    // consent flow: pending tag + push; their accept adds it to their Been.
+    // 23505 = already tagged or self-requested — leave it alone, quietly.
+    if (addInvitees.length > 0) {
+      const future = new Date(act.created_at).getTime() > Date.now();
+      const dateTxt = new Date(act.created_at).toLocaleDateString("en-AU", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      });
+      for (const uid of addInvitees) {
+        if (!uid || uid === userId) continue;
+        const { error: tagErr } = await supabase
+          .from("activity_tags")
+          .insert({ activity_id: act.id, tagged_user_id: uid });
+        if (!tagErr) {
+          sendPush(
+            uid,
+            future ? "You're on the plan 🎉" : "You've been checked in",
+            future
+              ? `${label || first.name} · ${dateTxt} — accept to join the night`
+              : `${label || first.name} — accept to add it to your Been list`
+          );
+        } else if (tagErr.code !== "23505") {
+          console.error("Auto-invite failed:", tagErr);
+        }
       }
     }
 

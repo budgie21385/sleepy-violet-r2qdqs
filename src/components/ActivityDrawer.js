@@ -55,6 +55,21 @@ function afternoonAfter(ts) {
   ).getTime();
   return ts < three ? three : ts + 2 * 60 * 60 * 1000;
 }
+
+// DATED plans ask the day after the night (Aug 1, Mark: "If we have a date
+// we should also ask them the day after — did you go here"). 10am local:
+// late enough to be polite, early enough that the night is fresh.
+function morningAfter(ts) {
+  const d = new Date(ts);
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate() + 1,
+    10,
+    0,
+    0
+  ).getTime();
+}
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
@@ -767,16 +782,21 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const doneSet = readNudgesDone();
       const { data: sess } = await supabase
         .from("match_sessions")
-        .select("id, name, decided_venue_id, event_at, updated_at")
+        .select("id, name, decided_venue_id, decided_for, event_at, updated_at")
         .in("id", sessIds)
         .not("decided_venue_id", "is", null);
       const now = Date.now();
       const WEEK = 7 * 24 * 60 * 60 * 1000;
+      // The outing's reference time: the PLAN'S when (decided_for) beats the
+      // decide moment — a Tuesday plan locked on Sunday should nudge off
+      // Tuesday, not Sunday. ref <= now keeps upcoming plans silent.
+      const nudgeRef = (s) =>
+        new Date(s.decided_for || s.event_at || s.updated_at).getTime();
       // Loose prefilter — the real window depends on the VENUE TYPE (café =
       // same afternoon, else following Monday), decided per candidate below.
       const candidates = (sess || []).filter((s) => {
         if (doneSet.has(s.id)) return false;
-        const ref = new Date(s.event_at || s.updated_at).getTime();
+        const ref = nudgeRef(s);
         return ref <= now && now - ref < 16 * 24 * 60 * 60 * 1000;
       });
       if (candidates.length === 0) return nudges;
@@ -805,7 +825,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         );
       const nudgeVenById = new Map((nudgeVens || []).map((v) => [v.id, v]));
       for (const s of candidates) {
-        const ref = new Date(s.event_at || s.updated_at).getTime();
+        const ref = nudgeRef(s);
         const went = (myCheckins || []).some(
           (c) =>
             c.venue_id === s.decided_venue_id &&
@@ -822,7 +842,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         // behind the missing nudge was `=== "cafe"` failing on a capital C.
         const t = (v?.type || "").toLowerCase();
         const isDaytime = t.includes("caf") || t.includes("coffee");
-        const start = isDaytime
+        // DATED plan (decided_for meaningfully after the decide write) →
+        // ask the morning after the night. Right-now decides keep the
+        // outing-aware rule: café = same afternoon, else following Monday.
+        const dated =
+          s.decided_for &&
+          new Date(s.decided_for).getTime() -
+            new Date(s.updated_at).getTime() >
+            60 * 60 * 1000;
+        const start = dated
+          ? morningAfter(ref)
+          : isDaytime
           ? afternoonAfter(ref)
           : followingMonday(ref).getTime();
         if (now < start || now >= start + WEEK) continue;
