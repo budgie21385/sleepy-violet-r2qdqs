@@ -23,6 +23,7 @@ import { Turnstile } from "@marsidev/react-turnstile";
 import { supabase } from "../supabaseClient";
 import { MapPin, Users, Image as ImageIcon } from "lucide-react";
 import { SIGNED_URL_TTL } from "../lib/photos";
+import { realName } from "../lib/names";
 
 // Same public site key as App.js / CollectScreen (bot gate on auth).
 const TURNSTILE_SITE_KEY = "0x4AAAAAADTF1P7KXWBPldrU";
@@ -127,14 +128,26 @@ export function GuestHome({ userId, displayName, onSignOut }) {
         });
         if (cErr) console.error("Claim reassign failed:", cErr);
       }
-      // Name rule, same as CollectScreen: the signup trigger seeds display_name
-      // from the email local part, so a brand-new account takes the door name
-      // instead. An account they already had is never touched.
-      const isNew =
-        data?.user?.created_at &&
-        Date.now() - new Date(data.user.created_at).getTime() < 10 * 60 * 1000;
-      if (displayName && isNew) {
-        await supabase.rpc("set_guest_name", { p_name: displayName });
+      // Name rule v2 (July 31, same as CollectScreen/session gate): ask the
+      // profile itself instead of inferring account age — a display_name
+      // that's empty, "New user", or the email's local part is the trigger's
+      // seed, so the carried name wins. A chosen name is never touched.
+      const newUid = data?.user?.id;
+      if (displayName && newUid) {
+        const { data: fp } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("id", newUid)
+          .maybeSingle();
+        const localPart = email.trim().split("@")[0].trim().toLowerCase();
+        const cur = (fp?.display_name || "").trim().toLowerCase();
+        const seeded = !realName(fp?.display_name) || cur === localPart;
+        if (seeded) {
+          const { error: nErr } = await supabase.rpc("set_guest_name", {
+            p_name: displayName,
+          });
+          if (nErr) console.error("set_guest_name after claim failed:", nErr);
+        }
       }
       // Full reload rather than a state flip: App re-mounts against a real
       // session and picks up anything parked for it — a /u/@handle invite in

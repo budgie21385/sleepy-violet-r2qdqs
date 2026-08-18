@@ -347,17 +347,26 @@ export function CollectScreen({ token }) {
         });
         if (cErr) console.error("Claim reassign failed:", cErr);
       }
-      // Name rule (Mark, July 25 — "Flynn" became "mark+event"): the
-      // signup trigger seeds display_name from the EMAIL local part, so
-      // "only if empty" never fired. Instead: BRAND-NEW account (created
-      // by this very code-send) → the door name wins. Existing account →
-      // never touched, whatever they have is theirs.
-      const isNewAccount =
-        data?.user?.created_at &&
-        Date.now() - new Date(data.user.created_at).getTime() <
-          10 * 60 * 1000;
-      if (displayName && isNewAccount) {
-        await supabase.rpc("set_guest_name", { p_name: displayName });
+      // Name rule v2 (July 31 — the session gate proved the created_at
+      // "is it new?" inference can silently answer wrong; three test runs).
+      // Ask the profile itself: a name that's empty, "New user", or the
+      // email's local part is the TRIGGER's seed, so the door name wins.
+      // A name a person actually chose is never touched.
+      if (displayName) {
+        const { data: fp } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("id", uid)
+          .maybeSingle();
+        const localPart = claimEmail.trim().split("@")[0].trim().toLowerCase();
+        const cur = (fp?.display_name || "").trim().toLowerCase();
+        const seeded = !realName(fp?.display_name) || cur === localPart;
+        if (seeded) {
+          const { error: nErr } = await supabase.rpc("set_guest_name", {
+            p_name: displayName,
+          });
+          if (nErr) console.error("set_guest_name after claim failed:", nErr);
+        }
       }
       // They're in the night now: twin check-in (Been + avatar row) and a
       // "joined" push to everyone already on the album.
