@@ -620,6 +620,8 @@ export default function RestaurantSwipeMVP() {
   const [guestShortlistVenues, setGuestShortlistVenues] = useState([]);
   // Host's final pick for this session — polled on the guest "Sent" screen.
   const [guestDecidedVenueId, setGuestDecidedVenueId] = useState(null);
+  // The plan's WHEN (decided_for, Aug 1) — shown wherever the decision shows.
+  const [guestDecidedFor, setGuestDecidedFor] = useState(null);
   // Host's saved list ("My List") for a concurrent source='list' session.
   const [guestListVenues, setGuestListVenues] = useState([]);
   const [guestLikes, setGuestLikes] = useState([]);
@@ -799,12 +801,13 @@ useEffect(() => {
     function poll() {
       supabase
         .from("match_sessions")
-        .select("decided_venue_id")
+        .select("decided_venue_id, decided_for")
         .eq("id", guestSessionId)
         .single()
         .then(({ data }) => {
           if (cancelled) return;
           setGuestDecidedVenueId(data?.decided_venue_id ?? null);
+          setGuestDecidedFor(data?.decided_for ?? null);
         });
     }
     poll();
@@ -1112,7 +1115,7 @@ useEffect(() => {
       const [{ data: sess }, { data: likes }] = await Promise.all([
         supabase
           .from("match_sessions")
-          .select("decided_venue_id")
+          .select("decided_venue_id, decided_for")
           .eq("id", guestSessionId)
           .maybeSingle(),
         supabase.rpc("get_session_likes", { p_session_id: guestSessionId }),
@@ -1132,6 +1135,7 @@ useEffect(() => {
       if (cancelled) return;
       setSplashEnd({
         decidedName: sess?.decided_venue_id ? decidedName || "the spot" : null,
+        decidedFor: sess?.decided_for || null,
         likesCount: (likes || []).length,
       });
     })();
@@ -3505,7 +3509,17 @@ if (authLoading || guestLoading) {
             </h1>
             <p className="mt-2 text-sm text-neutral-600">
               {decidedName
-                ? "The plan is locked — see you there."
+                ? guestDecidedFor &&
+                  new Date(guestDecidedFor).getTime() > Date.now() + 60 * 60 * 1000
+                  ? `${new Date(guestDecidedFor).toLocaleDateString("en-AU", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "short",
+                    })} · ${new Date(guestDecidedFor).toLocaleTimeString("en-AU", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })} — see you there.`
+                  : "The plan is locked — see you there."
                 : matchName
                   ? `Everyone liked it. ${hostName} locks it in.`
                   : resultsAreVotes
@@ -3630,6 +3644,19 @@ if (authLoading || guestLoading) {
                       <span className="font-semibold text-[#2f3f29]">
                         {splashEnd.decidedName}
                       </span>
+                      {splashEnd.decidedFor &&
+                      new Date(splashEnd.decidedFor).getTime() >
+                        Date.now() + 60 * 60 * 1000
+                        ? `, ${new Date(splashEnd.decidedFor).toLocaleDateString(
+                            "en-AU",
+                            { weekday: "long", day: "numeric", month: "short" }
+                          )} · ${new Date(
+                            splashEnd.decidedFor
+                          ).toLocaleTimeString("en-AU", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}`
+                        : ""}
                       . See you there.
                     </p>
                   ) : (

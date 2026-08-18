@@ -207,6 +207,22 @@ export function SessionResultsView({
       return;
     }
     setDecidedVenueId(scheduler.venueId);
+    // Persist the WHEN (Aug 1) — without this the plan's time lived only in
+    // push text and the share URL, and no in-app surface could show it.
+    // Fire-and-forget; hosts already update match_sessions directly.
+    supabase
+      .from("match_sessions")
+      .update({
+        decided_for:
+          scheduler.when === "date" && scheduler.dateTime
+            ? new Date(scheduler.dateTime).toISOString()
+            : new Date().toISOString(),
+      })
+      .eq("id", sessionId)
+      .eq("host_user_id", userId)
+      .then(({ error: dfErr }) => {
+        if (dfErr) console.error("decided_for write failed:", dfErr);
+      });
     // Anyone not personally told gets the push now — Done means everyone knows.
     const vName = venueById.get(scheduler.venueId)?.name || "the spot";
     for (const p of participants || []) {
