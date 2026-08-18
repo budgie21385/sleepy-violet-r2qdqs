@@ -88,6 +88,40 @@ export function PublicVenuePage({ venueId }) {
 
         {venue && (
           <>
+            {/* PLAN BANNER (Aug 1) — the scheduler's share link carries the
+                when (?when=<iso>), so people not on Flanit see the PLAN, not
+                just the venue: "a time and date along with the business card"
+                (Mark). No param = the plain venue card, unchanged. */}
+            {(() => {
+              let when = null;
+              try {
+                const raw = new URLSearchParams(window.location.search).get("when");
+                if (raw) {
+                  const d = new Date(raw);
+                  if (!isNaN(d.getTime())) when = d;
+                }
+              } catch {}
+              if (!when) return null;
+              return (
+                <div className="mb-4 rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#455d3b]">
+                    We're going here
+                  </p>
+                  <p className="mt-0.5 text-lg font-semibold text-[#2f3f29]">
+                    {when.toLocaleDateString("en-AU", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                    })}{" "}
+                    ·{" "}
+                    {when.toLocaleTimeString("en-AU", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              );
+            })()}
             <div className="rounded-[2rem] bg-white p-5 shadow-sm border border-neutral-100">
               <VenueHeroCarousel venue={venue} />
               {/* Name fallback for venues with no photo (hero renders null). */}

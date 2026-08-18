@@ -126,20 +126,71 @@ export function SessionResultsView({
   //   step 2: locked ✓ → Share the plan (link with details, for the group
   //           chat) → "Want the album ready?" → Been add form, prefilled
   // The in-app tell is automatic: the decide push now carries the WHEN.
-  const [scheduler, setScheduler] = useState(null); // {venueId, step, when, date}
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // One sheet, Mark's Aug 1 mock: when (+TIME), Friends-in-session with
+  // per-person "Tell them" pushes, a copyable public link that CARRIES the
+  // plan (?when= → PublicVenuePage shows a plan banner), Done to lock.
+  const [scheduler, setScheduler] = useState(null); // {venueId, step, when, dateTime, told:Set}
 
   function openScheduler(venueId) {
     if (!canDecide) return;
     const v = venueById.get(venueId);
     if (v) setDetailVenue(v); // the card sits UNDER the sheet (Mark's spec)
-    setScheduler({ venueId, step: 1, when: "now", date: "" });
+    setScheduler({
+      venueId,
+      step: 1,
+      when: "now",
+      dateTime: "",
+      told: new Set(),
+    });
   }
 
   function schedulerWhenText(s) {
-    if (s.when === "now" || !s.date) return "tonight";
-    const d = new Date(`${s.date}T20:00:00`);
-    return d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" });
+    if (s.when === "now" || !s.dateTime) return "tonight";
+    const d = new Date(s.dateTime);
+    const day = d.toLocaleDateString("en-AU", {
+      weekday: "long",
+      day: "numeric",
+      month: "short",
+    });
+    const time = d.toLocaleTimeString("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${day} · ${time}`;
+  }
+
+  function planUrl(s) {
+    const base = `https://flanit.co/v/${s.venueId}`;
+    return s.when === "date" && s.dateTime
+      ? `${base}?when=${encodeURIComponent(new Date(s.dateTime).toISOString())}`
+      : base;
+  }
+
+  function pushBody(s) {
+    return s.when === "now" || !s.dateTime
+      ? "The plan is locked — see you there"
+      : `Locked in for ${schedulerWhenText(s)}`;
+  }
+
+  // Per-friend push, Mark's mock — "Tell them" carries the details as
+  // currently chosen. Done re-pushes anyone not yet told, so nobody's missed.
+  function tellFriend(uid) {
+    if (!scheduler || !uid) return;
+    const vName = venueById.get(scheduler.venueId)?.name || "the spot";
+    sendPush(uid, `${vName} it is 🎉`, pushBody(scheduler));
+    setScheduler((s) =>
+      s ? { ...s, told: new Set([...s.told, uid]) } : s
+    );
+  }
+
+  async function copyPlanLink() {
+    if (!scheduler) return;
+    try {
+      await navigator.clipboard.writeText(planUrl(scheduler));
+      showToast?.("Link copied");
+    } catch {
+      showToast?.("Couldn't copy — long-press the link");
+    }
   }
 
   async function lockItIn() {
@@ -156,43 +207,19 @@ export function SessionResultsView({
       return;
     }
     setDecidedVenueId(scheduler.venueId);
-    // Tell everyone where AND WHEN — lock-screen push per participant.
+    // Anyone not personally told gets the push now — Done means everyone knows.
     const vName = venueById.get(scheduler.venueId)?.name || "the spot";
-    const whenBody =
-      scheduler.when === "now" || !scheduler.date
-        ? "The plan is locked — see you there"
-        : `Locked in for ${schedulerWhenText(scheduler)}`;
     for (const p of participants || []) {
-      if (p.user_id && p.user_id !== userId) {
-        sendPush(p.user_id, `${vName} it is 🎉`, whenBody);
+      if (
+        p.user_id &&
+        p.user_id !== userId &&
+        !scheduler.told.has(p.user_id)
+      ) {
+        sendPush(p.user_id, `${vName} it is 🎉`, pushBody(scheduler));
       }
     }
     setScheduler((s) => (s ? { ...s, step: 2 } : s));
   }
-
-  async function sharePlan() {
-    if (!scheduler) return;
-    const vName = venueById.get(scheduler.venueId)?.name || "the spot";
-    const when =
-      scheduler.when === "now" || !scheduler.date
-        ? ""
-        : ` on ${schedulerWhenText(scheduler)}`;
-    const text = `We're going to ${vName}${when} 🎉`;
-    const url = `https://flanit.co/v/${scheduler.venueId}`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ text, url });
-      } else {
-        await navigator.clipboard.writeText(`${text} ${url}`);
-        showToast?.("Copied — paste it in the group chat");
-      }
-    } catch {
-      /* share sheet closed — their call */
-    }
-  }
-
-  // Legacy path kept for nothing — decide now always goes through the
-  // scheduler. (Removed decideVenue; rows call openScheduler.)
 
   // Clear per-row selections when switching tabs.
   useEffect(() => {
@@ -517,7 +544,7 @@ export function SessionResultsView({
                   <button
                     type="button"
                     onClick={() =>
-                      setScheduler((s) => ({ ...s, when: "now", date: "" }))
+                      setScheduler((s) => ({ ...s, when: "now", dateTime: "" }))
                     }
                     className={`flex-1 rounded-2xl border py-3 text-sm font-medium transition ${
                       scheduler.when === "now"
@@ -527,34 +554,101 @@ export function SessionResultsView({
                   >
                     Right now
                   </button>
-                  <input
-                    type="date"
-                    min={todayStr}
-                    value={scheduler.date}
-                    onChange={(e) =>
-                      setScheduler((s) => ({
-                        ...s,
-                        date: e.target.value,
-                        when: e.target.value ? "date" : "now",
-                      }))
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setScheduler((s) => ({ ...s, when: "date" }))
                     }
-                    className={`flex-1 appearance-none rounded-2xl border px-3 py-3 text-sm font-medium focus:outline-none ${
+                    className={`flex-1 rounded-2xl border py-3 text-sm font-medium transition ${
                       scheduler.when === "date"
                         ? "border-[#455d3b] bg-[#edf2eb] text-[#2f3f29]"
                         : "border-neutral-200 bg-white text-neutral-600"
                     }`}
-                  />
+                  >
+                    {scheduler.when === "date" && scheduler.dateTime
+                      ? schedulerWhenText(scheduler)
+                      : "Choose date"}
+                  </button>
                 </div>
-                <p className="mt-3 text-xs text-neutral-500">
-                  Everyone on the session gets told in the app.
-                </p>
+                {/* Date AND time (Mark's mock note: "this option should also
+                    add a time"). datetime-local gives both in one native
+                    picker; text-base keeps iOS from zooming. */}
+                {scheduler.when === "date" && (
+                  <input
+                    type="datetime-local"
+                    value={scheduler.dateTime}
+                    onChange={(e) =>
+                      setScheduler((s) => ({ ...s, dateTime: e.target.value }))
+                    }
+                    className="mt-2 w-full appearance-none rounded-2xl border border-[#cdd9c6] bg-white px-3 py-3 text-base focus:outline-none focus:border-[#455d3b]"
+                  />
+                )}
+
+                {/* Friends in session — each gets the details as a push. */}
+                {(participants || []).filter(
+                  (p) => p.user_id && p.user_id !== userId
+                ).length > 0 && (
+                  <div className="mt-5">
+                    <p className="text-xs font-medium text-neutral-500">
+                      Friends in session
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {(participants || [])
+                        .filter((p) => p.user_id && p.user_id !== userId)
+                        .map((p) => (
+                          <div
+                            key={p.user_id}
+                            className="flex items-center gap-3"
+                          >
+                            <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                              {p.display_name || "A guest"}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={scheduler.told.has(p.user_id)}
+                              onClick={() => tellFriend(p.user_id)}
+                              className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                                scheduler.told.has(p.user_id)
+                                  ? "bg-[#edf2eb] text-[#455d3b]"
+                                  : "bg-[#455d3b] text-white active:scale-95"
+                              }`}
+                            >
+                              {scheduler.told.has(p.user_id) ? "Told ✓" : "Tell them"}
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Public link — carries the WHEN, so the page shows the plan,
+                    not just the venue (Mark: "a time and date along with the
+                    business card"). */}
+                <div className="mt-5">
+                  <p className="text-xs font-medium text-neutral-500">
+                    Share details with people not on Flanit
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="flex-1 min-w-0 truncate rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-xs text-neutral-500">
+                      {planUrl(scheduler).replace("https://", "")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={copyPlanLink}
+                      className="shrink-0 rounded-full bg-[#455d3b] px-4 py-2 text-xs font-medium text-white active:scale-95 transition"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  disabled={deciding}
+                  disabled={deciding || (scheduler.when === "date" && !scheduler.dateTime)}
                   onClick={lockItIn}
-                  className="mt-4 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition disabled:opacity-60"
+                  className="mt-5 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition disabled:opacity-60"
                 >
-                  {deciding ? "Locking…" : "Lock it in"}
+                  {deciding ? "Locking…" : "Done"}
                 </button>
               </>
             ) : (
@@ -565,15 +659,8 @@ export function SessionResultsView({
                 <p className="mt-1 text-sm text-neutral-600">
                   {venueById.get(scheduler.venueId)?.name || "The spot"},{" "}
                   {scheduler.when === "now" ? "tonight" : schedulerWhenText(scheduler)}
-                  . Everyone's been told in the app.
+                  . Everyone's been told.
                 </p>
-                <button
-                  type="button"
-                  onClick={sharePlan}
-                  className="mt-4 w-full rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 font-medium text-[#455d3b] active:scale-[0.98] transition"
-                >
-                  Share the plan — send the link
-                </button>
                 {onScheduleNight && (
                   <div className="mt-4 rounded-2xl border border-neutral-200 p-4">
                     <p className="text-sm font-semibold">Want the album ready?</p>
@@ -586,7 +673,9 @@ export function SessionResultsView({
                       onClick={() => {
                         const v = venueById.get(scheduler.venueId);
                         const dateStr =
-                          scheduler.when === "date" ? scheduler.date : "";
+                          scheduler.when === "date" && scheduler.dateTime
+                            ? scheduler.dateTime.slice(0, 10)
+                            : "";
                         setScheduler(null);
                         setDetailVenue(null);
                         onScheduleNight(v, dateStr);
