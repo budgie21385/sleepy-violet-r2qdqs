@@ -300,7 +300,6 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             id: `dec_${s.id}`,
             sessionId: s.id,
             venueName,
-            venueObj: v || null, // full venue → tap opens its card
             sessionName: s.name || "your session",
             decidedFor: s.decided_for || null, // the plan's WHEN (Aug 1)
             timestamp: s.updated_at,
@@ -2217,11 +2216,10 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
     return (
       <button
         type="button"
-        onClick={() =>
-          item.venueObj
-            ? onOpenVenue?.(item.venueObj)
-            : onOpenSession?.(item.sessionId)
-        }
+        // The board, not the business card (Aug 1, Mark) — tap lands on the
+        // results list with the pick pinned + highlighted and the plan's
+        // time/date banner above it. Where + when in one view.
+        onClick={() => onOpenSession?.(item.sessionId)}
         className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
       >
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">

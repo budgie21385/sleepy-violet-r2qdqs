@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
 import { sendPush } from "../lib/push";
-import { Check, Shuffle } from "lucide-react";
+import { Check, Shuffle, CalendarDays } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 
@@ -101,6 +101,8 @@ export function SessionResultsView({
   // Host's final pick for this session ("We're going here") — reuses the same
   // decided_venue_id mechanism as the curated board.
   const [decidedVenueId, setDecidedVenueId] = useState(null);
+  // The plan's WHEN (Aug 1) — drives the date banner over the pinned pick.
+  const [decidedFor, setDecidedFor] = useState(null);
   const [deciding, setDeciding] = useState(false);
   const canDecide = !!sessionId && !!userId && userId === hostUserId;
 
@@ -109,11 +111,13 @@ export function SessionResultsView({
     let cancelled = false;
     supabase
       .from("match_sessions")
-      .select("decided_venue_id")
+      .select("decided_venue_id, decided_for")
       .eq("id", sessionId)
       .single()
       .then(({ data }) => {
-        if (!cancelled) setDecidedVenueId(data?.decided_venue_id ?? null);
+        if (cancelled) return;
+        setDecidedVenueId(data?.decided_venue_id ?? null);
+        setDecidedFor(data?.decided_for ?? null);
       });
     return () => {
       cancelled = true;
@@ -210,14 +214,14 @@ export function SessionResultsView({
     // Persist the WHEN (Aug 1) — without this the plan's time lived only in
     // push text and the share URL, and no in-app surface could show it.
     // Fire-and-forget; hosts already update match_sessions directly.
+    const decidedForIso =
+      scheduler.when === "date" && scheduler.dateTime
+        ? new Date(scheduler.dateTime).toISOString()
+        : new Date().toISOString();
+    setDecidedFor(decidedForIso); // banner appears without a refetch
     supabase
       .from("match_sessions")
-      .update({
-        decided_for:
-          scheduler.when === "date" && scheduler.dateTime
-            ? new Date(scheduler.dateTime).toISOString()
-            : new Date().toISOString(),
-      })
+      .update({ decided_for: decidedForIso })
       .eq("id", sessionId)
       .eq("host_user_id", userId)
       .then(({ error: dfErr }) => {
@@ -315,6 +319,28 @@ export function SessionResultsView({
       .filter(Boolean);
     emptyMessage = "You didn't like any places in this session.";
   }
+
+  // THE PICK LEADS THE LIST (Aug 1, Mark: drawer tap should land on the
+  // board "with that venue highlighted and sitting at the top of the list
+  // of matches and the time and date sitting above it"). Pin in both views
+  // so the plan is never buried.
+  if (decidedVenueId) {
+    const di = rows.findIndex((r) => r.venue.id === decidedVenueId);
+    if (di > 0) rows.unshift(rows.splice(di, 1)[0]);
+  }
+  // The plan's when, rendered over the pinned card — only a real FUTURE
+  // slot (a right-now decide's timestamp says nothing the highlight doesn't).
+  const planWhen =
+    decidedFor && new Date(decidedFor).getTime() > Date.now() + 60 * 60 * 1000
+      ? `${new Date(decidedFor).toLocaleDateString("en-AU", {
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+        })} · ${new Date(decidedFor).toLocaleTimeString("en-AU", {
+          hour: "numeric",
+          minute: "2-digit",
+        })}`
+      : null;
 
   const matchesCount = (sessionMatches || []).length;
   const myLikesCount = (myLikedIds || []).length;
@@ -447,6 +473,15 @@ export function SessionResultsView({
               const isSelected = selectedIds.has(venue.id);
               return (
                 <li key={venue.id}>
+                  {/* Time and date over the pick (Aug 1, Mark) */}
+                  {decidedVenueId === venue.id && planWhen && (
+                    <div className="mb-1.5 flex items-center gap-2 rounded-xl bg-[#edf2eb] border border-[#c5d4c2] px-3 py-2">
+                      <CalendarDays size={15} className="text-[#455d3b] shrink-0" />
+                      <p className="text-sm font-medium text-[#2f4429] truncate">
+                        {planWhen}
+                      </p>
+                    </div>
+                  )}
                   <div className={`flex items-start gap-3 rounded-2xl border bg-white p-3 ${
                     decidedVenueId === venue.id
                       ? "border-[#455d3b] ring-1 ring-[#455d3b]"
