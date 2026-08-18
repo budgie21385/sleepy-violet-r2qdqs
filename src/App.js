@@ -352,6 +352,9 @@ export default function RestaurantSwipeMVP() {
   ];
   const [sessionTimeoutMins, setSessionTimeoutMins] = useState(180);
   const [sessionExpiresAt, setSessionExpiresAt] = useState(null);
+  // When the live session was created — duration changes recompute expiry
+  // from HERE (duration is a property of the session, not an increment).
+  const [sessionCreatedAt, setSessionCreatedAt] = useState(null);
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
   // null (all collapsed — the segment labels carry the current values).
   const [advTab, setAdvTab] = useState(null);
@@ -945,33 +948,34 @@ useEffect(() => {
     if (sid) setNotifSessionId(sid);
   }
 
-  // Host-side extend, shared by the waiting card's dropdown (Aug 1) and
-  // anything else that buys a session time. Extends from whichever is later —
-  // now, or the current expiry — so extending an already-expired session
-  // restarts the clock rather than producing a deadline still in the past.
-  async function extendSessionBy(mins) {
+  // Set the live session's DURATION (Aug 1, Mark: "Duration time: 3 hours" —
+  // a property shown and changed in place, not an "extend by" increment).
+  // Expiry recomputes from creation, so picking a longer duration extends and
+  // a shorter one shortens; if the new expiry is already past, the session
+  // simply ends and the existing expiry machinery takes over.
+  async function setSessionDuration(mins) {
     if (!currentSessionId || !mins) return;
-    const next = new Date(
-      Math.max(
-        Date.now(),
-        new Date(sessionExpiresAt || Date.now()).getTime()
-      ) +
-        mins * 60 * 1000
-    ).toISOString();
+    const base = new Date(sessionCreatedAt || Date.now()).getTime();
+    const next = new Date(base + mins * 60 * 1000).toISOString();
     const { error } = await supabase
       .from("match_sessions")
       .update({ expires_at: next })
       .eq("id", currentSessionId)
       .eq("host_user_id", session?.user?.id);
     if (error) {
-      console.error("Extend failed:", error);
-      showToast?.("Couldn't extend");
+      console.error("Duration change failed:", error);
+      showToast?.("Couldn't change the duration");
       return;
     }
     setSessionExpiresAt(next);
+    setSessionTimeoutMins(mins);
     const lbl =
       SESSION_DURATIONS.find(([v]) => v === mins)?.[1] || `${mins} mins`;
-    showToast?.(`Extended by ${lbl}`);
+    showToast?.(
+      new Date(next).getTime() <= Date.now()
+        ? "That time's already up — session ended"
+        : `Session set to ${lbl}`
+    );
   }
 
   // Game-end trigger for the host. Concurrent: a live match now goes STRAIGHT
@@ -2784,6 +2788,7 @@ loadAreas();
         return;
       }
       setSessionExpiresAt(data.expires_at || expiresAt.toISOString());
+      setSessionCreatedAt(data.created_at || new Date().toISOString());
       // FRESH GAME STATE AT CREATE (July 31 field test). Swipe history only
       // reset when a session ENDED through Done — a session abandoned midway
       // left markLikes/markPasses populated, so the NEXT session's deck read
@@ -4306,37 +4311,41 @@ if (authLoading || guestLoading) {
                       This card just parks the session: Done for now, with a
                       quiet Extend for the host who already knows someone
                       needs longer. */}
+                  {/* DURATION ROW (Aug 1, Mark: label and value as separate
+                      entities, value as a clear dropdown, above Done). Shows
+                      the session's duration as a property; changing it
+                      recomputes expiry from creation. text-base: sub-16px
+                      selects make iOS zoom the page. */}
+                  <div className="mt-6 flex items-center justify-between rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-left">
+                    <span className="text-sm font-medium text-neutral-700">
+                      Duration time
+                    </span>
+                    <span className="relative inline-flex items-center">
+                      <select
+                        value={sessionTimeoutMins}
+                        onChange={(e) =>
+                          setSessionDuration(Number(e.target.value))
+                        }
+                        className="appearance-none rounded-full border border-[#cdd9c6] bg-[#edf2eb] py-1.5 pl-4 pr-8 text-base font-medium text-[#455d3b] focus:outline-none"
+                      >
+                        {SESSION_DURATIONS.map(([v, lbl]) => (
+                          <option key={v} value={v}>
+                            {lbl}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="pointer-events-none absolute right-3 text-[#455d3b] text-xs">
+                        ⌄
+                      </span>
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={handleDoneSession}
-                    className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                    className="mt-3 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
                   >
                     Done for now
                   </button>
-                  {/* Prominent extend (Aug 1, Mark) — a dropdown, not a buried
-                      text link. Uncontrolled with a reset so the same option
-                      can be picked twice in a row. text-base: sub-16px selects
-                      make iOS zoom the page. */}
-                  <div className="mt-3 relative">
-                    <select
-                      defaultValue=""
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        e.target.value = "";
-                        if (v) extendSessionBy(v);
-                      }}
-                      className="w-full appearance-none rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 px-4 text-center text-base font-medium text-[#455d3b] focus:outline-none"
-                    >
-                      <option value="" disabled>
-                        Extend the session…
-                      </option>
-                      {SESSION_DURATIONS.map(([v, lbl]) => (
-                        <option key={v} value={v}>
-                          + {lbl}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                   <p className="mt-3 text-xs text-neutral-400">
                     This session lives under Profile → Sessions
                   </p>
