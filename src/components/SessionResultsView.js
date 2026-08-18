@@ -89,6 +89,10 @@ export function SessionResultsView({
   onOpenProfile,
   showConfetti = false,
   showToast,
+  // Aug 1 — "We're going here" opens the SCHEDULER instead of deciding
+  // instantly; after locking, "Set up the album" hands (venue, dateStr|"")
+  // up to App, which opens the Been add form prefilled. "" = going right now.
+  onScheduleNight,
 }) {
   const [view, setView] = useState("matches");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -115,12 +119,34 @@ export function SessionResultsView({
     };
   }, [sessionId]);
 
-  async function decideVenue(venueId) {
+  // THE SCHEDULER (Aug 1, Mark). "We're going here" no longer decides on the
+  // spot — it opens the venue card with this sheet over it:
+  //   step 1: when are you going (right now / pick a day) → Lock it in
+  //   step 2: locked ✓ → Share the plan (link with details, for the group
+  //           chat) → "Want the album ready?" → Been add form, prefilled
+  // The in-app tell is automatic: the decide push now carries the WHEN.
+  const [scheduler, setScheduler] = useState(null); // {venueId, step, when, date}
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  function openScheduler(venueId) {
     if (!canDecide) return;
+    const v = venueById.get(venueId);
+    if (v) setDetailVenue(v); // the card sits UNDER the sheet (Mark's spec)
+    setScheduler({ venueId, step: 1, when: "now", date: "" });
+  }
+
+  function schedulerWhenText(s) {
+    if (s.when === "now" || !s.date) return "tonight";
+    const d = new Date(`${s.date}T20:00:00`);
+    return d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" });
+  }
+
+  async function lockItIn() {
+    if (!scheduler || deciding) return;
     setDeciding(true);
     const { error } = await supabase.rpc("set_curated_decision", {
       p_session_id: sessionId,
-      p_venue_id: venueId,
+      p_venue_id: scheduler.venueId,
     });
     setDeciding(false);
     if (error) {
@@ -128,20 +154,44 @@ export function SessionResultsView({
       showToast?.("Couldn't save — try again");
       return;
     }
-    setDecidedVenueId(venueId);
-    showToast?.("Locked it in");
-    // Tell everyone where they're going — lock-screen push per participant
-    // (the guest end state promises exactly this nudge).
-    const vName = venueById.get(venueId)?.name || "the spot";
+    setDecidedVenueId(scheduler.venueId);
+    // Tell everyone where AND WHEN — lock-screen push per participant.
+    const vName = venueById.get(scheduler.venueId)?.name || "the spot";
+    const whenBody =
+      scheduler.when === "now" || !scheduler.date
+        ? "The plan is locked — see you there"
+        : `Locked in for ${schedulerWhenText(scheduler)}`;
     for (const p of participants || []) {
       if (p.user_id && p.user_id !== userId) {
-        sendPush(p.user_id, `${vName} it is 🎉`, "The plan is locked — see you there");
+        sendPush(p.user_id, `${vName} it is 🎉`, whenBody);
       }
     }
-    // Pop the venue card so the picker (and viewers) see the spot + can share it.
-    const v = venueById.get(venueId);
-    if (v) setDetailVenue(v);
+    setScheduler((s) => (s ? { ...s, step: 2 } : s));
   }
+
+  async function sharePlan() {
+    if (!scheduler) return;
+    const vName = venueById.get(scheduler.venueId)?.name || "the spot";
+    const when =
+      scheduler.when === "now" || !scheduler.date
+        ? ""
+        : ` on ${schedulerWhenText(scheduler)}`;
+    const text = `We're going to ${vName}${when} 🎉`;
+    const url = `https://flanit.co/v/${scheduler.venueId}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text, url });
+      } else {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        showToast?.("Copied — paste it in the group chat");
+      }
+    } catch {
+      /* share sheet closed — their call */
+    }
+  }
+
+  // Legacy path kept for nothing — decide now always goes through the
+  // scheduler. (Removed decideVenue; rows call openScheduler.)
 
   // Clear per-row selections when switching tabs.
   useEffect(() => {
@@ -408,7 +458,7 @@ export function SessionResultsView({
                       <button
                         type="button"
                         disabled={deciding || decidedVenueId === venue.id}
-                        onClick={() => decideVenue(venue.id)}
+                        onClick={() => openScheduler(venue.id)}
                         className={`shrink-0 self-center rounded-xl px-3 py-2 text-xs font-medium transition ${
                           decidedVenueId === venue.id
                             ? "bg-[#455d3b] text-white"
@@ -440,6 +490,118 @@ export function SessionResultsView({
           onHide={onHide}
           userId={userId}
         />
+      )}
+      {/* THE SCHEDULER — over the venue card (z above MapVenueSheet's 3100). */}
+      {scheduler && (
+        <div className="fixed inset-0 z-[4200] flex items-end justify-center sm:items-center">
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setScheduler(null)}
+            className="absolute inset-0 bg-black/40"
+          />
+          <div className="relative w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 shadow-xl">
+            {scheduler.step === 1 ? (
+              <>
+                <h2 className="text-xl font-semibold tracking-tight">
+                  {venueById.get(scheduler.venueId)?.name || "This spot"} it is 🎉
+                </h2>
+                <p className="mt-1 text-sm text-neutral-600">When are you going?</p>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setScheduler((s) => ({ ...s, when: "now", date: "" }))
+                    }
+                    className={`flex-1 rounded-2xl border py-3 text-sm font-medium transition ${
+                      scheduler.when === "now"
+                        ? "border-[#455d3b] bg-[#edf2eb] text-[#2f3f29]"
+                        : "border-neutral-200 bg-white text-neutral-600"
+                    }`}
+                  >
+                    Right now
+                  </button>
+                  <input
+                    type="date"
+                    min={todayStr}
+                    value={scheduler.date}
+                    onChange={(e) =>
+                      setScheduler((s) => ({
+                        ...s,
+                        date: e.target.value,
+                        when: e.target.value ? "date" : "now",
+                      }))
+                    }
+                    className={`flex-1 appearance-none rounded-2xl border px-3 py-3 text-sm font-medium focus:outline-none ${
+                      scheduler.when === "date"
+                        ? "border-[#455d3b] bg-[#edf2eb] text-[#2f3f29]"
+                        : "border-neutral-200 bg-white text-neutral-600"
+                    }`}
+                  />
+                </div>
+                <p className="mt-3 text-xs text-neutral-500">
+                  Everyone on the session gets told in the app.
+                </p>
+                <button
+                  type="button"
+                  disabled={deciding}
+                  onClick={lockItIn}
+                  className="mt-4 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition disabled:opacity-60"
+                >
+                  {deciding ? "Locking…" : "Lock it in"}
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-xl font-semibold tracking-tight">
+                  Locked in ✓
+                </h2>
+                <p className="mt-1 text-sm text-neutral-600">
+                  {venueById.get(scheduler.venueId)?.name || "The spot"},{" "}
+                  {scheduler.when === "now" ? "tonight" : schedulerWhenText(scheduler)}
+                  . Everyone's been told in the app.
+                </p>
+                <button
+                  type="button"
+                  onClick={sharePlan}
+                  className="mt-4 w-full rounded-2xl border border-[#cdd9c6] bg-[#edf2eb] py-3 font-medium text-[#455d3b] active:scale-[0.98] transition"
+                >
+                  Share the plan — send the link
+                </button>
+                {onScheduleNight && (
+                  <div className="mt-4 rounded-2xl border border-neutral-200 p-4">
+                    <p className="text-sm font-semibold">Want the album ready?</p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      We'll set up the night's card now — share the photo link
+                      ahead, and everyone's photos land in one place.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = venueById.get(scheduler.venueId);
+                        const dateStr =
+                          scheduler.when === "date" ? scheduler.date : "";
+                        setScheduler(null);
+                        setDetailVenue(null);
+                        onScheduleNight(v, dateStr);
+                      }}
+                      className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
+                    >
+                      Set up the album
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setScheduler(null)}
+                  className="mt-3 w-full text-center text-sm text-neutral-500"
+                >
+                  Not now
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </>
   );

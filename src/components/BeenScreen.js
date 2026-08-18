@@ -40,7 +40,7 @@ export function CheckinHistoryRow({ c }) {
   );
 }
 
-export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile }) {
+export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, prefillNight, onPrefillConsumed }) {
   const [rows, setRows] = useState(null); // null = loading
   const [venueById, setVenueById] = useState(() => new Map());
   // NIGHTS vs PLACES (July 31, Mark: "more of a list of locations rather than
@@ -79,6 +79,21 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
 
   const [addGoogle, setAddGoogle] = useState([]); // Google fallback rows
   const [addingPlaceId, setAddingPlaceId] = useState(null);
+
+  // SCHEDULER PREFILL (Aug 1): "Set up the album" from a decided session
+  // opens this form with the venue locked in and the chosen date set ("" =
+  // going tonight → today). Consumed once; everything stays editable.
+  useEffect(() => {
+    if (!prefillNight?.venue) return;
+    setAddVenues([prefillNight.venue]);
+    setAddSearching(false);
+    if (prefillNight.date) setAddDate(prefillNight.date);
+    else setAddDate(new Date().toISOString().slice(0, 10));
+    setAddOpen(true);
+    onPrefillConsumed?.();
+    // Consumes the prop exactly once per handoff.
+    // (prefillNight is cleared by the parent right after.)
+  }, [prefillNight]);
   // Tapping out of the search box means "I've finished typing" — the personal
   // place option steps forward at that point (Mark, July 31: the "not a venue"
   // row was too easy to read as a footnote).

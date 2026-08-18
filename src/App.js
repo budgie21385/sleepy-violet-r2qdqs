@@ -355,6 +355,16 @@ export default function RestaurantSwipeMVP() {
   // When the live session was created — duration changes recompute expiry
   // from HERE (duration is a property of the session, not an increment).
   const [sessionCreatedAt, setSessionCreatedAt] = useState(null);
+  // SCHEDULER → ALBUM handoff (Aug 1): "Set up the album" carries the decided
+  // venue + chosen date into the Been add form, prefilled. "" date = tonight.
+  const [nightPrefill, setNightPrefill] = useState(null); // {venue, date}
+  function scheduleNight(venue, dateStr) {
+    if (!venue) return;
+    setNotifSessionId(null); // close the sessions overlay if we're in it
+    setCardVenue(null);
+    setNightPrefill({ venue, date: dateStr || "" });
+    setTab("profile"); // Been lives under Profile; ProfileTab opens it
+  }
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
   // null (all collapsed — the segment labels carry the current values).
   const [advTab, setAdvTab] = useState(null);
@@ -4485,6 +4495,9 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onOpenProfile={openProfile}
           onFindFriends={() => setShowFindFriends(true)}
+          nightPrefill={nightPrefill}
+          onNightPrefillConsumed={() => setNightPrefill(null)}
+          onScheduleNight={scheduleNight}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -4551,6 +4564,7 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           initialSessionId={notifSessionId}
+          onScheduleNight={scheduleNight}
         />
       )}
       {cardVenue && (
@@ -5021,12 +5035,24 @@ function ProfileTab({
   showToast,
   onOpenProfile,
   onFindFriends,
+  nightPrefill,
+  onNightPrefillConsumed,
+  onScheduleNight,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [sessionsCount, setSessionsCount] = useState(null);
   // Been — your own check-in history (the memory ledger).
   const [showBeen, setShowBeen] = useState(false);
+
+  // Scheduler handoff (Aug 1): a decided session's "Set up the album" lands
+  // here — open Been (closing the local Sessions overlay so it can't stack)
+  // and let BeenScreen consume the prefill into its add form.
+  useEffect(() => {
+    if (!nightPrefill) return;
+    setShowSessions(false);
+    setShowBeen(true);
+  }, [nightPrefill]);
   const [beenCount, setBeenCount] = useState(null);
   // Friend graph counts for the entry card subtitle. Two queries kept simple
   // (count, head:true). Task #8 will lift requestCount to App level so the
@@ -5281,6 +5307,7 @@ function ProfileTab({
           onBack={() => setShowSessions(false)}
           showToast={showToast}
           onOpenProfile={onOpenProfile}
+          onScheduleNight={onScheduleNight}
         />
       )}
       {showBeen && (
@@ -5291,6 +5318,8 @@ function ProfileTab({
           onUnsave={onUnsave}
           onHide={onHide}
           onBack={() => setShowBeen(false)}
+          prefillNight={nightPrefill}
+          onPrefillConsumed={onNightPrefillConsumed}
           showToast={showToast}
           onOpenProfile={(uid) => {
             // Lookup renders ABOVE Been now — only close for self (your
@@ -5843,7 +5872,7 @@ function MyListScreen({
 // (`import_google_maps_prototype.js`) covers Mark's own bootstrap.
 // ImportGoogleMapsScreen moved to ./components/ImportGoogleMapsScreen.js.
 
-function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId }) {
+function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId, onScheduleNight }) {
   const [sessions, setSessions] = useState(null); // null = loading
   const [selectedSession, setSelectedSession] = useState(null);
   // True when the detail was opened via a deep-link (a tapped notification /
@@ -6341,6 +6370,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               onOpenProfile={onOpenProfile}
               showConfetti={false}
               showToast={showToast}
+              onScheduleNight={onScheduleNight}
             />
           )}
         </>
