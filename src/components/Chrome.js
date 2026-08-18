@@ -1,6 +1,7 @@
 // App chrome: the bottom tab bar, the floating add-button, and the toast.
 // Props-only presentational components extracted from App.js.
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, Zap, Send } from "lucide-react";
 
 export function FloatingActionButton({
@@ -134,7 +135,11 @@ export function Toast({ message, onDismiss }) {
 }
 
 export function BottomTabBar({ tab, setTab, unreadCount = 0, profileDot = false }) {
-  return (
+  // PORTALED to body (Aug 1, Mark: "bottom menu is broken when scrolling") —
+  // on iOS, a `fixed` element inside any transformed/filtered ancestor anchors
+  // to that ANCESTOR instead of the viewport, so the bar scrolled away mid-
+  // page. Rendering from document.body means no ancestor can ever capture it.
+  return createPortal(
     <div className="fixed bottom-0 left-0 right-0 z-[3000] bg-white border-t border-neutral-100 shadow-lg">
       <div className="flex max-w-md mx-auto">
         <button
@@ -196,6 +201,7 @@ export function BottomTabBar({ tab, setTab, unreadCount = 0, profileDot = false 
           <span className="text-xs font-medium">Profile</span>
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

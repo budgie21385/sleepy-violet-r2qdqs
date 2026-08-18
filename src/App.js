@@ -8281,7 +8281,9 @@ function SwipeActions({
 }) {
   const [soloMenuOpen, setSoloMenuOpen] = useState(false);
 
-  return (
+  // Portaled with the tab bar (Aug 1) — same iOS fixed-in-transformed-ancestor
+  // break scrolled both mid-page together.
+  return createPortal(
     <div className="fixed bottom-20 left-0 right-0 z-30 px-4">
       <div className="w-full max-w-sm mx-auto">
         {mode === "solo" ? (
@@ -8378,7 +8380,8 @@ function SwipeActions({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
