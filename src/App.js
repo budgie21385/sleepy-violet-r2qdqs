@@ -3128,6 +3128,25 @@ if (authLoading || guestLoading) {
                   <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
                     {guestShortlistVenues.find((v) => v.id === guestDecidedVenueId)?.name || "your spot"}
                   </p>
+                  {/* The plan's WHEN (Aug, Mark's screenshot: "the only thing
+                      not coming through on the plan is the time and date") —
+                      future slots only; a right-now decide adds nothing. */}
+                  {guestDecidedFor &&
+                    new Date(guestDecidedFor).getTime() >
+                      Date.now() + 60 * 60 * 1000 && (
+                      <p className="mt-1 text-sm font-medium text-[#2f3f29]">
+                        {new Date(guestDecidedFor).toLocaleDateString("en-AU", {
+                          weekday: "long",
+                          day: "numeric",
+                          month: "short",
+                        })}{" "}
+                        ·{" "}
+                        {new Date(guestDecidedFor).toLocaleTimeString("en-AU", {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    )}
                   <p className="mt-1 text-xs text-[#455d3b]">
                     {hostName} picked the place — see you there!
                   </p>
@@ -3286,7 +3305,10 @@ if (authLoading || guestLoading) {
                   }}
                   className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
                 >
-                  See the plan
+                  {/* No plan exists before the host locks one (Aug, Mark:
+                      guests shouldn't see the plan until it's locked) — the
+                      board behind this shows only THEIR picks until then. */}
+                  {guestDecidedVenueId ? "See the plan" : "See my picks"}
                 </button>
               )}
             </div>

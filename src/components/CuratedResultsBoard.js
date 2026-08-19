@@ -16,6 +16,9 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
   const [names, setNames] = useState({});
   const [participantsList, setParticipantsList] = useState([]);
   const [decidedVenueId, setDecidedVenueId] = useState(null);
+  // The plan's WHEN (Aug, Mark's field test: "the only thing not coming
+  // through on the plan is the time and date").
+  const [decidedFor, setDecidedFor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [detailVenue, setDetailVenue] = useState(null);
@@ -34,7 +37,7 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           .eq("session_id", sessionId),
         supabase
           .from("match_sessions")
-          .select("decided_venue_id")
+          .select("decided_venue_id, decided_for")
           .eq("id", sessionId)
           .single(),
       ]);
@@ -48,7 +51,11 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
       });
       setNames(nameMap);
       setParticipantsList(partsRpc.data || []);
-      if (initial) setDecidedVenueId(sessRpc.data?.decided_venue_id ?? null);
+      // Every poll, not just the first (Aug): a guest with the board open
+      // sees the host's decision land live — banner, highlight, and the
+      // voter-view unlock — instead of on their next visit.
+      setDecidedVenueId(sessRpc.data?.decided_venue_id ?? null);
+      setDecidedFor(sessRpc.data?.decided_for ?? null);
       if (initial) setLoading(false);
     }
     load(true);
@@ -102,8 +109,13 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
   const leaderCount = list.filter((r) => r.vote_count === topCount).length;
   const hasClearLeader = topCount > 0 && leaderCount === 1;
 
+  // Pre-decision, a non-host is a VOTER, not a viewer of the plan (Aug,
+  // Mark) — they see only the venues they voted for.
+  const voterView = !canDecide && !decidedVenueId;
+
   // Only rows whose venue resolved (RPC rows merged into venueById).
   const rows = list
+    .filter((r) => !voterView || (r.voter_user_ids || []).includes(userId))
     .map((r) => ({ r, v: venueById[r.venue_id] }))
     .filter((x) => x.v);
 
@@ -150,13 +162,46 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
             {venueById[decidedVenueId]?.name || "your pick"}
           </p>
+          {/* The plan's when — future slots only (a right-now decide's
+              timestamp says nothing the banner doesn't). */}
+          {decidedFor &&
+            new Date(decidedFor).getTime() > Date.now() + 60 * 60 * 1000 && (
+              <p className="mt-1 text-sm font-medium text-[#2f3f29]">
+                {new Date(decidedFor).toLocaleDateString("en-AU", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "short",
+                })}{" "}
+                ·{" "}
+                {new Date(decidedFor).toLocaleTimeString("en-AU", {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </p>
+            )}
+        </div>
+      )}
+      {/* VOTER VIEW (Aug, Mark: "we should not allow the guest to see the
+          plan until the plan is locked in") — until the host decides, a
+          non-host sees only THEIR OWN picks: no vote counts, no other
+          voters' names, no top-pick badge. The full board unlocks with
+          the decision. */}
+      {voterView && (
+        <div className="mb-4 rounded-2xl bg-white border border-neutral-100 p-4 text-center">
+          <p className="text-sm font-medium text-neutral-800">Your picks</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            The host makes the call from everyone's options — we'll nudge you
+            the moment it's locked.
+          </p>
         </div>
       )}
 
       {rows.length === 0 ? (
         <div className="rounded-2xl bg-white p-6 text-center shadow-sm border border-neutral-100">
           <p className="text-sm text-neutral-600">
-            No shortlist yet — add some places first.
+            {voterView
+              ? "You didn't pick any places this time."
+              : "No shortlist yet — add some places first."}
           </p>
         </div>
       ) : (
@@ -195,7 +240,7 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
 
           <ul className="space-y-2">
             {rows.map(({ r, v }) => {
-              const isTop = hasClearLeader && r.vote_count === topCount;
+              const isTop = hasClearLeader && r.vote_count === topCount && !voterView;
               const isDecided = decidedVenueId === r.venue_id;
               const isSelected = selectedIds.has(v.id);
               const voterNames = (r.voter_user_ids || []).map(
@@ -246,13 +291,17 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-neutral-500 truncate">
-                        {r.vote_count === 0
-                          ? "No votes yet"
-                          : `${r.vote_count} vote${r.vote_count === 1 ? "" : "s"}${
-                              voterNames.length ? " · " + voterNames.join(", ") : ""
-                            }`}
-                      </p>
+                      {/* Vote tallies are the plan taking shape — hidden
+                          from voters until the host locks it (Aug, Mark). */}
+                      {!voterView && (
+                        <p className="text-xs text-neutral-500 truncate">
+                          {r.vote_count === 0
+                            ? "No votes yet"
+                            : `${r.vote_count} vote${r.vote_count === 1 ? "" : "s"}${
+                                voterNames.length ? " · " + voterNames.join(", ") : ""
+                              }`}
+                        </p>
+                      )}
                       <p className="text-xs text-neutral-500 truncate">
                         {v.type}
                         {v.suburb ? ` · ${v.suburb}` : ""}
@@ -321,7 +370,10 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
                 }
               : undefined
           }
-          onDecided={(vid) => setDecidedVenueId(vid)}
+          onDecided={(vid, iso) => {
+            setDecidedVenueId(vid);
+            setDecidedFor(iso);
+          }}
           onClose={() => setSchedulingVenue(null)}
         />
       )}
