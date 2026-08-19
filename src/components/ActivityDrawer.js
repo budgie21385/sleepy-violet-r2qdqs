@@ -75,6 +75,7 @@ import { FriendAvatar } from "./FriendAvatar";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 import { timeAgoShort, whenAgo } from "../lib/checkins";
 import { realName } from "../lib/names";
+import { readDismissed, dismissItems } from "../lib/dismissed";
 
 // Tiny corner timestamp on every Activity card (Mark, July 25): "2h" while
 // fresh, "yesterday", then a date — same ladder as the check-in card.
@@ -95,6 +96,12 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   const [items, setItems] = useState(() =>
     drawerCache && drawerCache.uid === userId ? drawerCache.items : null
   ); // null = loading
+  // Dismissed ids (Aug, Mark) — per-device, see lib/dismissed.js.
+  const [dismissed, setDismissed] = useState(() => readDismissed());
+  function dismiss(ids) {
+    dismissItems(ids);
+    setDismissed(readDismissed());
+  }
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [thread, setThread] = useState(null); // open comment thread sheet
   const [visibleCount, setVisibleCount] = useState(10); // "Show more" paging
@@ -1840,10 +1847,13 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   // blocks still run — the cache is what makes reopen instant.)
   // Tier-0 items (pending tags, friend requests) sit in the TOP section
   // until dealt with — "seen" doesn't dismiss something awaiting an answer.
-  const allNew = (items || []).filter(
+  // DISMISSED items (Aug, Mark) are filtered here: tier-0 can't be
+  // dismissed (an unanswered ask isn't noise), everything else carries a ✕.
+  const visibleItems = (items || []).filter((i) => !dismissed.has(i.id));
+  const allNew = visibleItems.filter(
     (i) => itemWeight(i) === 0 || new Date(i.timestamp) > lastSeen
   );
-  const allEarlier = (items || []).filter(
+  const allEarlier = visibleItems.filter(
     (i) => itemWeight(i) !== 0 && new Date(i.timestamp) <= lastSeen
   );
   const newItems = allNew.slice(0, visibleCount);
@@ -1858,16 +1868,35 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     <>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
-        {!asTab && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
-          >
-            <X size={18} />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Clear all (Aug, Mark: "a way to dismiss notifications") —
+              sweeps everything dismissable; unanswered asks (tier 0) stay. */}
+          {visibleItems.some((i) => itemWeight(i) !== 0) && (
+            <button
+              type="button"
+              onClick={() =>
+                dismiss(
+                  visibleItems
+                    .filter((i) => itemWeight(i) !== 0)
+                    .map((i) => i.id)
+                )
+              }
+              className="text-xs font-medium text-neutral-500 hover:text-neutral-700 px-2 py-1"
+            >
+              Clear all
+            </button>
+          )}
+          {!asTab && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:bg-neutral-100"
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
       </div>
 
       {pushPrompt && (
@@ -1966,7 +1995,19 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2 mb-4">
             {newItems.map((item) => (
-              <div key={item.id}>
+              <div key={item.id} className="relative">
+              {/* Per-item dismiss (Aug, Mark) — not on tier-0: an
+                  unanswered ask has its own buttons, not a ✕. */}
+              {itemWeight(item) !== 0 && (
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  onClick={() => dismiss([item.id])}
+                  className="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded-full text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100"
+                >
+                  <X size={13} />
+                </button>
+              )}
               <ActivityItem
                 item={item}
                 isNew
@@ -2005,7 +2046,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2">
             {earlierItems.map((item) => (
-              <div key={item.id}>
+              <div key={item.id} className="relative">
+              {itemWeight(item) !== 0 && (
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  onClick={() => dismiss([item.id])}
+                  className="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded-full text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100"
+                >
+                  <X size={13} />
+                </button>
+              )}
               <ActivityItem
                 item={item}
                 acting={

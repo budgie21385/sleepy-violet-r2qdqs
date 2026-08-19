@@ -55,6 +55,7 @@ import { performCheckIn } from "./lib/checkins";
 // last three) — it lives on in SessionFields for any future consumer.
 import { AreaCheckbox } from "./components/SessionFields";
 import { realName } from "./lib/names";
+import { readDismissed } from "./lib/dismissed";
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
 import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -1581,7 +1582,11 @@ useEffect(() => {
             .select("activity_id")
             .in("activity_id", recentIds);
           const has = new Set((withPhotos || []).map((p) => p.activity_id));
-          photoNudgeCount = recentIds.filter((id) => !has.has(id)).length;
+          // Dismissed in the drawer (Aug, Mark) → doesn't badge either.
+          const dis = readDismissed();
+          photoNudgeCount = recentIds.filter(
+            (id) => !has.has(id) && !dis.has(`pn_${id}`)
+          ).length;
         }
       }
 
@@ -1690,8 +1695,10 @@ useEffect(() => {
                 "venue_id",
                 Array.from(new Set(cands.map((s) => s.decided_venue_id)))
               );
+            const disNudge = readDismissed();
             sessionNudgeCount = cands.filter((s) => {
-              const ref = new Date(s.event_at || s.updated_at).getTime();
+              if (disNudge.has(`sn_${s.id}`)) return false; // ✕'d in drawer
+              const ref = nudgeRef(s);
               return !(myCheckins || []).some(
                 (c) =>
                   c.venue_id === s.decided_venue_id &&
