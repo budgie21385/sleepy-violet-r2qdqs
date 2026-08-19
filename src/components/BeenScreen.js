@@ -16,6 +16,15 @@ import {
 import { MapVenueSheet } from "./MapVenueSheet";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
+// LOCAL yyyy-mm-dd, never toISOString().slice(0,10) — that's UTC, and
+// Melbourne runs 10-11h ahead: before ~10am the UTC date is still
+// YESTERDAY (Aug 1, Mark: "right now" album prefilled to yesterday).
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
 // One compact history row — also used by ProfileLookupScreen's Recent
 // activity section (a friend's history on their profile).
 export function CheckinHistoryRow({ c }) {
@@ -73,10 +82,10 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   const [addVenues, setAddVenues] = useState([]);
   const [addSearching, setAddSearching] = useState(true);
   const [addDate, setAddDate] = useState(() =>
-    new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    localDateStr(new Date(Date.now() - 24 * 60 * 60 * 1000))
   );
   const [addSaving, setAddSaving] = useState(false);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localDateStr();
 
   const [addGoogle, setAddGoogle] = useState([]); // Google fallback rows
   const [addingPlaceId, setAddingPlaceId] = useState(null);
@@ -93,7 +102,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     setAddVenues([prefillNight.venue]);
     setAddSearching(false);
     if (prefillNight.date) setAddDate(prefillNight.date);
-    else setAddDate(new Date().toISOString().slice(0, 10));
+    else setAddDate(localDateStr());
     setAddInvitees(prefillNight.invitees || []);
     setAddOpen(true);
     onPrefillConsumed?.();
@@ -174,7 +183,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     // QR exist before the event. Only a TODAY pick still clamps backward —
     // in the Been form, "today" means "earlier today", not "tonight".
     let ts = new Date(`${addDate}T20:00:00`);
-    const isToday = addDate === new Date().toISOString().slice(0, 10);
+    const isToday = addDate === localDateStr();
     if (isToday && ts.getTime() > Date.now())
       ts = new Date(Date.now() - 60 * 60 * 1000);
     const W = 12 * 60 * 60 * 1000;
