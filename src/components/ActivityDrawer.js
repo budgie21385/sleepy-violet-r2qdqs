@@ -101,9 +101,9 @@ function DismissableRow({ canDismiss, onDismiss, children }) {
   if (!canDismiss) return children;
   return (
     <div className="relative overflow-hidden" style={{ touchAction: "pan-y" }}>
-      {/* The reveal behind the card — quiet, no red. */}
+      {/* The reveal behind the card — light red (Mark's call). */}
       {dx < -8 && (
-        <div className="absolute inset-0 flex items-center justify-end rounded-2xl bg-neutral-100 pr-5 text-xs font-medium text-neutral-500">
+        <div className="absolute inset-0 flex items-center justify-end rounded-2xl bg-red-100 pr-5 text-xs font-medium text-red-500">
           Dismiss
         </div>
       )}
