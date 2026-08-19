@@ -84,6 +84,15 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
   const [addDate, setAddDate] = useState(() =>
     localDateStr(new Date(Date.now() - 24 * 60 * 60 * 1000))
   );
+  // THE ONE FORM (Aug, Mark: "combine the check in experiences... the been
+  // draw to be the standard"). Every door — venue card, plus icon, Been,
+  // the scheduler's album prompt — lands here. The door sets the default:
+  // "now" from a venue card (you're standing there), "date" from Been.
+  const [addMode, setAddMode] = useState("date"); // "now" | "date"
+  const [addTime, setAddTime] = useState(""); // "HH:MM", today/future dates only
+  // PRESENCE IS A CHOICE (Aug, Mark): live visibility is this explicit
+  // toggle, never the timestamp. Default OFF — going live is deliberate.
+  const [addShowLive, setAddShowLive] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
   const todayStr = localDateStr();
 
@@ -103,6 +112,12 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     setAddSearching(false);
     if (prefillNight.date) setAddDate(prefillNight.date);
     else setAddDate(localDateStr());
+    // Door defaults (Aug, Mark): a venue-card check-in arrives in "now";
+    // the scheduler's album prompt arrives in "date" — setting up an album
+    // is admin, not presence, so it must never go live by itself.
+    setAddMode(prefillNight.mode === "now" ? "now" : "date");
+    setAddTime(prefillNight.time || "");
+    setAddShowLive(false);
     setAddInvitees(prefillNight.invitees || []);
     setAddOpen(true);
     onPrefillConsumed?.();
@@ -170,22 +185,34 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     setAddSearching(true);
     setAddSaving(false);
     setAddInvitees([]);
+    setAddMode("date");
+    setAddTime("");
+    setAddShowLive(false);
   }
 
   async function confirmAddNight() {
     const first = addVenues[0];
-    if (!first || !addDate || addSaving) return;
+    if (!first || addSaving) return;
+    if (addMode === "date" && !addDate) return;
     setAddSaving(true);
-    // Land it at 8pm local — squarely inside the ±12h same-night window.
-    // FUTURE dates are legitimate now (Aug 1, Mark — the old blanket clamp
-    // silently converted a wedding-next-Friday into "an hour ago"): an
-    // upcoming night is a real card, created ahead so the collect link and
-    // QR exist before the event. Only a TODAY pick still clamps backward —
-    // in the Been form, "today" means "earlier today", not "tonight".
-    let ts = new Date(`${addDate}T20:00:00`);
-    const isToday = addDate === localDateStr();
-    if (isToday && ts.getTime() > Date.now())
-      ts = new Date(Date.now() - 60 * 60 * 1000);
+    // THE TIMESTAMP (Aug, Mark's unified form): "Right now" = the actual
+    // clock time. A dated TODAY/FUTURE night lands at its chosen time
+    // (default 7pm — a 7pm plan is a 7pm card); a PAST night lands at 8pm,
+    // squarely inside the ±12h same-night window. The old today-clamp
+    // ("today means earlier today") only applies when no time was touched.
+    const isNow = addMode === "now";
+    let ts;
+    if (isNow) {
+      ts = new Date();
+    } else if (addDate >= todayStr) {
+      ts = new Date(`${addDate}T${addTime || "19:00"}:00`);
+    } else {
+      ts = new Date(`${addDate}T20:00:00`);
+    }
+    // Live visibility is the TOGGLE, never the timestamp (Aug, Mark).
+    // Past nights are never live; the toggle default is off.
+    const liveEligible = isNow || (addMode === "date" && addDate >= todayStr);
+    const showLive = liveEligible && addShowLive;
     const W = 12 * 60 * 60 * 1000;
     // Already have a check-in that night? Open it instead of a dupe twin.
     const { data: existing } = await supabase
@@ -219,6 +246,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           venue_id: first.id,
           label,
           created_at: ts.toISOString(),
+          show_live: showLive,
         })
         .select("id, created_at, label")
         .single();
@@ -263,6 +291,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
         created_at: new Date(
           new Date(act.created_at).getTime() + (i + 1) * 60 * 60 * 1000
         ).toISOString(),
+        show_live: showLive, // one night, one visibility choice
       }));
       const { data: legRows, error: legErr } = await supabase
         .from("activities")
@@ -663,7 +692,10 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             }}
           >
             <div className="flex items-start justify-between mb-1">
-              <p className="text-sm font-semibold">Add a past check-in</p>
+              {/* One form, four doors (Aug) — the title follows the mode. */}
+              <p className="text-sm font-semibold">
+                {addMode === "now" ? "Check in" : "Add a check-in"}
+              </p>
               <button
                 type="button"
                 aria-label="Close"
@@ -850,31 +882,122 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             )}
 
             <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
-              Which night?
+              When?
             </label>
+            {/* Right now / Choose date — the same segmented control as the
+                scheduler (Aug, Mark: one vocabulary everywhere). */}
+            <div className="mb-2 flex bg-neutral-100 rounded-full p-0.5 text-sm font-medium">
+              <button
+                type="button"
+                onClick={() => setAddMode("now")}
+                className={`flex-1 rounded-full py-2.5 transition ${
+                  addMode === "now"
+                    ? "bg-white text-[#455d3b] shadow-sm"
+                    : "text-neutral-500"
+                }`}
+              >
+                Right now
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddMode("date")}
+                className={`flex-1 rounded-full py-2.5 transition ${
+                  addMode === "date"
+                    ? "bg-white text-[#455d3b] shadow-sm"
+                    : "text-neutral-500"
+                }`}
+              >
+                Choose date
+              </button>
+            </div>
             {/* No max — future dates create an UPCOMING night (Aug 1): the
                 card exists ahead of the event so the photo link and QR can go
                 out before anyone arrives. appearance-none + explicit bg: iOS
-                restyles date inputs into a gray centered pill otherwise. */}
-            <input
-              type="date"
-              value={addDate}
-              onChange={(e) => setAddDate(e.target.value)}
-              className="w-full appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-3"
-            />
-            {addDate > todayStr && (
-              <p className="-mt-1 mb-3 px-1 text-[11px] text-[#455d3b]">
+                restyles date inputs into a gray centered pill otherwise.
+                Today/future dates also take a TIME (a 7pm plan is a 7pm
+                card); past nights don't need one (8pm stamp). */}
+            {addMode === "date" && (
+              <div className="mb-2 flex gap-2">
+                <input
+                  type="date"
+                  value={addDate}
+                  onChange={(e) => setAddDate(e.target.value)}
+                  className="flex-1 min-w-0 appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
+                />
+                {addDate >= todayStr && (
+                  <input
+                    type="time"
+                    value={addTime || "19:00"}
+                    onChange={(e) => setAddTime(e.target.value)}
+                    className="w-28 shrink-0 appearance-none bg-white text-left rounded-full border border-neutral-200 px-3 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
+                  />
+                )}
+              </div>
+            )}
+            {addMode === "date" && addDate > todayStr && (
+              <p className="mb-2 px-1 text-[11px] text-[#455d3b]">
                 Upcoming night — the card's ready now, so you can share the
                 photo link before the day.
               </p>
             )}
+            {/* SHOW ON LIVE MAP (Aug, Mark's toggle): presence is this
+                switch, nothing else. Appears for right-now and today/future
+                nights; past nights are history and never live. */}
+            {(addMode === "now" ||
+              (addMode === "date" && addDate >= todayStr)) ? (
+              <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="flex-1 text-sm font-medium text-neutral-800">
+                    Show on live map
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={addShowLive}
+                    onClick={() => setAddShowLive((v) => !v)}
+                    className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                      addShowLive ? "bg-[#455d3b]" : "bg-neutral-300"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                        addShowLive ? "left-[22px]" : "left-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-neutral-500">
+                  {!addShowLive
+                    ? "Off — friends won't see you're here"
+                    : addMode === "now"
+                    ? `Friends see you're at ${addVenues[0]?.name || "the spot"} now`
+                    : `Friends see you at ${addVenues[0]?.name || "the spot"} from ${
+                        addTime || "19:00"
+                      } on the day`}
+                </p>
+              </div>
+            ) : (
+              <p className="mb-3 px-1 text-[11px] text-neutral-500">
+                Goes in your history — never on the live map.
+              </p>
+            )}
             <button
               type="button"
-              disabled={addSaving || addVenues.length === 0 || !addDate}
+              disabled={
+                addSaving ||
+                addVenues.length === 0 ||
+                (addMode === "date" && !addDate)
+              }
               onClick={confirmAddNight}
               className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-60"
             >
-              {addSaving ? "Adding…" : "Add to Been"}
+              {addSaving
+                ? "Adding…"
+                : addMode === "now"
+                ? "Check in"
+                : addDate > todayStr
+                ? "Create the night"
+                : "Add to Been"}
             </button>
           </div>
         </div>,

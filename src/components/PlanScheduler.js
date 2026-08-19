@@ -279,11 +279,16 @@ export function PlanScheduler({
                   onClick={() => {
                     const dateStr =
                       when === "date" && dateTime ? dateTime.slice(0, 10) : "";
+                    // The plan's TIME rides along too (Aug, Mark: a 7pm plan
+                    // makes a 7pm card, so it can go live at the right hour
+                    // if they choose to). "" = right-now plan → today.
+                    const timeStr =
+                      when === "date" && dateTime ? dateTime.slice(11, 16) : "";
                     // AUTO-INVITE (Aug, Mark) — the session's people ride
                     // along; BeenScreen tags them on the created night.
                     const invitees = friends.map((p) => p.user_id);
                     onClose?.();
-                    onScheduleNight(venue, dateStr, invitees);
+                    onScheduleNight(venue, dateStr, invitees, { time: timeStr });
                   }}
                   className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
                 >

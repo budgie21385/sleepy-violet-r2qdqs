@@ -357,15 +357,22 @@ export default function RestaurantSwipeMVP() {
   const [sessionCreatedAt, setSessionCreatedAt] = useState(null);
   // SCHEDULER → ALBUM handoff (Aug 1): "Set up the album" carries the decided
   // venue + chosen date into the Been add form, prefilled. "" date = tonight.
-  const [nightPrefill, setNightPrefill] = useState(null); // {venue, date, invitees}
-  function scheduleNight(venue, dateStr, inviteeIds) {
+  const [nightPrefill, setNightPrefill] = useState(null); // {venue, date, time, mode, invitees}
+  function scheduleNight(venue, dateStr, inviteeIds, opts = {}) {
     if (!venue) return;
     setNotifSessionId(null); // close the sessions overlay if we're in it
     setCardVenue(null);
-    // invitees: session friends to auto-tag onto the created night (Aug 1,
-    // Mark: "when someone creates an album and there is a flanit user on
-    // the post, it should automatically invite that user to the card").
-    setNightPrefill({ venue, date: dateStr || "", invitees: inviteeIds || [] });
+    // invitees: session friends to auto-tag onto the created night (Aug 1).
+    // mode "now" = the venue-card check-in door (Right now preselected);
+    // default "date" = album/backdate doors — admin, never presence.
+    // time: the plan's clock time, so a 7pm plan makes a 7pm card (Aug).
+    setNightPrefill({
+      venue,
+      date: dateStr || "",
+      time: opts.time || "",
+      mode: opts.mode === "now" ? "now" : "date",
+      invitees: inviteeIds || [],
+    });
     setTab("profile"); // Been lives under Profile; ProfileTab opens it
   }
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
@@ -2248,6 +2255,17 @@ useEffect(() => {
       showToast("Sign in to check in");
       return null;
     }
+    // THE ONE FORM (Aug, Mark: "combine the check in experiences... the
+    // been draw to be the standard"). A plain Check in from any venue card
+    // routes to the unified form — venue prefilled, Right now selected,
+    // live toggle off. Nothing is created until they confirm; the instant
+    // check-in + CheckinSheet path is retired for this door.
+    if (!joinedFrom) {
+      scheduleNight(venue, "", [], { mode: "now" });
+      return null;
+    }
+    // JOINS keep the instant path — "I'm here too" answers a friend's
+    // check-in; it isn't composing a night.
     try {
       const { activity, already } = await performCheckIn(uid, venue.id, joinedFrom);
       if (!already) setCheckinSheet({ venue, activity });
@@ -7187,7 +7205,7 @@ function ProfileLookupScreen({
     (async () => {
       const { data: rows } = await supabase
         .from("activities")
-        .select("id, venue_id, created_at, label, joined_from")
+        .select("id, venue_id, created_at, label, joined_from, show_live")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
@@ -7708,8 +7726,11 @@ function ProfileLookupScreen({
                 </div>
                 {(() => {
                   const latest = theirCheckins?.[0];
+                  // Presence is the toggle (Aug, Mark) — a quiet check-in
+                  // never claims "Is at ... right now" on their profile.
                   const live =
                     latest &&
+                    latest.show_live !== false &&
                     Date.now() - new Date(latest.created_at).getTime() <
                       3 * 60 * 60 * 1000;
                   return live ? (

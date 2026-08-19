@@ -363,10 +363,10 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           showToast={showToast}
           onScheduleNight={
             onScheduleNight
-              ? (v, dateStr, invitees) => {
+              ? (v, dateStr, invitees, opts) => {
                   setSchedulingVenue(null);
                   setDetailVenue(null);
-                  onScheduleNight(v, dateStr, invitees);
+                  onScheduleNight(v, dateStr, invitees, opts);
                 }
               : undefined
           }

@@ -418,7 +418,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data: checkinRows } = await supabase
         .from("activities")
-        .select("id, user_id, venue_id, created_at, label")
+        .select("id, user_id, venue_id, created_at, label, show_live")
         .eq("kind", "checkin")
         .in("user_id", friendIds)
         .gte("created_at", weekAgo)
@@ -507,6 +507,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           label: r.label || null,
           withNames: withByActivity[r.id] || [],
           commentCount: countByActivity[r.id] || 0,
+          // Presence is the toggle (Aug, Mark): a quiet check-in renders
+          // as history ("checked in at"), never as a live "is at".
+          showLive: r.show_live !== false,
           timestamp: r.created_at,
         }));
       }
@@ -2440,7 +2443,11 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
 
   if (item.kind === "friend_checkin") {
     // Present tense while plausibly still there (< 3h), past tense after.
-    const fresh = Date.now() - new Date(item.timestamp).getTime() < 3 * 60 * 60 * 1000;
+    // Quiet check-ins (show_live off — Aug, Mark's toggle) are NEVER
+    // present tense: presence is the toggle, not the timestamp.
+    const fresh =
+      item.showLive !== false &&
+      Date.now() - new Date(item.timestamp).getTime() < 3 * 60 * 60 * 1000;
     return (
       <div className={`rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3`}>
         <button

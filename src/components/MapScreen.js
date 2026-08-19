@@ -257,6 +257,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         .select("user_id, venue_id, created_at, label")
         .eq("kind", "checkin")
         .in("user_id", friendIds)
+        // Presence is the TOGGLE, not the timestamp (Aug, Mark's unified
+        // form) — quiet check-ins never pin anyone to the live map.
+        .eq("show_live", true)
         .gte("created_at", dayAgo)
         // Upcoming nights don't pin friends to the map before they happen
         // (Aug 1) — a future timestamp reads as fresh and drew a live ring.

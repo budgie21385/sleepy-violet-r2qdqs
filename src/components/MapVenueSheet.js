@@ -172,7 +172,7 @@ export function MapVenueSheet({
     (async () => {
       const { data: rows } = await supabase
         .from("activities")
-        .select("id, user_id, created_at, label")
+        .select("id, user_id, created_at, label, show_live")
         .eq("kind", "checkin")
         .eq("venue_id", venue.id)
         .order("created_at", { ascending: false })
@@ -193,8 +193,13 @@ export function MapVenueSheet({
         if (!cancelled) setStrip({ none: true });
         return;
       }
+      // Presence is the TOGGLE, not the timestamp (Aug, Mark's unified
+      // form): quiet check-ins never make the live "is here" state. They
+      // still count toward memory ("N friends have been here") below.
       const fresh = all.filter(
-        (r) => Date.now() - new Date(r.created_at).getTime() < FRESH_MS
+        (r) =>
+          r.show_live !== false &&
+          Date.now() - new Date(r.created_at).getTime() < FRESH_MS
       );
       // Distinct people over all time (memory), newest first, self included.
       const seen = new Set();
