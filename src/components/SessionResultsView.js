@@ -3,12 +3,11 @@
 // the host's "We're going here" decision (shared decided_venue_id mechanism).
 // Includes a one-shot confetti burst on the match reveal. Extracted from App.js.
 import { useState, useEffect, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
-import { sendPush } from "../lib/push";
 import { Check, Shuffle, CalendarDays } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
+import { PlanScheduler } from "./PlanScheduler";
 
 export function ConfettiBurst() {
   const canvasRef = useRef(null);
@@ -103,7 +102,6 @@ export function SessionResultsView({
   const [decidedVenueId, setDecidedVenueId] = useState(null);
   // The plan's WHEN (Aug 1) — drives the date banner over the pinned pick.
   const [decidedFor, setDecidedFor] = useState(null);
-  const [deciding, setDeciding] = useState(false);
   const canDecide = !!sessionId && !!userId && userId === hostUserId;
 
   useEffect(() => {
@@ -124,121 +122,18 @@ export function SessionResultsView({
     };
   }, [sessionId]);
 
-  // THE SCHEDULER (Aug 1, Mark). "We're going here" no longer decides on the
-  // spot — it opens the venue card with this sheet over it:
-  //   step 1: when are you going (right now / pick a day) → Lock it in
-  //   step 2: locked ✓ → Share the plan (link with details, for the group
-  //           chat) → "Want the album ready?" → Been add form, prefilled
-  // The in-app tell is automatic: the decide push now carries the WHEN.
-  // One sheet, Mark's Aug 1 mock: when (+TIME), Friends-in-session with
-  // per-person "Tell them" pushes, a copyable public link that CARRIES the
-  // plan (?when= → PublicVenuePage shows a plan banner), Done to lock.
-  const [scheduler, setScheduler] = useState(null); // {venueId, step, when, dateTime, told:Set}
+  // THE SCHEDULER (Aug 1, Mark) — extracted to components/PlanScheduler.js
+  // so the curated board runs the IDENTICAL flow (Mark, Aug: "Does the same
+  // UI and UX happen for the shortlist?"). This board just opens the venue
+  // card under it and applies the decision via onDecided.
+  const [schedulingVenue, setSchedulingVenue] = useState(null);
 
   function openScheduler(venueId) {
     if (!canDecide) return;
     const v = venueById.get(venueId);
-    if (v) setDetailVenue(v); // the card sits UNDER the sheet (Mark's spec)
-    setScheduler({
-      venueId,
-      step: 1,
-      when: "now",
-      dateTime: "",
-      told: new Set(),
-    });
-  }
-
-  function schedulerWhenText(s) {
-    if (s.when === "now" || !s.dateTime) return "tonight";
-    const d = new Date(s.dateTime);
-    const day = d.toLocaleDateString("en-AU", {
-      weekday: "long",
-      day: "numeric",
-      month: "short",
-    });
-    const time = d.toLocaleTimeString("en-AU", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return `${day} · ${time}`;
-  }
-
-  function planUrl(s) {
-    const base = `https://flanit.co/v/${s.venueId}`;
-    return s.when === "date" && s.dateTime
-      ? `${base}?when=${encodeURIComponent(new Date(s.dateTime).toISOString())}`
-      : base;
-  }
-
-  function pushBody(s) {
-    return s.when === "now" || !s.dateTime
-      ? "The plan is locked — see you there"
-      : `Locked in for ${schedulerWhenText(s)}`;
-  }
-
-  // Per-friend push, Mark's mock — "Tell them" carries the details as
-  // currently chosen. Done re-pushes anyone not yet told, so nobody's missed.
-  function tellFriend(uid) {
-    if (!scheduler || !uid) return;
-    const vName = venueById.get(scheduler.venueId)?.name || "the spot";
-    sendPush(uid, `${vName} it is 🎉`, pushBody(scheduler));
-    setScheduler((s) =>
-      s ? { ...s, told: new Set([...s.told, uid]) } : s
-    );
-  }
-
-  async function copyPlanLink() {
-    if (!scheduler) return;
-    try {
-      await navigator.clipboard.writeText(planUrl(scheduler));
-      showToast?.("Link copied");
-    } catch {
-      showToast?.("Couldn't copy — long-press the link");
-    }
-  }
-
-  async function lockItIn() {
-    if (!scheduler || deciding) return;
-    setDeciding(true);
-    const { error } = await supabase.rpc("set_curated_decision", {
-      p_session_id: sessionId,
-      p_venue_id: scheduler.venueId,
-    });
-    setDeciding(false);
-    if (error) {
-      console.error("set_curated_decision failed:", error);
-      showToast?.("Couldn't save — try again");
-      return;
-    }
-    setDecidedVenueId(scheduler.venueId);
-    // Persist the WHEN (Aug 1) — without this the plan's time lived only in
-    // push text and the share URL, and no in-app surface could show it.
-    // Fire-and-forget; hosts already update match_sessions directly.
-    const decidedForIso =
-      scheduler.when === "date" && scheduler.dateTime
-        ? new Date(scheduler.dateTime).toISOString()
-        : new Date().toISOString();
-    setDecidedFor(decidedForIso); // banner appears without a refetch
-    supabase
-      .from("match_sessions")
-      .update({ decided_for: decidedForIso })
-      .eq("id", sessionId)
-      .eq("host_user_id", userId)
-      .then(({ error: dfErr }) => {
-        if (dfErr) console.error("decided_for write failed:", dfErr);
-      });
-    // Anyone not personally told gets the push now — Done means everyone knows.
-    const vName = venueById.get(scheduler.venueId)?.name || "the spot";
-    for (const p of participants || []) {
-      if (
-        p.user_id &&
-        p.user_id !== userId &&
-        !scheduler.told.has(p.user_id)
-      ) {
-        sendPush(p.user_id, `${vName} it is 🎉`, pushBody(scheduler));
-      }
-    }
-    setScheduler((s) => (s ? { ...s, step: 2 } : s));
+    if (!v) return;
+    setDetailVenue(v); // the card sits UNDER the sheet (Mark's spec)
+    setSchedulingVenue(v);
   }
 
   // Clear per-row selections when switching tabs.
@@ -536,7 +431,7 @@ export function SessionResultsView({
                     {canDecide ? (
                       <button
                         type="button"
-                        disabled={deciding || decidedVenueId === venue.id}
+                        disabled={decidedVenueId === venue.id}
                         onClick={() => openScheduler(venue.id)}
                         className={`shrink-0 self-center rounded-xl px-3 py-2 text-xs font-medium transition ${
                           decidedVenueId === venue.id
@@ -570,214 +465,31 @@ export function SessionResultsView({
           userId={userId}
         />
       )}
-      {/* THE SCHEDULER — over the venue card. PORTALED to body (the card
-          portals too, so an in-tree overlay is trapped in this screen's
-          stacking context and paints UNDERNEATH regardless of z — Mark's
-          field report, and the same class as the July upload-tile bug).
-          pb-28 keeps the CTA clear of the bottom tab bar. */}
-      {scheduler &&
-        createPortal(
-        <div className="fixed inset-0 z-[4200] flex items-end justify-center sm:items-center">
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={() => setScheduler(null)}
-            className="absolute inset-0 bg-black/40"
-          />
-          <div className="relative w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 pb-28 sm:pb-5 shadow-xl max-h-[85vh] overflow-y-auto">
-            {scheduler.step === 1 ? (
-              <>
-                <h2 className="text-xl font-semibold tracking-tight">
-                  {venueById.get(scheduler.venueId)?.name || "This spot"} it is 🎉
-                </h2>
-                <p className="mt-1 text-sm text-neutral-600">When are you going?</p>
-                {/* SEGMENTED control (Mark's pick, Aug 1 — same style as the
-                    advanced Matches | Suburb only | 3h row): grey track,
-                    white active segment. Labels stay LITERAL — "Choose date"
-                    never echoes the date; the input below owns that. */}
-                <div className="mt-4 flex bg-neutral-100 rounded-full p-0.5 text-sm font-medium">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setScheduler((s) => ({ ...s, when: "now", dateTime: "" }))
-                    }
-                    className={`flex-1 rounded-full py-2.5 transition ${
-                      scheduler.when === "now"
-                        ? "bg-white text-[#455d3b] shadow-sm"
-                        : "text-neutral-500"
-                    }`}
-                  >
-                    Right now
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setScheduler((s) => {
-                        if (s.when === "date") return s;
-                        // Never a blank picker (Mark): default to the next
-                        // sensible evening — 7pm today, or tomorrow if 7pm
-                        // has passed. Local time, hand-built (toISOString
-                        // would shift to UTC).
-                        let dt = s.dateTime;
-                        if (!dt) {
-                          const d = new Date();
-                          if (d.getHours() >= 19) d.setDate(d.getDate() + 1);
-                          const pad = (n) => String(n).padStart(2, "0");
-                          dt = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T19:00`;
-                        }
-                        return { ...s, when: "date", dateTime: dt };
-                      })
-                    }
-                    className={`flex-1 rounded-full py-2.5 transition ${
-                      scheduler.when === "date"
-                        ? "bg-white text-[#455d3b] shadow-sm"
-                        : "text-neutral-500"
-                    }`}
-                  >
-                    Choose date
-                  </button>
-                </div>
-                {/* Date AND time (Mark's mock note: "this option should also
-                    add a time"). datetime-local gives both in one native
-                    picker; text-base keeps iOS from zooming. */}
-                {scheduler.when === "date" && (
-                  <input
-                    type="datetime-local"
-                    value={scheduler.dateTime}
-                    onChange={(e) =>
-                      setScheduler((s) => ({ ...s, dateTime: e.target.value }))
-                    }
-                    className="mt-2 w-full appearance-none rounded-2xl border border-[#cdd9c6] bg-white px-3 py-3 text-base focus:outline-none focus:border-[#455d3b]"
-                  />
-                )}
-
-                {/* Friends in session — each gets the details as a push. */}
-                {(participants || []).filter(
-                  (p) => p.user_id && p.user_id !== userId
-                ).length > 0 && (
-                  <div className="mt-5">
-                    <p className="text-xs font-medium text-neutral-500">
-                      Friends in session
-                    </p>
-                    <div className="mt-2 space-y-2">
-                      {(participants || [])
-                        .filter((p) => p.user_id && p.user_id !== userId)
-                        .map((p) => (
-                          <div
-                            key={p.user_id}
-                            className="flex items-center gap-3"
-                          >
-                            <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
-                              {p.display_name || "A guest"}
-                            </span>
-                            <button
-                              type="button"
-                              // No details, no telling (Mark): a "date"
-                              // choice with no date would push wrong info.
-                              disabled={
-                                scheduler.told.has(p.user_id) ||
-                                (scheduler.when === "date" && !scheduler.dateTime)
-                              }
-                              onClick={() => tellFriend(p.user_id)}
-                              className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
-                                scheduler.told.has(p.user_id)
-                                  ? "bg-[#edf2eb] text-[#455d3b]"
-                                  : "bg-[#455d3b] text-white active:scale-95"
-                              }`}
-                            >
-                              {scheduler.told.has(p.user_id) ? "Told ✓" : "Tell them"}
-                            </button>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Public link — carries the WHEN, so the page shows the plan,
-                    not just the venue (Mark: "a time and date along with the
-                    business card"). */}
-                <div className="mt-5">
-                  <p className="text-xs font-medium text-neutral-500">
-                    Share details with people not on Flanit
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="flex-1 min-w-0 truncate rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-xs text-neutral-500">
-                      {planUrl(scheduler).replace("https://", "")}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={scheduler.when === "date" && !scheduler.dateTime}
-                      onClick={copyPlanLink}
-                      className="shrink-0 rounded-full bg-[#455d3b] px-4 py-2 text-xs font-medium text-white active:scale-95 transition disabled:opacity-50"
-                    >
-                      Copy
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={deciding || (scheduler.when === "date" && !scheduler.dateTime)}
-                  onClick={lockItIn}
-                  className="mt-5 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition disabled:opacity-60"
-                >
-                  {deciding ? "Locking…" : "Done"}
-                </button>
-              </>
-            ) : (
-              <>
-                <h2 className="text-xl font-semibold tracking-tight">
-                  Locked in ✓
-                </h2>
-                <p className="mt-1 text-sm text-neutral-600">
-                  {venueById.get(scheduler.venueId)?.name || "The spot"},{" "}
-                  {scheduler.when === "now" ? "tonight" : schedulerWhenText(scheduler)}
-                  . Everyone's been told.
-                </p>
-                {onScheduleNight && (
-                  <div className="mt-4 rounded-2xl border border-neutral-200 p-4">
-                    <p className="text-sm font-semibold">Want the album ready?</p>
-                    <p className="mt-1 text-xs text-neutral-500">
-                      We'll set up the night's card now — share the photo link
-                      ahead, and everyone's photos land in one place.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = venueById.get(scheduler.venueId);
-                        const dateStr =
-                          scheduler.when === "date" && scheduler.dateTime
-                            ? scheduler.dateTime.slice(0, 10)
-                            : "";
-                        // AUTO-INVITE (Aug 1, Mark: a flanit user on the
-                        // post is invited to the card automatically) — the
-                        // session's people ride along; BeenScreen tags them
-                        // on the created night (standard consent flow).
-                        const invitees = (participants || [])
-                          .filter((p) => p.user_id && p.user_id !== userId)
-                          .map((p) => p.user_id);
-                        setScheduler(null);
-                        setDetailVenue(null);
-                        onScheduleNight(v, dateStr, invitees);
-                      }}
-                      className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
-                    >
-                      Set up the album
-                    </button>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setScheduler(null)}
-                  className="mt-3 w-full text-center text-sm text-neutral-500"
-                >
-                  Not now
-                </button>
-              </>
-            )}
-          </div>
-        </div>,
-        document.body
+      {/* THE SCHEDULER — shared with the curated board (PlanScheduler.js).
+          Portaled inside the component; this board opens the venue card
+          under it and applies the decision via onDecided. */}
+      {schedulingVenue && (
+        <PlanScheduler
+          sessionId={sessionId}
+          userId={userId}
+          venue={schedulingVenue}
+          participants={participants}
+          showToast={showToast}
+          onScheduleNight={
+            onScheduleNight
+              ? (v, dateStr, invitees) => {
+                  setSchedulingVenue(null);
+                  setDetailVenue(null);
+                  onScheduleNight(v, dateStr, invitees);
+                }
+              : undefined
+          }
+          onDecided={(vid, iso) => {
+            setDecidedVenueId(vid);
+            setDecidedFor(iso); // banner appears without a refetch
+          }}
+          onClose={() => setSchedulingVenue(null)}
+        />
       )}
     </>
   );

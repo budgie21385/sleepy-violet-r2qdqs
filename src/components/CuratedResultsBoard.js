@@ -8,15 +8,14 @@ import { supabase } from "../supabaseClient";
 import { Check } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
-import { sendPush } from "../lib/push";
+import { PlanScheduler } from "./PlanScheduler";
 
-export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile }) {
+export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile, onScheduleNight }) {
   const [results, setResults] = useState(null);
   const [venueRows, setVenueRows] = useState([]);
   const [names, setNames] = useState({});
   const [participantsList, setParticipantsList] = useState([]);
   const [decidedVenueId, setDecidedVenueId] = useState(null);
-  const [deciding, setDeciding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [detailVenue, setDetailVenue] = useState(null);
@@ -74,34 +73,17 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
     return m;
   }, [venues, venueRows]);
 
-  async function decide(venueId) {
-    setDeciding(true);
-    const { error } = await supabase.rpc("set_curated_decision", {
-      p_session_id: sessionId,
-      p_venue_id: venueId,
-    });
-    setDeciding(false);
-    if (error) {
-      console.error("set_curated_decision failed:", error);
-      if (showToast) showToast("Couldn't save — try again");
-      return;
-    }
-    setDecidedVenueId(venueId);
-    if (showToast) showToast("Locked it in");
-    // Tell everyone in the session where they're going (July 25 — the
-    // curated board was the last silent decide path; concurrent already
-    // did this). Everyone who JOINED, not just voters. Anon guests have no
-    // subscription so it's a no-op for them — they get the in-app
-    // "You're going to [venue]" item when they return.
-    const vName = venueById[venueId]?.name || "the spot";
-    for (const p of participantsList || []) {
-      if (p.user_id && p.user_id !== userId) {
-        sendPush(p.user_id, `${vName} it is 🎉`, "The plan is locked — see you there");
-      }
-    }
-    // Pop the venue card so the picker (and viewers) see the spot + can share it.
+  // "We're going here" runs the SAME scheduler as the concurrent board
+  // (Aug, Mark: "Does the same UI and UX happen for the shortlist?").
+  // PlanScheduler owns the decide RPC, decided_for, the tell-them pushes
+  // and the album prompt; this board just opens the card under the sheet.
+  const [schedulingVenue, setSchedulingVenue] = useState(null);
+  function openScheduler(venueId) {
+    if (!canDecide) return;
     const v = venueById[venueId];
-    if (v) setDetailVenue(v);
+    if (!v) return;
+    setDetailVenue(v); // the card sits UNDER the sheet
+    setSchedulingVenue(v);
   }
 
   if (loading) {
@@ -280,8 +262,8 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
                     {canDecide ? (
                       <button
                         type="button"
-                        disabled={deciding || isDecided}
-                        onClick={() => decide(r.venue_id)}
+                        disabled={isDecided}
+                        onClick={() => openScheduler(r.venue_id)}
                         className={`shrink-0 self-center rounded-xl px-3 py-2 text-sm font-medium transition ${
                           isDecided
                             ? "bg-[#455d3b] text-white"
@@ -321,6 +303,26 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           onHide={onHide}
           userId={userId}
           onOpenProfile={onOpenProfile}
+        />
+      )}
+      {schedulingVenue && (
+        <PlanScheduler
+          sessionId={sessionId}
+          userId={userId}
+          venue={schedulingVenue}
+          participants={participantsList}
+          showToast={showToast}
+          onScheduleNight={
+            onScheduleNight
+              ? (v, dateStr, invitees) => {
+                  setSchedulingVenue(null);
+                  setDetailVenue(null);
+                  onScheduleNight(v, dateStr, invitees);
+                }
+              : undefined
+          }
+          onDecided={(vid) => setDecidedVenueId(vid)}
+          onClose={() => setSchedulingVenue(null)}
         />
       )}
     </div>

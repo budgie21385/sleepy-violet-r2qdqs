@@ -4315,6 +4315,7 @@ if (authLoading || guestLoading) {
                 setCardIndex(0);
               }}
               showToast={showToast}
+              onScheduleNight={scheduleNight}
             />
           </div>
         )}
@@ -6411,6 +6412,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               onHide={onHide}
               onDone={() => (deepLinked ? onBack() : setSelectedSession(null))}
               showToast={showToast}
+              onScheduleNight={onScheduleNight}
             />
           ) : (
             <SessionResultsView
