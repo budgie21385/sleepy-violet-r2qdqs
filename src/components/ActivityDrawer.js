@@ -6,7 +6,7 @@
 // NEW vs EARLIER split via a localStorage timestamp: `flanit_drawer_last_seen`.
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock } from "lucide-react";
 import { pushState, enablePush, sendPush } from "../lib/push";
 import {
@@ -86,6 +86,65 @@ function whenLabel(ts) {
   // Short form in a corner: "2h", "yesterday", "18 Jul" — same calendar
   // rules as lib/checkins' whenAgo, minus the "ago".
   return whenAgo(ts).replace(/ ago$/, "");
+}
+
+// SWIPE-LEFT TO DISMISS (Aug, Mark: the ✕ overlay "is especially bad when
+// there is also a CTA" — the right edge already belongs to chevrons and
+// comment buttons). No visible control: the standard notification-tray
+// gesture. touch-action pan-y keeps vertical scroll native; the row only
+// captures the gesture once it's clearly horizontal. Tier-0 rows (pending
+// asks) don't swipe — canDismiss gates the whole thing.
+function DismissableRow({ canDismiss, onDismiss, children }) {
+  const [dx, setDx] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const touch = useRef(null); // {x, y, horizontal}
+  if (!canDismiss) return children;
+  return (
+    <div className="relative overflow-hidden" style={{ touchAction: "pan-y" }}>
+      {/* The reveal behind the card — quiet, no red. */}
+      {dx < -8 && (
+        <div className="absolute inset-0 flex items-center justify-end rounded-2xl bg-neutral-100 pr-5 text-xs font-medium text-neutral-500">
+          Dismiss
+        </div>
+      )}
+      <div
+        style={{
+          transform: `translateX(${dx}px)`,
+          transition: touch.current ? "none" : "transform 0.18s ease",
+          opacity: leaving ? 0 : 1,
+        }}
+        onTouchStart={(e) => {
+          const t = e.touches[0];
+          touch.current = { x: t.clientX, y: t.clientY, horizontal: false };
+        }}
+        onTouchMove={(e) => {
+          const s = touch.current;
+          if (!s) return;
+          const t = e.touches[0];
+          const mx = t.clientX - s.x;
+          const my = t.clientY - s.y;
+          if (!s.horizontal) {
+            if (Math.abs(mx) < 8 || Math.abs(mx) < Math.abs(my)) return;
+            s.horizontal = true;
+          }
+          setDx(Math.min(0, mx)); // left only
+        }}
+        onTouchEnd={() => {
+          const wasHorizontal = touch.current?.horizontal;
+          touch.current = null;
+          if (wasHorizontal && dx < -72) {
+            setLeaving(true);
+            setDx(-window.innerWidth);
+            setTimeout(onDismiss, 180);
+          } else {
+            setDx(0);
+          }
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 // Last loaded items, module-level — reopening the tab paints instantly from
@@ -1995,19 +2054,11 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2 mb-4">
             {newItems.map((item) => (
-              <div key={item.id} className="relative">
-              {/* Per-item dismiss (Aug, Mark) — not on tier-0: an
-                  unanswered ask has its own buttons, not a ✕. */}
-              {itemWeight(item) !== 0 && (
-                <button
-                  type="button"
-                  aria-label="Dismiss"
-                  onClick={() => dismiss([item.id])}
-                  className="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded-full text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100"
-                >
-                  <X size={13} />
-                </button>
-              )}
+              <DismissableRow
+                key={item.id}
+                canDismiss={itemWeight(item) !== 0}
+                onDismiss={() => dismiss([item.id])}
+              >
               <ActivityItem
                 item={item}
                 isNew
@@ -2033,7 +2084,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenVenue={onOpenVenue}
                 onOpenThread={setThread}
               />
-              </div>
+              </DismissableRow>
             ))}
           </div>
         </>
@@ -2046,17 +2097,11 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           </p>
           <div className="space-y-2">
             {earlierItems.map((item) => (
-              <div key={item.id} className="relative">
-              {itemWeight(item) !== 0 && (
-                <button
-                  type="button"
-                  aria-label="Dismiss"
-                  onClick={() => dismiss([item.id])}
-                  className="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded-full text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100"
-                >
-                  <X size={13} />
-                </button>
-              )}
+              <DismissableRow
+                key={item.id}
+                canDismiss={itemWeight(item) !== 0}
+                onDismiss={() => dismiss([item.id])}
+              >
               <ActivityItem
                 item={item}
                 acting={
@@ -2081,7 +2126,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenVenue={onOpenVenue}
                 onOpenThread={setThread}
               />
-              </div>
+              </DismissableRow>
             ))}
           </div>
         </>
