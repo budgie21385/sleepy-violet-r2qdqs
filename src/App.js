@@ -56,6 +56,15 @@ import { performCheckIn } from "./lib/checkins";
 import { AreaCheckbox } from "./components/SessionFields";
 import { realName } from "./lib/names";
 import { readDismissed } from "./lib/dismissed";
+import { CheckinForm } from "./components/CheckinForm";
+
+// Local yyyy-mm-dd — never toISOString().slice(0,10), that's the UTC date
+// and Melbourne runs 10h ahead (the "right now album on yesterday" bug).
+function localDateStrApp(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
 import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -358,23 +367,26 @@ export default function RestaurantSwipeMVP() {
   const [sessionCreatedAt, setSessionCreatedAt] = useState(null);
   // SCHEDULER → ALBUM handoff (Aug 1): "Set up the album" carries the decided
   // venue + chosen date into the Been add form, prefilled. "" date = tonight.
-  const [nightPrefill, setNightPrefill] = useState(null); // {venue, date, time, mode, invitees}
+  // THE ONE FORM's open-state (Aug, Mark: "It should stay on the same page
+  // you are on") — CheckinForm overlays whatever is on screen; no tab
+  // switch, no navigation. {venue?, date, time, mode, invitees}.
+  const [checkinForm, setCheckinForm] = useState(null);
+  // Been list refresh signal — a night created from the overlay should be
+  // there when Been next renders.
+  const [beenRefresh, setBeenRefresh] = useState(0);
   function scheduleNight(venue, dateStr, inviteeIds, opts = {}) {
     if (!venue) return;
-    setNotifSessionId(null); // close the sessions overlay if we're in it
-    setCardVenue(null);
     // invitees: session friends to auto-tag onto the created night (Aug 1).
     // mode "now" = the venue-card check-in door (Right now preselected);
     // default "date" = album/backdate doors — admin, never presence.
     // time: the plan's clock time, so a 7pm plan makes a 7pm card (Aug).
-    setNightPrefill({
+    setCheckinForm({
       venue,
-      date: dateStr || "",
+      date: dateStr || localDateStrApp(),
       time: opts.time || "",
       mode: opts.mode === "now" ? "now" : "date",
       invitees: inviteeIds || [],
     });
-    setTab("profile"); // Been lives under Profile; ProfileTab opens it
   }
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
   // null (all collapsed — the segment labels carry the current values).
@@ -4601,8 +4613,8 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onOpenProfile={openProfile}
           onFindFriends={() => setShowFindFriends(true)}
-          nightPrefill={nightPrefill}
-          onNightPrefillConsumed={() => setNightPrefill(null)}
+          onAddNight={() => setCheckinForm({ mode: "date" })}
+          beenRefresh={beenRefresh}
           onScheduleNight={scheduleNight}
         />
       )}
@@ -4714,8 +4726,10 @@ if (authLoading || guestLoading) {
         onAddFriend={() => setShowFindFriends(true)}
         onImportMap={() => setShowImport(true)}
         onCheckIn={() => {
-          setTab("map");
-          setMapSearchOpen(true);
+          // The unified form, on THIS page (Aug, Mark: "It should stay on
+          // the same page you are on") — no map jump, no search sheet. The
+          // form has its own place search.
+          setCheckinForm({ mode: "now" });
         }}
         onRightNow={() => {
           setMatchMode("concurrent");
@@ -4737,6 +4751,21 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           showToast={showToast}
           onClose={() => setCheckinSheet(null)}
+        />
+      )}
+      {/* THE ONE CHECK-IN FORM — overlays whatever page is active (Aug,
+          Mark). Saving opens the night's card on top. */}
+      {checkinForm && session?.user?.id && (
+        <CheckinForm
+          userId={session.user.id}
+          prefill={checkinForm}
+          showToast={showToast}
+          onClose={() => setCheckinForm(null)}
+          onCreated={(t) => {
+            setCheckinForm(null);
+            setBeenRefresh((n) => n + 1);
+            setThreadCheckin(t);
+          }}
         />
       )}
       {threadCheckin && (
@@ -5141,8 +5170,8 @@ function ProfileTab({
   showToast,
   onOpenProfile,
   onFindFriends,
-  nightPrefill,
-  onNightPrefillConsumed,
+  onAddNight,
+  beenRefresh,
   onScheduleNight,
 }) {
   const [showMyList, setShowMyList] = useState(false);
@@ -5151,14 +5180,8 @@ function ProfileTab({
   // Been — your own check-in history (the memory ledger).
   const [showBeen, setShowBeen] = useState(false);
 
-  // Scheduler handoff (Aug 1): a decided session's "Set up the album" lands
-  // here — open Been (closing the local Sessions overlay so it can't stack)
-  // and let BeenScreen consume the prefill into its add form.
-  useEffect(() => {
-    if (!nightPrefill) return;
-    setShowSessions(false);
-    setShowBeen(true);
-  }, [nightPrefill]);
+  // (The scheduler → Been navigation handoff died in Aug's overlay refactor:
+  // CheckinForm now overlays whatever page you're on — no tab switch.)
   const [beenCount, setBeenCount] = useState(null);
   // Friend graph counts for the entry card subtitle. Two queries kept simple
   // (count, head:true). Task #8 will lift requestCount to App level so the
@@ -5424,8 +5447,8 @@ function ProfileTab({
           onUnsave={onUnsave}
           onHide={onHide}
           onBack={() => setShowBeen(false)}
-          prefillNight={nightPrefill}
-          onPrefillConsumed={onNightPrefillConsumed}
+          onAddNight={onAddNight}
+          refreshSignal={beenRefresh}
           showToast={showToast}
           onOpenProfile={(uid) => {
             // Lookup renders ABOVE Been now — only close for self (your
