@@ -263,16 +263,21 @@ export function PlanScheduler({
         ) : (
           <>
             <h2 className="text-xl font-semibold tracking-tight">Locked in ✓</h2>
+            {/* Host-only surface (Mark, Aug 20) — "You locked in" owns the
+                act; no "tonight" assumption for right-now plans anymore. */}
             <p className="mt-1 text-sm text-neutral-600">
-              {venueName}, {when === "now" ? "tonight" : whenText()}. Everyone's
-              been told.
+              You locked in {venueName}. Everyone's been told the when and
+              where.
             </p>
             {onScheduleNight && (
               <div className="mt-4 rounded-2xl border border-neutral-200 p-4">
-                <p className="text-sm font-semibold">Want the album ready?</p>
+                {/* EVENT language starts here (Mark, Aug 20: "I want these
+                    to sort of start being events"). */}
+                <p className="text-sm font-semibold">Make it an event?</p>
                 <p className="mt-1 text-xs text-neutral-500">
-                  We'll set up the night's card now — share the photo link
-                  ahead, and everyone's photos land in one place.
+                  We'll create the event and invite every Flanit member in the
+                  session, ready to collect photos and memories when it
+                  happens.
                 </p>
                 <button
                   type="button"
@@ -292,7 +297,7 @@ export function PlanScheduler({
                   }}
                   className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
                 >
-                  Set up the album
+                  Set it up
                 </button>
               </div>
             )}

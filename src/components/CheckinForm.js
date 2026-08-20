@@ -498,7 +498,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
             : addMode === "now"
             ? "Check in"
             : addDate > todayStr
-            ? "Create the night"
+            ? "Create the event"
             : "Add to Been"}
         </button>
       </div>

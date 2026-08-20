@@ -8086,7 +8086,7 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
         <SessionSetupCard
           icon={<Calendar size={18} />}
           title="Send a shortlist"
-          subtitle="Curate options, friends choose"
+          subtitle="You curate the list, friends vote on it"
           expanded={expanded === "later"}
           onToggle={() =>
             setExpanded(expanded === "later" ? null : "later")
