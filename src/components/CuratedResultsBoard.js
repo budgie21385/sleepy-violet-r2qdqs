@@ -162,10 +162,9 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
             {venueById[decidedVenueId]?.name || "your pick"}
           </p>
-          {/* The plan's when — future slots only (a right-now decide's
-              timestamp says nothing the banner doesn't). */}
-          {decidedFor &&
-            new Date(decidedFor).getTime() > Date.now() + 60 * 60 * 1000 && (
+          {/* The plan's when — always shown once decided (Mark, Aug 20:
+              "it should still say when you're going and where"). */}
+          {decidedFor && (
               <p className="mt-1 text-sm font-medium text-[#2f3f29]">
                 {new Date(decidedFor).toLocaleDateString("en-AU", {
                   weekday: "long",

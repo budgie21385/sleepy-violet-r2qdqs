@@ -228,7 +228,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       >
         <div className="flex items-start justify-between mb-1">
           <p className="text-sm font-semibold">
-            {addMode === "now" ? "Check in" : "Add a check-in"}
+            {addMode === "now" ? "Check in" : "Create a check-in"}
           </p>
           <button
             type="button"

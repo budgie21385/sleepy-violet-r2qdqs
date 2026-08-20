@@ -2841,7 +2841,7 @@ loadAreas();
           })
         : matchMode === "curated"
         ? "Send options"
-        : "Right now";
+        : "Pick together"; // the mode's public name (Aug 20; stored, never rendered)
 
       const { data, error } = await supabase
         .from("match_sessions")
@@ -3067,10 +3067,15 @@ if (authLoading || guestLoading) {
                 {/* Same leak as the landing card: `name` is the host's own
                     label ("Send options"), so the guest reads the mode. */}
                 <p className="text-xs text-neutral-500 truncate">
+                  {/* No "Right now" for the guest (Mark, Aug 20 — mode label
+                      says nothing to them; same family as the generated-name
+                      leaks). Shortlist keeps its word: it tells the guest
+                      what they're browsing. */}
                   {guestSessionData.mode === "concurrent"
-                    ? "Right now"
-                    : "Shortlist"}
-                  {guestQueue.length > 0 ? ` · ${guestQueue.length} places` : ""}
+                    ? guestQueue.length > 0
+                      ? `${guestQueue.length} places`
+                      : ""
+                    : `Shortlist${guestQueue.length > 0 ? ` · ${guestQueue.length} places` : ""}`}
                 </p>
                 <h1 className="text-lg font-semibold tracking-tight truncate">
                   Welcome, {guestName.trim() || "friend"}
@@ -3165,12 +3170,9 @@ if (authLoading || guestLoading) {
                   <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
                     {guestShortlistVenues.find((v) => v.id === guestDecidedVenueId)?.name || "your spot"}
                   </p>
-                  {/* The plan's WHEN (Aug, Mark's screenshot: "the only thing
-                      not coming through on the plan is the time and date") —
-                      future slots only; a right-now decide adds nothing. */}
-                  {guestDecidedFor &&
-                    new Date(guestDecidedFor).getTime() >
-                      Date.now() + 60 * 60 * 1000 && (
+                  {/* The plan's WHEN — always shown once decided (Aug 20,
+                      Mark: "it should still say when you're going"). */}
+                  {guestDecidedFor && (
                       <p className="mt-1 text-sm font-medium text-[#2f3f29]">
                         {new Date(guestDecidedFor).toLocaleDateString("en-AU", {
                           weekday: "long",
@@ -3584,19 +3586,22 @@ if (authLoading || guestLoading) {
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
               <Check size={28} />
             </div>
+            {/* MATCHED, PRE-LOCK: no venue name (Mark, Aug 20) — the match
+                is announced, but the where/when is the HOST's to deliver
+                when they lock the plan. Same doctrine as shortlist guests
+                not seeing the plan until it's locked. */}
             <h1 className="text-2xl font-semibold tracking-tight">
               {decidedName
                 ? `${decidedName} it is 🎉`
                 : matchName
-                  ? `It's a match — ${matchName}`
+                  ? "You matched 🎉"
                   : resultsAreVotes
                     ? "Time's up"
                     : "Your picks are in"}
             </h1>
             <p className="mt-2 text-sm text-neutral-600">
               {decidedName
-                ? guestDecidedFor &&
-                  new Date(guestDecidedFor).getTime() > Date.now() + 60 * 60 * 1000
+                ? guestDecidedFor
                   ? `${new Date(guestDecidedFor).toLocaleDateString("en-AU", {
                       weekday: "long",
                       day: "numeric",
@@ -3607,7 +3612,7 @@ if (authLoading || guestLoading) {
                     })} — see you there.`
                   : "The plan is locked — see you there."
                 : matchName
-                  ? `Everyone liked it. ${hostName} locks it in.`
+                  ? `It's unanimous! You all liked the same spot — ${hostName} will update you on the when and where.`
                   : resultsAreVotes
                     ? `${hostName} is picking from what everyone liked.`
                     : `We'll nudge you the moment ${hostName} locks in the spot.`}
@@ -3691,7 +3696,7 @@ if (authLoading || guestLoading) {
               {guestSessionData.mode === "concurrent" ? (
                 <>
                   <Zap size={14} />
-                  Right now
+                  Pick together
                 </>
               ) : (
                 <>
@@ -3730,9 +3735,7 @@ if (authLoading || guestLoading) {
                       <span className="font-semibold text-[#2f3f29]">
                         {splashEnd.decidedName}
                       </span>
-                      {splashEnd.decidedFor &&
-                      new Date(splashEnd.decidedFor).getTime() >
-                        Date.now() + 60 * 60 * 1000
+                      {splashEnd.decidedFor
                         ? `, ${new Date(splashEnd.decidedFor).toLocaleDateString(
                             "en-AU",
                             { weekday: "long", day: "numeric", month: "short" }
@@ -3900,6 +3903,14 @@ if (authLoading || guestLoading) {
                     <h1 className="text-2xl font-semibold tracking-tight">
                       Match with friends
                     </h1>
+                    {/* One line on what this tab IS (Mark, Aug 20) — setup
+                        screen only; deeper screens explain themselves. */}
+                    {screen === "session_setup" && (
+                      <p className="mt-1 text-sm text-neutral-500">
+                        Find food, coffee or drinks with friends, without the
+                        group-chat spiral
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -4444,9 +4455,14 @@ if (authLoading || guestLoading) {
                       the session's duration as a property; changing it
                       recomputes expiry from creation. text-base: sub-16px
                       selects make iOS zoom the page. */}
-                  <div className="mt-6 flex items-center justify-between rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-left">
+                  {/* Copy per Mark (Aug 20): headline sells what the control
+                      does; "Session length" over the awkward "Duration time". */}
+                  <p className="mt-6 mb-2 text-sm font-medium text-neutral-800 text-left">
+                    Give your friends time to pick
+                  </p>
+                  <div className="flex items-center justify-between rounded-2xl bg-white border border-neutral-200 px-4 py-3 text-left">
                     <span className="text-sm font-medium text-neutral-700">
-                      Duration time
+                      Session length
                     </span>
                     <span className="relative inline-flex items-center">
                       <select
@@ -6342,7 +6358,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                         )}
                       </div>
                       <p className="text-xs text-neutral-500 truncate">
-                        {s.mode === "concurrent" ? "Right now" : "Later"}
+                        {s.mode === "concurrent" ? "Pick together" : "Later"}
                       </p>
                       {s.otherPeople?.length > 0 && (
                         <div className="flex items-center gap-1.5 mt-1">
@@ -8049,8 +8065,8 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
       <div className="w-full max-w-sm">
         <SessionSetupCard
           icon={<Zap size={18} />}
-          title="Right now"
-          subtitle="Swipe together, find a place in 10 min"
+          title="Pick together"
+          subtitle="Swipe together and find the perfect match"
           expanded={expanded === "right_now"}
           onToggle={() =>
             setExpanded(expanded === "right_now" ? null : "right_now")
@@ -8225,7 +8241,7 @@ function InviteShareScreen({
     // happened to open Flanit. Deep-links straight to the join screen.
     sendPush(
       friendId,
-      mode === "curated" ? "A shortlist for you" : "Pick a place — right now",
+      mode === "curated" ? "A shortlist for you" : "Pick a place together",
       inviterName
         ? `${inviterName} wants you in`
         : "A friend wants you in",

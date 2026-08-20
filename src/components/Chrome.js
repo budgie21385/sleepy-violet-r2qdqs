@@ -56,7 +56,7 @@ export function FloatingActionButton({
     {
       key: "right_now",
       icon: <Zap size={16} />,
-      label: "Right now",
+      label: "Pick together",
       action: () => {
         setOpen(false);
         onRightNow?.();

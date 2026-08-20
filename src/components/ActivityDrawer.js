@@ -365,6 +365,24 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         .in("id", myPartRows.map((p) => p.session_id))
         .not("decided_venue_id", "is", null)
         .neq("host_user_id", userId);
+      // Host names for the headline (Mark, Aug 20: "[Host] has decided —
+      // you're going to [Venue]") — one lookup for all decided sessions.
+      const hostIds = Array.from(
+        new Set((decidedRows || []).map((s) => s.host_user_id).filter(Boolean))
+      );
+      let hostNameById = {};
+      if (hostIds.length > 0) {
+        const { data: hostProfs } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", hostIds);
+        hostNameById = Object.fromEntries(
+          (hostProfs || []).map((p) => [
+            p.id,
+            (p.display_name || "").split(" ")[0],
+          ])
+        );
+      }
       // Resolve venue names via the shortlist RPC (bypasses venues RLS so
       // host-imported decided venues still show their name).
       decidedItems = await Promise.all(
@@ -381,6 +399,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             id: `dec_${s.id}`,
             sessionId: s.id,
             venueName,
+            hostName: hostNameById[s.host_user_id] || null,
             sessionName: s.name || "your session",
             decidedFor: s.decided_for || null, // the plan's WHEN (Aug 1)
             timestamp: s.updated_at,
@@ -2285,8 +2304,10 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-sm text-neutral-900">
             <strong className="font-medium">{item.inviterName}</strong> invited you to a session
           </p>
+          {/* No session name — it's GENERATED ("Right now"), never typed
+              (July 31 rule; the drawer was the last surface leaking it). */}
           <p className="text-[11px] text-neutral-500 truncate">
-            {item.sessionName} · tap to join{whenSuffix}
+            Tap to join{whenSuffix}
           </p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
@@ -2309,7 +2330,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             <strong className="font-medium">{item.guestName}</strong> sent their picks
           </p>
           <p className="text-[11px] text-neutral-500 truncate">
-            See if there's a match{item.sessionName ? ` · ${item.sessionName}` : ""}{whenSuffix}
+            See if there's a match{whenSuffix}
           </p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
@@ -2329,7 +2350,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-sm text-neutral-900">
-            Time's up on <strong className="font-medium">{item.sessionName}</strong>
+            Time's up on <strong className="font-medium">your session</strong>
           </p>
           <p className="text-[11px] text-neutral-500 truncate">
             {item.submitted} of {item.expected} sent picks — see the results
@@ -2355,16 +2376,28 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <MapPin size={16} />
         </span>
         <div className="flex-1 min-w-0">
+          {/* "[Host] has decided" (Mark, Aug 20) — the decision has an
+              author; falls back cleanly when the profile can't resolve. */}
           <p className="text-sm text-neutral-900">
-            You're going to <strong className="font-medium">{item.venueName}</strong>
+            {item.hostName ? (
+              <>
+                <strong className="font-medium">{item.hostName}</strong> has
+                decided — you're going to{" "}
+              </>
+            ) : (
+              <>You're going to </>
+            )}
+            <strong className="font-medium">{item.venueName}</strong>
           </p>
           {/* The plan's when leads the detail line (Aug 1 — a scheduled plan
               without its time told the recipient nothing actionable). Only
               shown when it's a real FUTURE slot; a right-now decide's
               timestamp adds nothing over the corner time. */}
+          {/* No session name here either — generated, never typed. The
+              plan's when shows whenever it's stored (Aug 20, Mark: the
+              decide moment IS the when for a right-now plan). */}
           <p className="text-[11px] text-neutral-500 truncate">
-            {item.decidedFor &&
-            new Date(item.decidedFor).getTime() > Date.now() + 60 * 60 * 1000
+            {item.decidedFor
               ? `${new Date(item.decidedFor).toLocaleDateString("en-AU", {
                   weekday: "short",
                   day: "numeric",
@@ -2372,9 +2405,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
                 })} · ${new Date(item.decidedFor).toLocaleTimeString("en-AU", {
                   hour: "numeric",
                   minute: "2-digit",
-                })} · `
-              : ""}
-            {item.sessionName}
+                })}`
+              : "The plan is locked"}
             {whenSuffix}
           </p>
         </div>
@@ -2722,10 +2754,9 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
               Did you go to{" "}
               <strong className="font-medium">{item.venueName}</strong>?
             </p>
+            {/* No generated session name (July 31 rule) — when says enough. */}
             <p className="text-[11px] text-neutral-500">
-              {item.sessionName
-                ? `Your pick from “${item.sessionName}”`
-                : `Your session pick from ${when}`}
+              {`Your session pick from ${when}`}
             </p>
           </div>
         </div>

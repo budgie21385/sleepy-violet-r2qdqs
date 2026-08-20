@@ -223,19 +223,20 @@ export function SessionResultsView({
     const di = rows.findIndex((r) => r.venue.id === decidedVenueId);
     if (di > 0) rows.unshift(rows.splice(di, 1)[0]);
   }
-  // The plan's when, rendered over the pinned card — only a real FUTURE
-  // slot (a right-now decide's timestamp says nothing the highlight doesn't).
-  const planWhen =
-    decidedFor && new Date(decidedFor).getTime() > Date.now() + 60 * 60 * 1000
-      ? `${new Date(decidedFor).toLocaleDateString("en-AU", {
-          weekday: "long",
-          day: "numeric",
-          month: "short",
-        })} · ${new Date(decidedFor).toLocaleTimeString("en-AU", {
-          hour: "numeric",
-          minute: "2-digit",
-        })}`
-      : null;
+  // The plan's when, rendered over the pinned card — ALWAYS shown once
+  // decided (Mark, Aug 20: "it should still say when you're going and
+  // where", even for a right-now plan — the decide moment IS the when).
+  // Only legacy decides with no stored when show nothing.
+  const planWhen = decidedFor
+    ? `${new Date(decidedFor).toLocaleDateString("en-AU", {
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+      })} · ${new Date(decidedFor).toLocaleTimeString("en-AU", {
+        hour: "numeric",
+        minute: "2-digit",
+      })}`
+    : null;
 
   const matchesCount = (sessionMatches || []).length;
   const myLikesCount = (myLikedIds || []).length;
@@ -278,6 +279,22 @@ export function SessionResultsView({
         onOpenProfile={onOpenProfile}
         showToast={showToast}
       />
+
+      {/* GUEST, MATCHED, PRE-LOCK (Mark, Aug 20): the board shows the match,
+          but the plan isn't a plan until the host locks it — this banner
+          holds the space, then the decide replaces it with the pinned pick
+          + date banner. */}
+      {!canDecide && !decidedVenueId && matchesCount > 0 && (
+        <div className="bg-white px-4 pt-3">
+          <div className="rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-4 py-3 text-center">
+            <p className="text-sm text-[#2f3f29]">
+              {(participants || []).find((p) => p.user_id === hostUserId)
+                ?.display_name?.split(" ")[0] || "The host"}{" "}
+              locks in the time and place — we'll nudge you the moment it's set.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Pick for us — host shortcut when several places matched. */}
       {canDecide && !decidedVenueId && matchesCount > 1 && (
