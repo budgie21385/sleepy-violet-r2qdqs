@@ -240,11 +240,13 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           </button>
         </div>
         <p className="text-[11px] text-neutral-500 mb-3">
-          It lands in your Been list — add photos and videos after. If friends
-          checked in that night, their moments show up too.
+          It lands in your Been list. Add photos and videos after, and if
+          friends checked in that night, their moments show up too.
         </p>
+        {/* What / Where / When (Mark, Aug 20) — three questions, no more
+            words. Also settles audit #4: flat labels beat mode-aware ones. */}
         <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
-          What was it?
+          What?
         </label>
         <input
           value={addLabel}
@@ -255,7 +257,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         />
 
         <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
-          {addVenues.length > 1 ? "Where did you go?" : "Where?"}
+          Where?
         </label>
         {addVenues.map((v, i) => (
           <div

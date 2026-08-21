@@ -468,6 +468,10 @@ export default function RestaurantSwipeMVP() {
   // Venue to show in an app-level MapVenueSheet card — e.g. tapping a
   // "You're going to X" decision notification opens that venue's card directly.
   const [cardVenue, setCardVenue] = useState(null);
+  // The card's layer follows its ORIGIN (Aug 20, Mark: strip-tap opened the
+  // thread UNDER the card): base 3100 lets a thread (3600) stack above;
+  // opened FROM a thread it takes 3700 to sit above that thread instead.
+  const [cardVenueZ, setCardVenueZ] = useState(3100);
   // Post-signup onboarding (pattern B). Every real account without a username
   // gets the screen — the old came-from-guest deferral is gone (July 31,
   // Mark): gate signups were sailing past with an email-local-part name and
@@ -602,6 +606,7 @@ export default function RestaurantSwipeMVP() {
       if (cancelled) return;
       const v = (data && data[0]) || null;
       if (v) {
+        setCardVenueZ(3100);
         setCardVenue(v);
         // Keep it in the pool so the card's save/hide controls read correctly.
         setVenues((prev) => (prev.some((x) => x.id === v.id) ? prev : [...prev, v]));
@@ -3336,20 +3341,36 @@ if (authLoading || guestLoading) {
                   </div>
                 )
               ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const sid = guestSessionId;
-                    goToMainApp("matches");
-                    setNotifSessionId(sid); // open this session's results, not the map
-                  }}
-                  className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
-                >
-                  {/* No plan exists before the host locks one (Aug, Mark:
-                      guests shouldn't see the plan until it's locked) — the
-                      board behind this shows only THEIR picks until then. */}
-                  {guestDecidedVenueId ? "See the plan" : "See my picks"}
-                </button>
+                <>
+                  {/* The session's people, for the freshly signed-up
+                      shortlist guest too (Aug 20, Mark: "no subsequent
+                      screen of add people from session") — same list as
+                      the concurrent matched state. */}
+                  <div className="mt-6 text-left">
+                    <SessionPeople
+                      part="list"
+                      sessionId={guestSessionId}
+                      viewerUserId={session?.user?.id}
+                      viewerName={profile?.display_name}
+                      hostUserId={guestSessionData?.host_user_id}
+                      showToast={showToast}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sid = guestSessionId;
+                      goToMainApp("matches");
+                      setNotifSessionId(sid); // open this session's results, not the map
+                    }}
+                    className="mt-6 w-full rounded-2xl bg-[#455d3b] py-3 font-medium text-white active:scale-[0.98] transition shadow-md"
+                  >
+                    {/* No plan exists before the host locks one (Aug, Mark:
+                        guests shouldn't see the plan until it's locked) — the
+                        board behind this shows only THEIR picks until then. */}
+                    {guestDecidedVenueId ? "See the plan" : "See my picks"}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -3489,11 +3510,13 @@ if (authLoading || guestLoading) {
                       >
                         {guestSigningUp
                           ? "Sending..."
-                          : gateStillRunning || guestDecidedVenueId
+                          : guestDecidedVenueId
                             ? "See the plan"
-                            : resultsAreVotes
-                              ? "See the votes"
-                              : "See your matches"}
+                            : gateStillRunning
+                              ? "Stay updated"
+                              : resultsAreVotes
+                                ? "See the votes"
+                                : "See your matches"}
                       </button>
                       {guestSignupError && (
                         <p className="text-sm text-red-600">{guestSignupError}</p>
@@ -4665,7 +4688,10 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           onOpenProfile={openProfile}
           onOpenSession={(sid) => setNotifSessionId(sid)}
-          onOpenVenue={(v) => setCardVenue(v)}
+          onOpenVenue={(v) => {
+            setCardVenueZ(3100); // base layer — a strip-tap thread stacks above
+            setCardVenue(v);
+          }}
           onCheckIn={handleCheckIn}
           profileIncomplete={profileIncomplete}
           onFinishProfile={() => setTab("profile")}
@@ -4738,7 +4764,7 @@ if (authLoading || guestLoading) {
           onOpenThread={setThreadCheckin}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           userId={session?.user?.id}
-          zIndex={3700}
+          zIndex={cardVenueZ}
         />
       )}
       {/* Post-signup onboarding (B): real account, no username yet, not
@@ -4827,6 +4853,7 @@ if (authLoading || guestLoading) {
           onOpenVenue={(v) => {
             // Keep the check-in card open underneath — the venue card stacks
             // above it (zIndex 3700) and closing it returns you here.
+            setCardVenueZ(3700);
             setCardVenue(v);
           }}
           onCheckIn={handleCheckIn}
