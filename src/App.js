@@ -36,7 +36,7 @@ import { FloatingActionButton, Toast, BottomTabBar } from "./components/Chrome";
 import { ImportGoogleMapsScreen } from "./components/ImportGoogleMapsScreen";
 import { ParticipantsStrip } from "./components/ParticipantsStrip";
 import { CuratedResultsBoard } from "./components/CuratedResultsBoard";
-import { SessionResultsView } from "./components/SessionResultsView";
+import { SessionResultsView, ConfettiBurst } from "./components/SessionResultsView";
 import { OnboardingScreen } from "./components/OnboardingScreen";
 import { GuestHome } from "./components/GuestHome";
 import {
@@ -57,6 +57,7 @@ import { AreaCheckbox } from "./components/SessionFields";
 import { realName } from "./lib/names";
 import { readDismissed } from "./lib/dismissed";
 import { CheckinForm } from "./components/CheckinForm";
+import { SessionPeople } from "./components/SessionPeople";
 
 // Local yyyy-mm-dd — never toISOString().slice(0,10), that's the UTC date
 // and Melbourne runs 10h ahead (the "right now album on yesterday" bug).
@@ -3429,7 +3430,7 @@ if (authLoading || guestLoading) {
                       ? "Time's up — the votes are in"
                       : gateStillRunning
                         ? "Your choices are in"
-                        : `You matched on ${matchCount} place${matchCount === 1 ? "" : "s"}`}
+                        : "It's a match"}
                 </h1>
               </div>
               <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
@@ -3442,7 +3443,7 @@ if (authLoading || guestLoading) {
                           ? "See what everyone liked"
                           : gateStillRunning
                             ? "Keep track of your plan"
-                            : "Your matches are ready"}
+                            : "See where you matched"}
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
                       {gateStillRunning
@@ -3582,10 +3583,22 @@ if (authLoading || guestLoading) {
           : null;
       return (
         <div className="fixed inset-0 bg-[#fdf6f0] text-[#111111] flex flex-col pb-16 overflow-y-auto">
+          {/* The match is PEOPLE (Aug 20, Mark: the tick was underwhelming) —
+              confetti + the group's faces on the matched state. */}
+          {matchName && !decidedName && <ConfettiBurst />}
           <div className="w-full max-w-sm mx-auto px-4 pt-14 text-center">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
-              <Check size={28} />
-            </div>
+            {matchName && !decidedName ? (
+              <SessionPeople
+                part="stack"
+                sessionId={guestSessionId}
+                viewerUserId={session?.user?.id}
+                hostUserId={guestSessionData?.host_user_id}
+              />
+            ) : (
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
+                <Check size={28} />
+              </div>
+            )}
             {/* MATCHED, PRE-LOCK: no venue name (Mark, Aug 20) — the match
                 is announced, but the where/when is the HOST's to deliver
                 when they lock the plan. Same doctrine as shortlist guests
@@ -3612,20 +3625,32 @@ if (authLoading || guestLoading) {
                     })} — see you there.`
                   : "The plan is locked — see you there."
                 : matchName
-                  ? `It's unanimous! You all liked the same spot — ${hostName} will update you on the when and where.`
+                  ? `It's unanimous! You all liked the same spot. ${hostName} will update you on the when and where.`
                   : resultsAreVotes
                     ? `${hostName} is picking from what everyone liked.`
                     : `We'll nudge you the moment ${hostName} locks in the spot.`}
             </p>
             <div className="mt-6 text-left">
-              {/* Add-host-as-friend CTA — high-intent moment, hides itself if
-                  already friends or pending in either direction. */}
-              <AddHostFriendCard
-                hostUserId={guestSessionData?.host_user_id}
-                hostName={hostName}
-                viewerUserId={session?.user?.id}
-                showToast={showToast}
-              />
+              {/* Matched state: EVERYONE in the session, state-aware chips
+                  (Aug 20, Mark — a 3-person session offered only the host).
+                  Other states keep the host-only card. */}
+              {matchName && !decidedName ? (
+                <SessionPeople
+                  part="list"
+                  sessionId={guestSessionId}
+                  viewerUserId={session?.user?.id}
+                  viewerName={profile?.display_name}
+                  hostUserId={guestSessionData?.host_user_id}
+                  showToast={showToast}
+                />
+              ) : (
+                <AddHostFriendCard
+                  hostUserId={guestSessionData?.host_user_id}
+                  hostName={hostName}
+                  viewerUserId={session?.user?.id}
+                  showToast={showToast}
+                />
+              )}
             </div>
             <button
               type="button"

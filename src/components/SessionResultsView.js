@@ -290,7 +290,8 @@ export function SessionResultsView({
             <p className="text-sm text-[#2f3f29]">
               {(participants || []).find((p) => p.user_id === hostUserId)
                 ?.display_name?.split(" ")[0] || "The host"}{" "}
-              locks in the time and place — we'll nudge you the moment it's set.
+              locks in the time and place. We'll nudge you the moment we have
+              all the details.
             </p>
           </div>
         </div>
