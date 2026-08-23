@@ -67,7 +67,7 @@ function localDateStrApp(d = new Date()) {
   ).padStart(2, "0")}`;
 }
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
-import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, MapPin as MapPinIcon } from "lucide-react";
+import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { prefetchVenueDetails } from "./lib/venueDetails";
 import { sendPush } from "./lib/push";
@@ -3743,12 +3743,12 @@ if (authLoading || guestLoading) {
             <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-neutral-500">
               {guestSessionData.mode === "concurrent" ? (
                 <>
-                  <Zap size={14} />
+                  <HeartHandshake size={14} />
                   Pick together
                 </>
               ) : (
                 <>
-                  <Calendar size={14} />
+                  <ListChecks size={14} />
                   Here is my shortlist
                 </>
               )}
@@ -8157,7 +8157,7 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
     <div className="flex items-start justify-center p-4 pb-24">
       <div className="w-full max-w-sm">
         <SessionSetupCard
-          icon={<Zap size={18} />}
+          icon={<HeartHandshake size={18} />}
           title="Pick together"
           subtitle="Swipe together and find the perfect match"
           expanded={expanded === "right_now"}
@@ -8177,7 +8177,7 @@ function SessionSetupScreen({ onBack, onPickRightNow, onPickLater }) {
         <div className="h-2" />
 
         <SessionSetupCard
-          icon={<Calendar size={18} />}
+          icon={<ListChecks size={18} />}
           title="Send a shortlist"
           subtitle="You curate the list, friends vote on it"
           expanded={expanded === "later"}

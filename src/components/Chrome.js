@@ -2,7 +2,9 @@
 // Props-only presentational components extracted from App.js.
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, Zap, Send } from "lucide-react";
+// HeartHandshake/ListChecks = the mode icons everywhere (Aug 21, Mark:
+// "Why did you not update all the instances" — all-surfaces rule).
+import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, HeartHandshake, ListChecks } from "lucide-react";
 
 export function FloatingActionButton({
   tab,
@@ -55,7 +57,7 @@ export function FloatingActionButton({
   const mapOptions = [
     {
       key: "right_now",
-      icon: <Zap size={16} />,
+      icon: <HeartHandshake size={16} />,
       label: "Pick together",
       action: () => {
         setOpen(false);
@@ -64,7 +66,7 @@ export function FloatingActionButton({
     },
     {
       key: "shortlist",
-      icon: <Send size={16} />,
+      icon: <ListChecks size={16} />,
       label: "Send a shortlist",
       action: () => {
         setOpen(false);
