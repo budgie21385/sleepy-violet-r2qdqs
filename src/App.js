@@ -67,7 +67,7 @@ function localDateStrApp(d = new Date()) {
   ).padStart(2, "0")}`;
 }
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
-import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, MapPin as MapPinIcon } from "lucide-react";
+import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Zap, Calendar, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { prefetchVenueDetails } from "./lib/venueDetails";
 import { sendPush } from "./lib/push";
@@ -6126,7 +6126,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
       }
       const { data: sessionRows, error: sErr } = await supabase
         .from("match_sessions")
-        .select("id, name, mode, status, created_at, event_at, host_user_id, target_matches, expires_at, decided_venue_id, expected_others")
+        .select("id, name, mode, status, created_at, event_at, host_user_id, target_matches, expires_at, decided_venue_id, decided_for, expected_others")
         .in("id", ids);
       if (cancelled) return;
       if (sErr) {
@@ -6395,8 +6395,15 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                     }}
                     className="w-full flex items-center gap-3 rounded-2xl bg-white border border-neutral-100 p-4 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
                   >
+                    {/* Mode icons (Aug 20, Mark: ⚡/📅 "aren't even the right
+                        icons") — HeartHandshake = Pick together, ListChecks =
+                        a shortlist. */}
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b] shrink-0">
-                      {s.mode === "concurrent" ? <Zap size={18} /> : <Calendar size={18} />}
+                      {s.mode === "concurrent" ? (
+                        <HeartHandshake size={18} />
+                      ) : (
+                        <ListChecks size={18} />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -6409,9 +6416,43 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-neutral-500 truncate">
-                        {s.mode === "concurrent" ? "Pick together" : "Later"}
-                      </p>
+                      {/* THE OUTCOME, not the mode (Aug 20, Mark: "Later"
+                          was a fossil and the mode is the icon's job) —
+                          what the row says is what HAPPENED. */}
+                      {(() => {
+                        if (s.decided_venue_id) {
+                          const dv = venues.find(
+                            (v) => v.id === s.decided_venue_id
+                          );
+                          const when = s.decided_for
+                            ? ` · ${new Date(s.decided_for).toLocaleDateString(
+                                "en-AU",
+                                { weekday: "short" }
+                              )} ${new Date(s.decided_for).toLocaleTimeString(
+                                "en-AU",
+                                { hour: "numeric", minute: "2-digit" }
+                              )}`
+                            : "";
+                          return (
+                            <p className="text-xs text-[#455d3b] font-medium truncate">
+                              → {dv?.name || "your pick"}
+                              {when}
+                            </p>
+                          );
+                        }
+                        const ended =
+                          s.expires_at &&
+                          Date.now() > new Date(s.expires_at).getTime();
+                        return (
+                          <p className="text-xs text-neutral-500 truncate">
+                            {!ended
+                              ? "Still running"
+                              : s.isHost
+                              ? "Nothing locked in, it's your call"
+                              : "Nothing locked in"}
+                          </p>
+                        );
+                      })()}
                       {s.otherPeople?.length > 0 && (
                         <div className="flex items-center gap-1.5 mt-1">
                           <div className="flex -space-x-2 shrink-0">

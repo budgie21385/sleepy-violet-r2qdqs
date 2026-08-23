@@ -24,6 +24,7 @@ const KIND_WEIGHT = {
   session_invite: 1,
   session_nudge: 1,
   photo_nudge: 1,
+  plan_reminder: 1, // today's plan — outranks ambient news, still dismissible
   session_timeup: 1, // your session ended on the clock — go decide
 };
 function itemWeight(i) {
@@ -959,6 +960,55 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return nudges;
     })();
 
+    // ---- PLAN REMINDER (Aug 20, Mark: "the date set should nudge as a
+    // reminder. You're going here tonight"). On the DAY of a locked plan —
+    // host and guests alike — one item: "You're going to [venue] tonight".
+    // Shows from midnight until 3h after the slot, timestamped at the slot
+    // so it surfaces as NEW as the moment approaches. Drawer half only;
+    // the lock-screen push at the right time is the server cron's job.
+    const reminderP = (async () => {
+      const items = [];
+      const ids = Array.from(
+        new Set([
+          ...hostedRows.map((s) => s.id),
+          ...myPartRows.map((p) => p.session_id),
+        ])
+      );
+      if (ids.length === 0) return items;
+      const { data: sess } = await supabase
+        .from("match_sessions")
+        .select("id, decided_venue_id, decided_for")
+        .in("id", ids)
+        .not("decided_venue_id", "is", null)
+        .not("decided_for", "is", null);
+      const now = Date.now();
+      const todays = (sess || []).filter((s) => {
+        const t = new Date(s.decided_for);
+        return (
+          t.toDateString() === new Date().toDateString() &&
+          now < t.getTime() + 3 * 60 * 60 * 1000
+        );
+      });
+      for (const s of todays) {
+        let venueName = "your spot";
+        const { data: vts } = await supabase.rpc(
+          "get_session_shortlist_venues",
+          { p_session_id: s.id }
+        );
+        const v = (vts || []).find((x) => x.id === s.decided_venue_id);
+        if (v?.name) venueName = v.name;
+        items.push({
+          kind: "plan_reminder",
+          id: `rem_${s.id}`,
+          sessionId: s.id,
+          venueName,
+          decidedFor: s.decided_for,
+          timestamp: s.decided_for,
+        });
+      }
+      return items;
+    })();
+
     // ---- "[Friend] added [Name] as a friend" — social-graph news via the
     // friends_new_friendships SECURITY DEFINER RPC (friendships RLS is
     // party-only). 7-day window; errors (RPC not yet run) fail silent.
@@ -1527,6 +1577,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       inviteItems,
       photoNudgeItems,
       sessionNudgeItems,
+      reminderItems,
       friendNewsItems,
       joinReqItems,
       venueShareItems,
@@ -1544,6 +1595,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       fuse(inviteP, "invites"),
       fuse(photoNudgeP, "photoNudges"),
       fuse(sessionNudgeP, "sessionNudges"),
+      fuse(reminderP, "planReminders"),
       fuse(friendNewsP, "friendNews"),
       fuse(joinReqP, "joinReqs"),
       fuse(venueShareP, "venueShares"),
@@ -1565,6 +1617,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...tagNudgeItems,
       ...photoNudgeItems,
       ...sessionNudgeItems,
+      ...reminderItems,
       ...friendNewsItems,
       ...joinReqItems,
       ...venueShareItems,
@@ -2408,6 +2461,40 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
                 })}`
               : "The plan is locked"}
             {whenSuffix}
+          </p>
+        </div>
+        <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
+      </button>
+    );
+  }
+
+  if (item.kind === "plan_reminder") {
+    // "You're going here tonight" (Aug 20, Mark) — the day-of reminder for
+    // a locked plan. No whenSuffix: the slot IS the when, and a future
+    // timestamp reads wrong through the ago-ladder.
+    const t = new Date(item.decidedFor);
+    const evening = t.getHours() >= 17;
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenSession?.(item.sessionId)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white">
+          <MapPin size={16} />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            You're going to{" "}
+            <strong className="font-medium">{item.venueName}</strong>{" "}
+            {evening ? "tonight" : "today"}
+          </p>
+          <p className="text-[11px] text-[#455d3b]">
+            {t.toLocaleTimeString("en-AU", {
+              hour: "numeric",
+              minute: "2-digit",
+            })}{" "}
+            · tap to open
           </p>
         </div>
         <span className="text-neutral-400 text-lg leading-none shrink-0">›</span>
