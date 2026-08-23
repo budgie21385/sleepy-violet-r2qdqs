@@ -2862,7 +2862,10 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             onClick={onSessionNudgeNo}
             className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
           >
-            Not yet
+            {/* "Didn't go" (Aug 21, Mark) — the button dismisses for good,
+                so the word matches the behaviour. Anyone going LATER gets
+                caught by their own check-in suppressing the nudge. */}
+            Didn't go
           </button>
         </div>
       </div>
