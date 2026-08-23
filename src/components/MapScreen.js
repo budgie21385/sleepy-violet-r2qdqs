@@ -197,11 +197,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     onFiltersSnapshot?.({
       cuisines: fCuisines,
       areas: fAreas,
+      occasions: fOccasions, // "What are you after?" — same chips as sessions
       openNow: fOpenNow,
       prices: fPrices,
       amenities: fAmenities,
     });
-  }, [fCuisines, fAreas, fOpenNow, fPrices, fAmenities]);
+  }, [fCuisines, fAreas, fOccasions, fOpenNow, fPrices, fAmenities]);
 
   // Suburb-first, same as sessions (July 25) — was a blunt 3km circle,
   // which is why the map and a session showed different places.

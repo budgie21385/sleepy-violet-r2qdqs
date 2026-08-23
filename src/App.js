@@ -356,6 +356,7 @@ export default function RestaurantSwipeMVP() {
         f.areas.map((fa) => areas.find((a) => a.name === fa.name) || fa)
       );
     }
+    if (f.occasions?.length) setSelectedOccasions(f.occasions);
     if (f.prices?.length) setSelectedPrices(f.prices);
     if (f.amenities?.length) setSelectedAmenities(f.amenities);
     if (f.openNow) setOpenNow(true);
