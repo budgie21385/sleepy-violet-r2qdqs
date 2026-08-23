@@ -337,6 +337,29 @@ export default function RestaurantSwipeMVP() {
   const [selectedOccasions, setSelectedOccasions] = useState([]);
   const [selectedPrices, setSelectedPrices] = useState([]); // price levels 1..4
   const [selectedAmenities, setSelectedAmenities] = useState([]); // amenity keys
+  // MAP → SESSION FILTER CARRY (Aug 21, Mark: "if someone has created a
+  // filter set on the maps and then clicks the plus... carry over the
+  // filters"). MapScreen snapshots its local filter state up here; starting
+  // a session FROM THE MAP copies the overlapping facets into session
+  // filters. Only NON-EMPTY facets copy (session filters are sticky by
+  // design — an empty map facet shouldn't wipe a saved preference), and
+  // the map's min-rating has no session twin, so it stays behind.
+  const mapFiltersRef = useRef(null);
+  function carryMapFilters() {
+    const f = mapFiltersRef.current;
+    if (tab !== "map" || !f) return;
+    if (f.cuisines?.length) setSelectedCuisines(f.cuisines);
+    if (f.areas?.length) {
+      // Map areas may be bare {name, lat, lng} — re-key onto the areas rows
+      // the session picker uses, matched by name; unknowns pass through.
+      setSelectedAreas(
+        f.areas.map((fa) => areas.find((a) => a.name === fa.name) || fa)
+      );
+    }
+    if (f.prices?.length) setSelectedPrices(f.prices);
+    if (f.amenities?.length) setSelectedAmenities(f.amenities);
+    if (f.openNow) setOpenNow(true);
+  }
   // Default 1 (Mark, July 24): one match ends a Right Now session — most
   // groups only need the one answer.
   const [matchLimit, setMatchLimit] = useState(1);
@@ -346,7 +369,11 @@ export default function RestaurantSwipeMVP() {
   // groups of 3+ swipe a deterministic 30-venue deck, and the Matches target
   // is forced to 1 (one unanimous venue IS the plan). Pairs keep today's
   // behaviour exactly.
-  const [expectedOthers, setExpectedOthers] = useState(1);
+  // 0 = UNSET (Aug 21, Mark) — not a valid party size, a "you haven't
+  // answered yet" marker. The stepper pulses and Start stays dead until
+  // it's ≥ 1: this number drives unanimity + everyone's-in, and a silently
+  // wrong default is the most damaging misconfiguration in the app.
+  const [expectedOthers, setExpectedOthers] = useState(0);
   // Session time limit (default 3 HOURS — Aug 1, Mark; the original 30-min
   // default was his July 31 spec when the clock was purely a dead-session
   // safety net, but now it drives real end states and 30 min proved twitchy
@@ -2802,6 +2829,8 @@ loadAreas();
   }
  
   async function startSwiping() {
+    // Belt + braces (Aug 21): 0 = unset, must never reach a created session.
+    if (matchMode === "concurrent" && expectedOthers < 1) return;
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
@@ -4022,13 +4051,21 @@ if (authLoading || guestLoading) {
                   liked by everyone declared here, and groups of 3+ swipe a
                   bounded 30-venue deck. Right Now only. */}
               {matchMode === "concurrent" && (
-                <div className="flex items-center justify-between rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] px-4 py-3">
+                <div
+                  className={`flex items-center justify-between rounded-2xl bg-[#edf2eb] px-4 py-3 ${
+                    expectedOthers < 1
+                      ? "border-2 border-[#455d3b] animate-pulse"
+                      : "border border-[#cdd9c6]"
+                  }`}
+                >
                   <div>
                     <p className="text-sm font-medium text-[#2f3f29]">
                       How many friends?
                     </p>
                     <p className="text-[11px] text-[#455d3b] mt-0.5">
-                      {expectedOthers === 1
+                      {expectedOthers < 1
+                        ? "Pick a number to start"
+                        : expectedOthers === 1
                         ? "You + 1 — first match wins"
                         : `You + ${expectedOthers} — everyone must like the place`}
                     </p>
@@ -4292,11 +4329,21 @@ if (authLoading || guestLoading) {
               </div>
               <button
                 onClick={startSwiping}
-                disabled={!swipeQueue.length}
+                disabled={
+                  !swipeQueue.length ||
+                  (matchMode === "concurrent" && expectedOthers < 1)
+                }
                 className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
               >
                 Start swiping
-              </button>            
+              </button>
+              {matchMode === "concurrent" &&
+                expectedOthers < 1 &&
+                swipeQueue.length > 0 && (
+                  <p className="text-center text-xs text-neutral-500">
+                    Pick how many friends are joining
+                  </p>
+                )}
             </div>
           </div>
         )}
@@ -4633,6 +4680,9 @@ if (authLoading || guestLoading) {
           venues={venues}
           hiddenIds={hiddenVenueIds}
           areas={areas}
+          onFiltersSnapshot={(f) => {
+            mapFiltersRef.current = f; // ref: no re-render, read at FAB time
+          }}
           savedIds={savedVenueIds}
           onSave={saveVenue}
           onUnsave={unsaveVenue}
@@ -4799,12 +4849,14 @@ if (authLoading || guestLoading) {
           setCheckinForm({ mode: "now" });
         }}
         onRightNow={() => {
+          carryMapFilters();
           setMatchMode("concurrent");
           setEventDate(null);
           setScreen("filters");
           setTab("matches");
         }}
         onShortlist={() => {
+          carryMapFilters();
           setMatchMode("curated");
           setEventDate(null);
           setScreen("filters");

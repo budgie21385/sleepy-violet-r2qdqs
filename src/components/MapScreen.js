@@ -151,7 +151,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onClearPersonFilter }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onClearPersonFilter, onFiltersSnapshot }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -189,6 +189,19 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const [fMinRating, setFMinRating] = useState(0);
   const [fPrices, setFPrices] = useState([]); // price_level numbers 1..4
   const [fAmenities, setFAmenities] = useState([]); // amenity column keys
+
+  // MAP → SESSION carry (Aug 21, Mark): snapshot the active filters up to
+  // App so starting a session from the map's ⊕ inherits them. Ref-stored
+  // there; min-rating has no session twin and deliberately stays behind.
+  useEffect(() => {
+    onFiltersSnapshot?.({
+      cuisines: fCuisines,
+      areas: fAreas,
+      openNow: fOpenNow,
+      prices: fPrices,
+      amenities: fAmenities,
+    });
+  }, [fCuisines, fAreas, fOpenNow, fPrices, fAmenities]);
 
   // Suburb-first, same as sessions (July 25) — was a blunt 3km circle,
   // which is why the map and a session showed different places.
