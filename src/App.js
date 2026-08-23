@@ -6367,8 +6367,15 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
         >
           <ArrowLeft size={18} />
         </button>
+        {/* NEVER the stored name (generated "Right now"/"Send options" —
+            the July 31 rule; this header was the last surface leaking it,
+            Mark's Aug 21 screenshots). Mode reads literally instead. */}
         <h1 className="text-lg font-semibold flex-1 truncate">
-          {selectedSession ? selectedSession.name || "Session" : "Your sessions"}
+          {selectedSession
+            ? selectedSession.mode === "curated"
+              ? "Shortlist"
+              : "Pick together"
+            : "Your sessions"}
         </h1>
       </div>
 
