@@ -286,8 +286,15 @@ export function PlanScheduler({
                     // The plan's TIME rides along too (Aug, Mark: a 7pm plan
                     // makes a 7pm card, so it can go live at the right hour
                     // if they choose to). "" = right-now plan → today.
+                    // Right-now plans carry the DECIDE MOMENT as the time
+                    // (Mark, Aug 21: the album defaulted to 7pm while the
+                    // plan said 9:41am) — the card should match the plan.
+                    const pad = (n) => String(n).padStart(2, "0");
+                    const nowT = new Date();
                     const timeStr =
-                      when === "date" && dateTime ? dateTime.slice(11, 16) : "";
+                      when === "date" && dateTime
+                        ? dateTime.slice(11, 16)
+                        : `${pad(nowT.getHours())}:${pad(nowT.getMinutes())}`;
                     // AUTO-INVITE (Aug, Mark) — the session's people ride
                     // along; BeenScreen tags them on the created night.
                     const invitees = friends.map((p) => p.user_id);

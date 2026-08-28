@@ -2183,16 +2183,21 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     </span>
                   </button>
                 )}
+              {/* Full-width ROW, not a grid tile (Mark, Aug 21: the square
+                  read too much like an empty album) — plain cards show no
+                  grid at all, just this one quiet upgrade offer. */}
               {uploadTargetId && !albumNight && (
                 <button
                     type="button"
                     disabled={albumBusy}
                     onClick={createAlbum}
-                    className="aspect-square rounded-lg border border-dashed border-[#a8b89a] bg-[#edf2eb]/60 flex flex-col items-center justify-center gap-1 text-[#455d3b] active:scale-95 transition disabled:opacity-50"
+                    className="col-span-3 w-full rounded-2xl border border-dashed border-[#a8b89a] bg-[#edf2eb]/60 flex items-center justify-center gap-2 py-3 text-[#455d3b] active:scale-[0.99] transition disabled:opacity-50"
                   >
-                    <Camera size={20} />
-                    <span className="text-[10px] font-medium text-center leading-tight">
-                      {albumBusy ? "Creating…" : "Create album"}
+                    <Camera size={16} />
+                    <span className="text-xs font-medium">
+                      {albumBusy
+                        ? "Creating…"
+                        : "Create album — collect photos from the night"}
                     </span>
                   </button>
                 )}

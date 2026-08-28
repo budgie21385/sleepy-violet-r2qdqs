@@ -613,9 +613,13 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           <MapResizer />
           <BoundsWatcher onBounds={setMapBounds} />
           <MapRef mapRef={mapRef} />
+          {/* CARTO began watermarking keyless basemap tiles ("API KEY
+              REQUIRED", Mark's Aug 21 desktop screenshot) — switched to the
+              OSM standard tiles. If the look matters later: a free CARTO
+              key restores Positron. */}
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           {personFilter ? (
             // One friend's trail — their places, their pins.
