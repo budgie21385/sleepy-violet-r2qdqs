@@ -58,6 +58,7 @@ import { realName } from "./lib/names";
 import { readDismissed } from "./lib/dismissed";
 import { CheckinForm } from "./components/CheckinForm";
 import { SessionPeople } from "./components/SessionPeople";
+import { AlbumPrompt } from "./components/AlbumPrompt";
 
 // Local yyyy-mm-dd — never toISOString().slice(0,10), that's the UTC date
 // and Melbourne runs 10h ahead (the "right now album on yesterday" bug).
@@ -400,6 +401,10 @@ export default function RestaurantSwipeMVP() {
   // you are on") — CheckinForm overlays whatever is on screen; no tab
   // switch, no navigation. {venue?, date, time, mode, invitees}.
   const [checkinForm, setCheckinForm] = useState(null);
+  // "Create an album?" after a check-in saves (Aug 21) — holds the thread
+  // object while the person decides; either answer opens the card.
+  const [albumPromptFor, setAlbumPromptFor] = useState(null);
+  const [albumPromptBusy, setAlbumPromptBusy] = useState(false);
   // Been list refresh signal — a night created from the overlay should be
   // there when Been next renders.
   const [beenRefresh, setBeenRefresh] = useState(0);
@@ -415,6 +420,7 @@ export default function RestaurantSwipeMVP() {
       time: opts.time || "",
       mode: opts.mode === "now" ? "now" : "date",
       invitees: inviteeIds || [],
+      album: opts.album === true, // scheduler door: born-album, no re-ask
     });
   }
   // Which advanced pill's options are open: "matches" | "radius" | "time" |
@@ -4874,7 +4880,8 @@ if (authLoading || guestLoading) {
         />
       )}
       {/* THE ONE CHECK-IN FORM — overlays whatever page is active (Aug,
-          Mark). Saving opens the night's card on top. */}
+          Mark). Saving offers the album (unless the door already did),
+          then opens the night's card on top. */}
       {checkinForm && session?.user?.id && (
         <CheckinForm
           userId={session.user.id}
@@ -4884,7 +4891,34 @@ if (authLoading || guestLoading) {
           onCreated={(t) => {
             setCheckinForm(null);
             setBeenRefresh((n) => n + 1);
-            setThreadCheckin(t);
+            if (t.bornAlbum) setThreadCheckin(t);
+            else setAlbumPromptFor(t); // "Create an album?" first (Aug 21)
+          }}
+        />
+      )}
+      {albumPromptFor && (
+        <AlbumPrompt
+          venueName={albumPromptFor.venueName}
+          busy={albumPromptBusy}
+          onCreate={async () => {
+            setAlbumPromptBusy(true);
+            const { error } = await supabase.rpc("create_night_album", {
+              p_activity_id: albumPromptFor.activityId,
+            });
+            setAlbumPromptBusy(false);
+            if (error) {
+              console.error("Create album failed:", error);
+              showToast("Couldn't create the album");
+              return;
+            }
+            const t = albumPromptFor;
+            setAlbumPromptFor(null);
+            setThreadCheckin(t); // card opens in album mode
+          }}
+          onSkip={() => {
+            const t = albumPromptFor;
+            setAlbumPromptFor(null);
+            setThreadCheckin(t); // plain card; upgrade lives on the tile
           }}
         />
       )}

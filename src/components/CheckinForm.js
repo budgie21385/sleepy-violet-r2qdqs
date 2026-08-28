@@ -54,6 +54,9 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
   const [addShowLive, setAddShowLive] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
   const addInvitees = prefill?.invitees || [];
+  // BORN-ALBUM (Aug 21): the scheduler door creates the album directly —
+  // its own popup already asked, so the post-save prompt must not double-ask.
+  const bornAlbum = prefill?.album === true;
 
   useEffect(() => {
     const q = addQ.trim();
@@ -122,6 +125,14 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       .limit(1);
     const label = addLabel.trim() || null;
     let act = existing?.[0] || null;
+    // Reopening an existing plain night through the album door (scheduler)
+    // flips its album on — own row, plain update.
+    if (act && bornAlbum) {
+      await supabase
+        .from("activities")
+        .update({ is_album: true })
+        .eq("id", act.id);
+    }
     if (act && label && !act.label) {
       const { error: lblErr } = await supabase
         .from("activities")
@@ -140,6 +151,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           label,
           created_at: ts.toISOString(),
           show_live: showLive,
+          is_album: bornAlbum, // night-level flag lives on the root
         })
         .select("id, created_at, label")
         .single();
@@ -211,6 +223,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       label: act.label || null,
       venueObj: first,
       timestamp: act.created_at,
+      bornAlbum, // App skips the album prompt when the door already asked
     });
   }
 

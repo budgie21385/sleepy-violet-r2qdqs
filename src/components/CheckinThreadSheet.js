@@ -611,7 +611,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       }
       const { data: root } = await supabase
         .from("activities")
-        .select("id, user_id, guests_can_invite")
+        .select("id, user_id, guests_can_invite, is_album")
         .eq("id", rootId)
         .maybeSingle();
       if (!cancelled && root) {
@@ -619,6 +619,8 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           rootId: root.id,
           ownerId: root.user_id,
           canInvite: root.guests_can_invite !== false,
+          // ALBUM lives on the NIGHT (Aug 21, Mark) — the root's flag.
+          isAlbum: root.is_album === true,
         });
       }
     })();
@@ -626,6 +628,31 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       cancelled = true;
     };
   }, [thread.activityId, clusterKey]);
+
+  // NIGHT ALBUM (Aug 21, Mark: "Albums kind of feel like they are their own
+  // thing"). Plain check-in = record only (people, comments, no photos).
+  // The album is the explicit upgrade: night-level, any participant can
+  // create it. Photos already existing = the album already exists in spirit.
+  // (No `pending` here — it's declared further down (TDZ), and uploads can
+  // only start from album mode anyway, so the flag already covers it.)
+  const albumNight =
+    (nightPerms?.isAlbum ?? false) || (photos && photos.length > 0);
+  const [albumBusy, setAlbumBusy] = useState(false);
+  async function createAlbum() {
+    if (albumBusy) return;
+    setAlbumBusy(true);
+    const { error } = await supabase.rpc("create_night_album", {
+      p_activity_id: thread.activityId,
+    });
+    setAlbumBusy(false);
+    if (error) {
+      console.error("Create album failed:", error);
+      showToast?.("Couldn't create the album");
+      return;
+    }
+    setNightPerms((prev) => (prev ? { ...prev, isAlbum: true } : prev));
+    showToast?.("Album ready — add your photos");
+  }
 
   async function togglePerm() {
     if (!nightPerms || permBusy || !iAmRootOwner) return;
@@ -1641,6 +1668,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 friends see this
 
               </p>
+              {/* COVER LINE (Aug 21, Mark): in album mode, the night's first
+                  comment doubles as the album's cover copy — the words that
+                  were said become the caption of the memory. */}
+              {albumNight && comments && comments.length > 0 && comments[0].body && (
+                <p className="mt-1 text-xs italic text-neutral-600 truncate">
+                  “{comments[0].body}”
+                </p>
+              )}
           </div>
         </div>
 
@@ -1849,7 +1884,25 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             >
               ‹ Back
             </button>
-            {mayShareLink ? (
+            {mayShareLink && !albumNight ? (
+              <div>
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                  Anyone else — collect photos
+                </p>
+                <p className="mb-3 text-xs text-neutral-500">
+                  Create the album first — the link and QR live here once it
+                  exists.
+                </p>
+                <button
+                  type="button"
+                  disabled={albumBusy}
+                  onClick={createAlbum}
+                  className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-50"
+                >
+                  {albumBusy ? "Creating…" : "Create album"}
+                </button>
+              </div>
+            ) : mayShareLink ? (
             <div>
               <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
                 Anyone else — collect photos
@@ -2113,7 +2166,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   </span>
                 </div>
               ))}
-              {uploadTargetId && (
+              {/* Camera = album mode only (Aug 21, Mark: a plain check-in
+                  is the record; the album is the explicit upgrade). Plain
+                  nights get the Create-album tile in its place. */}
+              {uploadTargetId && albumNight && (
                 <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -2124,6 +2180,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                       {myPhotoCount + pending.length === 0
                         ? "Add photos"
                         : "More"}
+                    </span>
+                  </button>
+                )}
+              {uploadTargetId && !albumNight && (
+                <button
+                    type="button"
+                    disabled={albumBusy}
+                    onClick={createAlbum}
+                    className="aspect-square rounded-lg border border-dashed border-[#a8b89a] bg-[#edf2eb]/60 flex flex-col items-center justify-center gap-1 text-[#455d3b] active:scale-95 transition disabled:opacity-50"
+                  >
+                    <Camera size={20} />
+                    <span className="text-[10px] font-medium text-center leading-tight">
+                      {albumBusy ? "Creating…" : "Create album"}
                     </span>
                   </button>
                 )}

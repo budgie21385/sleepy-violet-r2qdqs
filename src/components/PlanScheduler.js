@@ -271,13 +271,12 @@ export function PlanScheduler({
             </p>
             {onScheduleNight && (
               <div className="mt-4 rounded-2xl border border-neutral-200 p-4">
-                {/* EVENT language starts here (Mark, Aug 20: "I want these
-                    to sort of start being events"). */}
-                <p className="text-sm font-semibold">Make it an event?</p>
+                {/* ALBUM language (Aug 21, Mark — events are their own
+                    deliberate feature; this prompt is the casual layer). */}
+                <p className="text-sm font-semibold">Create an album?</p>
                 <p className="mt-1 text-xs text-neutral-500">
-                  We'll create the event and invite every Flanit member in the
-                  session, ready to collect photos and memories when it
-                  happens.
+                  Want to collect photos from the night? We'll set up the
+                  album and invite every Flanit member in the session.
                 </p>
                 <button
                   type="button"
@@ -293,7 +292,12 @@ export function PlanScheduler({
                     // along; BeenScreen tags them on the created night.
                     const invitees = friends.map((p) => p.user_id);
                     onClose?.();
-                    onScheduleNight(venue, dateStr, invitees, { time: timeStr });
+                    // album: true — this door IS the album ask; the form's
+                    // post-save prompt must not ask again (born-album).
+                    onScheduleNight(venue, dateStr, invitees, {
+                      time: timeStr,
+                      album: true,
+                    });
                   }}
                   className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
                 >

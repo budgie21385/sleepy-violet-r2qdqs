@@ -77,6 +77,7 @@ import { CheckinThreadSheet } from "./CheckinThreadSheet";
 import { timeAgoShort, whenAgo } from "../lib/checkins";
 import { realName } from "../lib/names";
 import { readDismissed, dismissItems } from "../lib/dismissed";
+import { AlbumPrompt } from "./AlbumPrompt";
 
 // Tiny corner timestamp on every Activity card (Mark, July 25): "2h" while
 // fresh, "yesterday", then a date — same ladder as the check-in card.
@@ -1893,7 +1894,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     }
     markNudgeDone(item.sessionId);
     setItems((prev) => (prev || []).filter((i) => i.id !== item.id));
-    setThread({
+    // "Create an album?" lives between the prompt and the card (Aug 21,
+    // Mark) — same popup as the form doors; either answer opens the card.
+    setAlbumPromptFor({
       activityId: act.id,
       ownerId: userId,
       ownerName: "You",
@@ -1901,6 +1904,31 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       venueObj: item.venueObj,
       timestamp: act.created_at,
     });
+  }
+
+  // The drawer's own album-prompt state (the did-you-go door).
+  const [albumPromptFor, setAlbumPromptFor] = useState(null);
+  const [albumPromptBusy, setAlbumPromptBusy] = useState(false);
+  async function albumPromptCreate() {
+    if (!albumPromptFor) return;
+    setAlbumPromptBusy(true);
+    const { error } = await supabase.rpc("create_night_album", {
+      p_activity_id: albumPromptFor.activityId,
+    });
+    setAlbumPromptBusy(false);
+    if (error) {
+      console.error("Create album failed:", error);
+      showToast?.("Couldn't create the album");
+      return;
+    }
+    const t = albumPromptFor;
+    setAlbumPromptFor(null);
+    setThread(t);
+  }
+  function albumPromptSkip() {
+    const t = albumPromptFor;
+    setAlbumPromptFor(null);
+    setThread(t);
   }
 
   function sessionNudgeNo(item) {
@@ -2214,6 +2242,14 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         </button>
       )}
 
+      {albumPromptFor && (
+        <AlbumPrompt
+          venueName={albumPromptFor.venueName}
+          busy={albumPromptBusy}
+          onCreate={albumPromptCreate}
+          onSkip={albumPromptSkip}
+        />
+      )}
       {thread && (
         <CheckinThreadSheet
           thread={thread}
