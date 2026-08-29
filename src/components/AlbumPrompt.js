@@ -7,14 +7,16 @@ import { createPortal } from "react-dom";
 
 export function AlbumPrompt({ venueName, busy, onCreate, onSkip }) {
   return createPortal(
-    <div className="fixed inset-0 z-[4300] flex items-end justify-center sm:items-center">
+    // CENTERED card, not a bottom sheet (Mark, Aug 21: "I prefer the one
+    // that happens after you select a place in a session").
+    <div className="fixed inset-0 z-[4300] flex items-center justify-center p-6">
       <button
         type="button"
         aria-label="Not now"
         onClick={onSkip}
         className="absolute inset-0 bg-black/40"
       />
-      <div className="relative w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 pb-8 sm:pb-5 shadow-xl">
+      <div className="relative w-full max-w-sm rounded-3xl bg-white p-5 shadow-xl">
         <h2 className="text-xl font-semibold tracking-tight">
           Create an album?
         </h2>

@@ -1483,9 +1483,13 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         style={{
           bottom: 80,
           width: "calc(100% - 1.5rem)",
-          // FIXED height (Mark: like the venue card) — the card must not
-          // resize as views/content change.
-          height: "calc(100% - 100px)",
+          // ALBUM nights keep the venue-card FIXED height. PLAIN check-ins
+          // are a RECEIPT (Aug 21, Mark's pick, design A): only as tall as
+          // their content, growing with comments up to the same cap — the
+          // size difference IS the differentiation.
+          ...(albumNight
+            ? { height: "calc(100% - 100px)" }
+            : { maxHeight: "calc(100% - 100px)" }),
         }}
       >
         <div className="px-5 pt-3 pb-2.5 border-b border-neutral-100">
@@ -1505,20 +1509,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 >
                   {labelValue}
                 </button>
-              ) : (
-                isOwner && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLabelDraft("");
-                      setLabelEdit((v) => !v);
-                    }}
-                    className="text-[11px] font-medium text-[#455d3b]"
-                  >
-                    add a title
-                  </button>
-                )
-              )}
+              ) : null}
+              {/* "add a title" eyebrow REMOVED (Mark, Aug 21) — the form's
+                  "What?" field asks at creation; the card doesn't nag. An
+                  existing title still renders and stays owner-editable. */}
               {/* Title editor lives in the TITLE's slot (Mark: not under the
                   names/venue). */}
               {labelEdit && isOwner && (
@@ -2093,9 +2087,29 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               </button>
             </div>
           )}
-        {/* Photo GRID (July 23 redesign) — 3-up album, capped with a
-            "+N more" tile; a small strip in the expanded-comments view. */}
-        {view === "card" && (photos.length > 0 || uploadTargetId) && (
+        {/* PLAIN check-in (Aug 21, design A "receipt"): no grid at all —
+            the album offer is one quiet row under the people, above the
+            conversation. */}
+        {view === "card" && !albumNight && uploadTargetId && (
+          <div className="px-4 pt-3">
+            <button
+              type="button"
+              disabled={albumBusy}
+              onClick={createAlbum}
+              className="w-full rounded-2xl border border-dashed border-[#a8b89a] bg-[#edf2eb]/60 flex items-center justify-center gap-2 py-3 text-[#455d3b] active:scale-[0.99] transition disabled:opacity-50"
+            >
+              <Camera size={16} />
+              <span className="text-xs font-medium">
+                {albumBusy
+                  ? "Creating…"
+                  : "Create album — collect photos from the night"}
+              </span>
+            </button>
+          </div>
+        )}
+        {/* Photo GRID (July 23 redesign) — ALBUM nights only. 3-up, capped
+            with a "+N more" tile; a small strip in expanded comments. */}
+        {view === "card" && albumNight && (photos.length > 0 || uploadTargetId) && (
           <div className="px-4 pt-3">
             <div className="grid grid-cols-3 gap-1.5">
               {(photosExpanded
@@ -2183,24 +2197,8 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     </span>
                   </button>
                 )}
-              {/* Full-width ROW, not a grid tile (Mark, Aug 21: the square
-                  read too much like an empty album) — plain cards show no
-                  grid at all, just this one quiet upgrade offer. */}
-              {uploadTargetId && !albumNight && (
-                <button
-                    type="button"
-                    disabled={albumBusy}
-                    onClick={createAlbum}
-                    className="col-span-3 w-full rounded-2xl border border-dashed border-[#a8b89a] bg-[#edf2eb]/60 flex items-center justify-center gap-2 py-3 text-[#455d3b] active:scale-[0.99] transition disabled:opacity-50"
-                  >
-                    <Camera size={16} />
-                    <span className="text-xs font-medium">
-                      {albumBusy
-                        ? "Creating…"
-                        : "Create album — collect photos from the night"}
-                    </span>
-                  </button>
-                )}
+              {/* (Plain-night Create-album row moved ABOVE the grid section
+                  — the grid itself is album-only now.) */}
             </div>
           </div>
         )}

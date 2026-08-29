@@ -508,16 +508,16 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           onClick={confirmAddNight}
           className="w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-60"
         >
-          {/* Future = "Done" (Mark, Aug 21 — a 7pm-tonight save isn't
-              "Add to Been" yet, and "Create the event" was shelved-events
-              language). Past = Been; now = the act itself. */}
+          {/* DATE decides the CTA, never the clock (Mark, Aug 21: a right-
+              now plan carries the decide moment, which is already seconds
+              in the past by the time you read the button — comparing
+              timestamps made the label flicker on the boundary). Today or
+              future = "Done"; only genuinely past days = "Add to Been". */}
           {addSaving
             ? "Adding…"
             : addMode === "now"
             ? "Check in"
-            : addDate > todayStr ||
-              (addDate === todayStr &&
-                new Date(`${addDate}T${addTime || "19:00"}:00`) > new Date())
+            : addDate >= todayStr
             ? "Done"
             : "Add to Been"}
         </button>
