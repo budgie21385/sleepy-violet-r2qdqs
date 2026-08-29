@@ -53,7 +53,53 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
   const [addTime, setAddTime] = useState(() => prefill?.time || "");
   const [addShowLive, setAddShowLive] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
-  const addInvitees = prefill?.invitees || [];
+  // WHO? (Aug 21, Mark: "should we ask users to add their friends at this
+  // level, rather than downstream?") — the old CheckinSheet asked at
+  // check-in time; the unified form lost it. Optional friend chips; the
+  // selected ride the existing invitee pipeline (consent tag + push).
+  // Session-door invitees arrive pre-filled and merge in.
+  const [friends, setFriends] = useState(null); // null = loading
+  const [whoIds, setWhoIds] = useState(() => new Set(prefill?.invitees || []));
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data: fr } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      const ids = Array.from(
+        new Set(
+          (fr || []).map((f) =>
+            f.requester_id === userId ? f.addressee_id : f.requester_id
+          )
+        )
+      );
+      if (ids.length === 0) {
+        if (!cancelled) setFriends([]);
+        return;
+      }
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url")
+        .in("id", ids)
+        .order("display_name", { ascending: true });
+      if (!cancelled) setFriends(profs || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+  function toggleWho(id) {
+    setWhoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  const addInvitees = Array.from(whoIds);
   // BORN-ALBUM (Aug 21): the scheduler door creates the album directly —
   // its own popup already asked, so the post-save prompt must not double-ask.
   const bornAlbum = prefill?.album === true;
@@ -407,6 +453,37 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
                 </div>
               )}
             </div>
+          </>
+        )}
+
+        {/* WHO? — optional; selected friends get the consent tag + push on
+            save (never published to their friends until they accept). */}
+        {friends && friends.length > 0 && (
+          <>
+            <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
+              Who? <span className="text-neutral-400">(optional)</span>
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-1">
+              {friends.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => toggleWho(f.id)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition active:scale-95 ${
+                    whoIds.has(f.id)
+                      ? "bg-[#455d3b] text-white"
+                      : "bg-white border border-neutral-200 text-neutral-700"
+                  }`}
+                >
+                  {(f.display_name || "Friend").split(" ")[0]}
+                </button>
+              ))}
+            </div>
+            {whoIds.size > 0 && (
+              <p className="mb-2 px-1 text-[10px] text-neutral-400">
+                They'll be asked before their friends see anything.
+              </p>
+            )}
           </>
         )}
 

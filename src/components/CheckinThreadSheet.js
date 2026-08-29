@@ -1481,15 +1481,20 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       <div
         className="absolute left-0 right-0 mx-auto max-w-sm flex flex-col bg-white rounded-3xl border border-neutral-100 shadow-2xl overflow-hidden"
         style={{
-          bottom: 80,
           width: "calc(100% - 1.5rem)",
-          // ALBUM nights keep the venue-card FIXED height. PLAIN check-ins
-          // are a RECEIPT (Aug 21, Mark's pick, design A): only as tall as
-          // their content, growing with comments up to the same cap — the
-          // size difference IS the differentiation.
-          ...(albumNight
-            ? { height: "calc(100% - 100px)" }
-            : { maxHeight: "calc(100% - 100px)" }),
+          // ALBUM nights keep the venue-card FIXED, bottom-anchored height.
+          // PLAIN check-ins in the CARD view are a RECEIPT (Aug 21, Mark's
+          // pick): content-height, CENTERED (bottom-anchoring made a short
+          // card read as an off-centre half-sheet). Drill-in views (add
+          // people, settings) snap to the full fixed height so the card
+          // doesn't stretch and shrink as you navigate (Mark's note 2).
+          ...(!albumNight && view === "card"
+            ? {
+                top: "50%",
+                transform: "translateY(-50%)",
+                maxHeight: "calc(100% - 100px)",
+              }
+            : { bottom: 80, height: "calc(100% - 100px)" }),
         }}
       >
         <div className="px-5 pt-3 pb-2.5 border-b border-neutral-100">
