@@ -60,6 +60,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
   // Session-door invitees arrive pre-filled and merge in.
   const [friends, setFriends] = useState(null); // null = loading
   const [whoIds, setWhoIds] = useState(() => new Set(prefill?.invitees || []));
+  const [whoQ, setWhoQ] = useState(""); // adaptive search (>8 friends)
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -457,28 +458,66 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         )}
 
         {/* WHO? — optional; selected friends get the consent tag + push on
-            save (never published to their friends until they accept). */}
+            save. ADAPTIVE (the July CheckinSheet rule, Mark's Aug 21 note:
+            a chip wall "isn't great for users with a lot of friends"):
+            ≤8 friends = all chips; more = a search box that filters as you
+            type. Selected always render as solid chips up top. */}
         {friends && friends.length > 0 && (
           <>
             <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
               Who? <span className="text-neutral-400">(optional)</span>
             </label>
-            <div className="flex flex-wrap gap-1.5 mb-1">
-              {friends.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => toggleWho(f.id)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition active:scale-95 ${
-                    whoIds.has(f.id)
-                      ? "bg-[#455d3b] text-white"
-                      : "bg-white border border-neutral-200 text-neutral-700"
-                  }`}
-                >
-                  {(f.display_name || "Friend").split(" ")[0]}
-                </button>
-              ))}
-            </div>
+            {whoIds.size > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {friends
+                  .filter((f) => whoIds.has(f.id))
+                  .map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => toggleWho(f.id)}
+                      className="rounded-full bg-[#455d3b] px-3 py-1.5 text-xs font-medium text-white transition active:scale-95"
+                    >
+                      {(f.display_name || "Friend").split(" ")[0]} ✕
+                    </button>
+                  ))}
+              </div>
+            )}
+            {friends.length > 8 && (
+              <input
+                value={whoQ}
+                onChange={(e) => setWhoQ(e.target.value)}
+                placeholder="Search friends"
+                className="mb-1.5 w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
+              />
+            )}
+            {(friends.length <= 8 || whoQ.trim().length > 0) && (
+              <div className="flex flex-wrap gap-1.5 mb-1">
+                {friends
+                  .filter(
+                    (f) =>
+                      !whoIds.has(f.id) &&
+                      (friends.length <= 8 ||
+                        (f.display_name || "")
+                          .toLowerCase()
+                          .includes(whoQ.trim().toLowerCase()))
+                  )
+                  .slice(0, 12)
+                  .map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => {
+                        toggleWho(f.id);
+                        setWhoQ("");
+                      }}
+                      className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition active:scale-95"
+                    >
+                      {(f.display_name || "Friend").split(" ")[0]}
+                    </button>
+                  ))}
+              </div>
+            )}
             {whoIds.size > 0 && (
               <p className="mb-2 px-1 text-[10px] text-neutral-400">
                 They'll be asked before their friends see anything.

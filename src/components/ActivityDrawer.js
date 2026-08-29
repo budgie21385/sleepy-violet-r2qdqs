@@ -816,7 +816,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       const to = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
       const { data: acts } = await supabase
         .from("activities")
-        .select("id, venue_id, label, created_at")
+        .select("id, venue_id, label, created_at, is_album")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .gte("created_at", from)
@@ -846,6 +846,9 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
           venueObj: venById[a.venue_id] || null,
           venueName: venById[a.venue_id]?.name || "that spot",
           label: a.label || null,
+          // Album door #2 (Aug 21): a PLAIN night's nudge offers the album;
+          // an album that's merely photoless keeps the add-photos ask.
+          isAlbum: a.is_album === true,
           checkinTimestamp: a.created_at,
           // Surfaces as NEW the morning after, not buried at check-in time.
           timestamp: new Date(
@@ -2964,11 +2967,23 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-sm text-neutral-900">
-            Add photos from{" "}
-            <strong className="font-medium">{item.venueName}</strong>?
+            {item.isAlbum ? (
+              <>
+                Add photos from{" "}
+                <strong className="font-medium">{item.venueName}</strong>?
+              </>
+            ) : (
+              <>
+                Collect photos from last night at{" "}
+                <strong className="font-medium">{item.venueName}</strong>?
+              </>
+            )}
           </p>
           <p className="text-[11px] text-neutral-500">
-            Last night's check-in — while it's still fresh{whenSuffix}
+            {item.isAlbum
+              ? "Last night's album — while it's still fresh"
+              : "Create the album while it's still fresh"}
+            {whenSuffix}
           </p>
         </div>
       </button>

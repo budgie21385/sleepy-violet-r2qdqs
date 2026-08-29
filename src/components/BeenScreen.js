@@ -7,7 +7,7 @@
 // page (Mark: "It should stay on the same page you are on"). This screen is
 // purely the list; "+ Add" calls up through onAddNight.
 import { useState, useEffect, useMemo } from "react";
-import { ArrowLeft, MapPin } from "lucide-react";
+import { ArrowLeft, MapPin, Camera } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { whenAgo } from "../lib/checkins";
 import { MapVenueSheet } from "./MapVenueSheet";
@@ -60,7 +60,7 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
     (async () => {
       const { data } = await supabase
         .from("activities")
-        .select("id, venue_id, label, created_at, joined_from")
+        .select("id, venue_id, label, created_at, joined_from, is_album")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .order("created_at", { ascending: false })
@@ -179,6 +179,8 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           legs: ordered,
           // The title lives on the root; fall back to any leg that carries one.
           label: ordered.find((l) => l.label)?.label || null,
+          // Album vs plain (Aug 21, Mark: the list should show the kind).
+          isAlbum: ordered.some((l) => l.is_album === true),
           startedAt: ordered[0].created_at,
         };
       })
@@ -331,8 +333,10 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
                 }
                 className="w-full rounded-2xl bg-white border border-neutral-100 p-3 flex items-center gap-3 text-left hover:bg-neutral-50 active:scale-[0.99] transition"
               >
+                {/* Icon = the KIND (Aug 21, Mark): camera for album nights,
+                    pin for plain check-ins — one row per night either way. */}
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
-                  <MapPin size={16} />
+                  {n.isAlbum ? <Camera size={16} /> : <MapPin size={16} />}
                 </div>
                 <div className="flex-1 min-w-0">
                   {/* TITLE LEADS (Mark, July 31: "have a focus on the title if
