@@ -307,7 +307,14 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             // first bar at 2am shouldn't print its name twice.
             const trail = [];
             for (const leg of n.legs) {
-              const nm = venueById.get(leg.venue_id)?.name;
+              const v = venueById.get(leg.venue_id);
+              // Personal places carry their suburb into the line — the whole
+              // location story the world gets: "Mark's house · Fitzroy"
+              // (Aug 30). Real venues stay name-only; suburb would be noise.
+              const nm =
+                v?.source === "personal" && v?.suburb
+                  ? `${v.name} · ${v.suburb}`
+                  : v?.name;
               if (nm && trail[trail.length - 1] !== nm) trail.push(nm);
             }
             // Companions are per-leg; the night shows everyone who was on any

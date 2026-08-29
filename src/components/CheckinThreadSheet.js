@@ -401,6 +401,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // so they share a switch (Mark's call). Owner opens it from the cog.
   const [nightPerms, setNightPerms] = useState(null); // {rootId, ownerId, canInvite}
   const [permBusy, setPermBusy] = useState(false);
+  // Street address of a personal-place night — RLS returns it only to the
+  // guest list, so non-null means this viewer is allowed to see it.
+  const [privateAddress, setPrivateAddress] = useState(null);
   const iAmRootOwner = nightPerms?.ownerId === userId;
   const mayInvite = !nightPerms || iAmRootOwner || nightPerms.canInvite;
   const mayShareLink = mayInvite;
@@ -614,6 +617,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .select("id, user_id, guests_can_invite, is_album")
         .eq("id", rootId)
         .maybeSingle();
+      // PRIVATE ADDRESS (Aug 30) — the night at a personal place. RLS only
+      // returns the row to the guest list, so a plain select IS the gate.
+      const { data: priv } = await supabase
+        .from("activity_private_place")
+        .select("address")
+        .eq("activity_id", rootId)
+        .maybeSingle();
+      if (!cancelled) setPrivateAddress(priv?.address || null);
       if (!cancelled && root) {
         setNightPerms({
           rootId: root.id,
@@ -1579,6 +1590,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   thread.venueName
                 )}
               </p>
+              {/* Personal-place address — only ever fetched for the guest
+                  list (RLS), so rendering it here is already gated. */}
+              {privateAddress && (
+                <p className="mt-0.5 text-[11px] text-neutral-500">
+                  📍 {privateAddress}
+                  <span className="text-neutral-400"> · guest list only</span>
+                </p>
+              )}
               {/* Sits under the trail, not in the crowded avatar row — it's
                   about places, and that's where the places are. Any
                   participant, per the rule that adding a place isn't an

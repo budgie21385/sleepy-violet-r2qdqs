@@ -46,6 +46,7 @@ import {
 } from "./lib/friendships";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
+import { EventsScreen } from "./components/EventsScreen";
 import { FriendAvatar } from "./components/FriendAvatar";
 import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
 import { CheckinSheet } from "./components/CheckinSheet";
@@ -4755,6 +4756,17 @@ if (authLoading || guestLoading) {
           showToast={showToast}
         />
       )}
+      {/* EVENTS — fifth tab (Aug 29–30). Upcoming nights + past events;
+          "+ Create event" opens the unified form's event variant. */}
+      {tab === "events" && session?.user?.id && (
+        <EventsScreen
+          userId={session.user.id}
+          showToast={showToast}
+          onOpenProfile={openProfile}
+          onCreateEvent={() => setCheckinForm({ event: true })}
+          refreshSignal={beenRefresh}
+        />
+      )}
       {showImport && (
         <ImportGoogleMapsScreen
           userId={session?.user?.id}
@@ -4891,7 +4903,13 @@ if (authLoading || guestLoading) {
           onCreated={(t) => {
             setCheckinForm(null);
             setBeenRefresh((n) => n + 1);
-            if (t.bornAlbum) setThreadCheckin(t);
+            // Events skip the album prompt (the toggle already answered) and
+            // open the card — that IS the share moment: address for the
+            // guest list, Collect photos link for everyone else.
+            if (t.isEvent) {
+              showToast("Event created — share it from the card");
+              setThreadCheckin(t);
+            } else if (t.bornAlbum) setThreadCheckin(t);
             else setAlbumPromptFor(t); // "Create an album?" first (Aug 21)
           }}
         />

@@ -30,6 +30,11 @@ function localDateStr(d = new Date()) {
 
 export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) {
   const todayStr = localDateStr();
+  // EVENT VARIANT (Aug 30) — same form, deliberate tier. Date-only future,
+  // Collect photos + Open guest list toggles (both born ON), NO Who (Mark:
+  // dropped until accepting can honestly mean attending), NO live-map toggle
+  // (presence is a choice made on the night, never at planning time).
+  const isEvent = prefill?.event === true;
   const [addLabel, setAddLabel] = useState("");
   const [addQ, setAddQ] = useState("");
   const [addResults, setAddResults] = useState([]);
@@ -41,12 +46,12 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
   const [addSearching, setAddSearching] = useState(() => !prefill?.venue);
   const [addBlurred, setAddBlurred] = useState(false);
   const [addMode, setAddMode] = useState(() =>
-    prefill?.mode === "now" ? "now" : "date"
+    prefill?.mode === "now" && prefill?.event !== true ? "now" : "date"
   );
   const [addDate, setAddDate] = useState(() =>
     prefill?.date
       ? prefill.date
-      : prefill?.mode === "now"
+      : prefill?.mode === "now" || prefill?.event === true
       ? localDateStr()
       : localDateStr(new Date(Date.now() - 24 * 60 * 60 * 1000))
   );
@@ -101,9 +106,24 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     });
   }
   const addInvitees = Array.from(whoIds);
+  // EVENT toggles — Collect photos maps to is_album (the event's album is the
+  // point), Open guest list to guests_can_invite. Both default ON per Mark.
+  const [collectPhotos, setCollectPhotos] = useState(true);
+  const [openGuests, setOpenGuests] = useState(true);
+  // PERSONAL ADDRESS (Aug 30, Mark: "What if it's a personal address?") —
+  // suburb goes on the personal venue row (world sees "Mark's house party ·
+  // Fitzroy" and nothing more); the street address goes to
+  // activity_private_place, readable only by the guest list. Never on venues:
+  // venue reads are open by design (personal_places.sql).
+  const [placeSuburb, setPlaceSuburb] = useState("");
+  const [placeAddress, setPlaceAddress] = useState("");
+  const [suburbTouched, setSuburbTouched] = useState(false);
+  const personalVenue =
+    addVenues[0]?.source === "personal" ? addVenues[0] : null;
   // BORN-ALBUM (Aug 21): the scheduler door creates the album directly —
   // its own popup already asked, so the post-save prompt must not double-ask.
-  const bornAlbum = prefill?.album === true;
+  // Events fold in: the Collect photos toggle IS the album answer.
+  const bornAlbum = prefill?.album === true || (isEvent && collectPhotos);
 
   useEffect(() => {
     const q = addQ.trim();
@@ -125,6 +145,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     setAddVenues((prev) =>
       prev.some((x) => x.id === v.id) ? prev : [...prev, v]
     );
+    if (v.source === "personal" && v.suburb) setPlaceSuburb(v.suburb);
     setAddSearching(false);
     setAddQ("");
     setAddResults([]);
@@ -157,7 +178,10 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     else if (addDate >= todayStr)
       ts = new Date(`${addDate}T${addTime || "19:00"}:00`);
     else ts = new Date(`${addDate}T20:00:00`);
-    const liveEligible = isNow || (addMode === "date" && addDate >= todayStr);
+    // Events are never live at creation — the choice becomes honest on the
+    // night, from the card, not three weeks out.
+    const liveEligible =
+      !isEvent && (isNow || (addMode === "date" && addDate >= todayStr));
     const showLive = liveEligible && addShowLive;
     const W = 12 * 60 * 60 * 1000;
     // Already have a check-in that night? Open it instead of a dupe twin.
@@ -173,12 +197,15 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     const label = addLabel.trim() || null;
     let act = existing?.[0] || null;
     // Reopening an existing plain night through the album door (scheduler)
-    // flips its album on — own row, plain update.
-    if (act && bornAlbum) {
-      await supabase
-        .from("activities")
-        .update({ is_album: true })
-        .eq("id", act.id);
+    // or the event door flips the tier up — own row, plain update.
+    if (act && (bornAlbum || isEvent)) {
+      const up = {};
+      if (bornAlbum) up.is_album = true;
+      if (isEvent) {
+        up.is_event = true;
+        up.guests_can_invite = openGuests;
+      }
+      await supabase.from("activities").update(up).eq("id", act.id);
     }
     if (act && label && !act.label) {
       const { error: lblErr } = await supabase
@@ -199,6 +226,8 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           created_at: ts.toISOString(),
           show_live: showLive,
           is_album: bornAlbum, // night-level flag lives on the root
+          is_event: isEvent,
+          guests_can_invite: isEvent ? openGuests : false,
         })
         .select("id, created_at, label")
         .single();
@@ -209,6 +238,27 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         return;
       }
       act = inserted;
+    }
+
+    // PERSONAL PLACE extras. Suburb → the venue row (own personal rows are
+    // updatable; policy allows suburb, still never an address). Street
+    // address → activity_private_place on the ROOT, guest-list-only by RLS.
+    if (personalVenue) {
+      const sub = placeSuburb.trim().slice(0, 40);
+      if (sub && sub !== (personalVenue.suburb || "")) {
+        const { error: subErr } = await supabase
+          .from("venues")
+          .update({ suburb: sub })
+          .eq("id", personalVenue.id);
+        if (subErr) console.error("Suburb update failed:", subErr);
+      }
+      const addr = placeAddress.trim().slice(0, 200);
+      if (addr) {
+        const { error: addrErr } = await supabase
+          .from("activity_private_place")
+          .upsert({ activity_id: act.id, address: addr });
+        if (addrErr) console.error("Private address save failed:", addrErr);
+      }
     }
 
     // The trail: legs point at the root via joined_from — the cluster folds
@@ -271,6 +321,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       venueObj: first,
       timestamp: act.created_at,
       bornAlbum, // App skips the album prompt when the door already asked
+      isEvent, // App opens the card as the share moment
     });
   }
 
@@ -288,7 +339,11 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       >
         <div className="flex items-start justify-between mb-1">
           <p className="text-sm font-semibold">
-            {addMode === "now" ? "Check in" : "Create a check-in"}
+            {isEvent
+              ? "Create an event"
+              : addMode === "now"
+              ? "Check in"
+              : "Create a check-in"}
           </p>
           <button
             type="button"
@@ -300,8 +355,9 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           </button>
         </div>
         <p className="text-[11px] text-neutral-500 mb-3">
-          It lands in your Been list. Add photos and videos after, and if
-          friends checked in that night, their moments show up too.
+          {isEvent
+            ? "The album's ready before the night. Anyone can add photos with your link, even without Flanit."
+            : "It lands in your Been list. Add photos and videos after, and if friends checked in that night, their moments show up too."}
         </p>
         {/* What / Where / When (Mark, Aug 20) — three questions, no more
             words. Also settles audit #4: flat labels beat mode-aware ones. */}
@@ -457,12 +513,58 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           </>
         )}
 
+        {/* PERSONAL PLACE extras (Aug 30) — suburb is the only location the
+            world ever sees ("Mark's house party · Fitzroy"); the street
+            address is event-only and guest-list-only. */}
+        {personalVenue && (
+          <div className="mt-1 mb-1">
+            {isEvent && (
+              <>
+                <input
+                  value={placeAddress}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setPlaceAddress(val);
+                    // Guess the suburb from the last comma part until edited.
+                    if (!suburbTouched) {
+                      const parts = val.split(",");
+                      if (parts.length > 1)
+                        setPlaceSuburb(parts[parts.length - 1].trim());
+                    }
+                  }}
+                  placeholder="Street address (optional)"
+                  maxLength={200}
+                  className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-1"
+                />
+                <p className="mb-2 px-1 text-[10px] text-neutral-400">
+                  Only your guest list ever sees the address.
+                </p>
+              </>
+            )}
+            <input
+              value={placeSuburb}
+              onChange={(e) => {
+                setSuburbTouched(true);
+                setPlaceSuburb(e.target.value);
+              }}
+              placeholder="Suburb (optional)"
+              maxLength={40}
+              className="w-full rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b] mb-1"
+            />
+            <p className="mb-1 px-1 text-[10px] text-neutral-400">
+              Friends only ever see the suburb.
+            </p>
+          </div>
+        )}
+
         {/* WHO? — optional; selected friends get the consent tag + push on
             save. ADAPTIVE (the July CheckinSheet rule, Mark's Aug 21 note:
             a chip wall "isn't great for users with a lot of friends"):
             ≤8 friends = all chips; more = a search box that filters as you
-            type. Selected always render as solid chips up top. */}
-        {friends && friends.length > 0 && (
+            type. Selected always render as solid chips up top. EVENTS skip
+            Who entirely (Aug 30 ruling) — invites come later, from the card,
+            once accepting can mean attending. */}
+        {!isEvent && friends && friends.length > 0 && (
           <>
             <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
               Who? <span className="text-neutral-400">(optional)</span>
@@ -529,6 +631,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
           When?
         </label>
+        {!isEvent && (
         <div className="mb-2 flex bg-neutral-100 rounded-full p-0.5 text-sm font-medium">
           <button
             type="button"
@@ -553,10 +656,12 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
             Choose date
           </button>
         </div>
+        )}
         {addMode === "date" && (
           <div className="mb-2 flex gap-2">
             <input
               type="date"
+              min={isEvent ? todayStr : undefined}
               value={addDate}
               onChange={(e) => setAddDate(e.target.value)}
               className="flex-1 min-w-0 appearance-none bg-white text-left rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
@@ -571,13 +676,73 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
             )}
           </div>
         )}
-        {addMode === "date" && addDate > todayStr && (
+        {!isEvent && addMode === "date" && addDate > todayStr && (
           <p className="mb-2 px-1 text-[11px] text-[#455d3b]">
             Upcoming night — the card's ready now, so you can share the photo
             link before the day.
           </p>
         )}
-        {addMode === "now" || (addMode === "date" && addDate >= todayStr) ? (
+        {isEvent ? (
+          <>
+            {/* Collect photos (default ON, above the guest-list toggle —
+                Mark's field order) + Open guest list. No live-map toggle:
+                events are never live at creation. */}
+            <div className="mb-2 rounded-2xl border border-[#c5d4c2] bg-[#edf2eb]/40 px-3.5 py-2.5">
+              <div className="flex items-center gap-3">
+                <span className="flex-1">
+                  <span className="block text-sm font-medium text-neutral-800">
+                    Collect photos
+                  </span>
+                  <span className="block text-[11px] text-neutral-500">
+                    One album for the night, link and QR included
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={collectPhotos}
+                  onClick={() => setCollectPhotos((v) => !v)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                    collectPhotos ? "bg-[#455d3b]" : "bg-neutral-300"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                      collectPhotos ? "left-[22px]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+            <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
+              <div className="flex items-center gap-3">
+                <span className="flex-1">
+                  <span className="block text-sm font-medium text-neutral-800">
+                    Open guest list
+                  </span>
+                  <span className="block text-[11px] text-neutral-500">
+                    Guests can invite others
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={openGuests}
+                  onClick={() => setOpenGuests((v) => !v)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                    openGuests ? "bg-[#455d3b]" : "bg-neutral-300"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                      openGuests ? "left-[22px]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          </>
+        ) : addMode === "now" || (addMode === "date" && addDate >= todayStr) ? (
           <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
             <div className="flex items-center gap-3">
               <span className="flex-1 text-sm font-medium text-neutral-800">
@@ -631,6 +796,8 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
               future = "Done"; only genuinely past days = "Add to Been". */}
           {addSaving
             ? "Adding…"
+            : isEvent
+            ? "Create event"
             : addMode === "now"
             ? "Check in"
             : addDate >= todayStr

@@ -5,7 +5,7 @@
   "keywords": [],
   "main": "src/index.tsx",
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.2",

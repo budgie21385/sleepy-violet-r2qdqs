@@ -11,6 +11,10 @@
 //   4. TIME'S UP       — one clean push to the host when an undecided
 //                        session's clock runs out (replaces duplicate
 //                        guest-device sends).
+//   5. EVENT REMINDERS — hour before an is_event night: owner + everyone
+//                        who ACCEPTED an invite (Aug 30, Mark's probe: the
+//                        accepted tag is the RSVP-yes we already have;
+//                        pending = asked, not coming yet, no buzz).
 // Every send is logged in nudge_log with a UNIQUE(kind, target, user) —
 // a nudge can never fire twice, however often the clock ticks. Nudges
 // (2, 3) respect quiet hours (9:00–21:00 Melbourne); reminders (1) and
@@ -52,7 +56,7 @@ export default async function handler(req, res) {
   const nowMs = now.getTime();
   const hourMelb = melbourneHour(now);
   const quiet = hourMelb < 9 || hourMelb >= 21; // nudges hold; reminders don't
-  const summary = { reminders: 0, didYouGo: 0, photoNudges: 0, timeups: 0, errors: [] };
+  const summary = { reminders: 0, didYouGo: 0, photoNudges: 0, timeups: 0, eventReminders: 0, errors: [] };
 
   // Send to every subscription a user has; prune dead ones. Quietly a
   // no-op for users with no subscriptions (never enabled push).
@@ -119,7 +123,7 @@ export default async function handler(req, res) {
           summary.reminders += await push(
             part.user_id,
             `You're going to ${vName} 🎉`,
-            `${timeTxt} — see you there`
+            `${timeTxt}, see you there`
           );
         }
       }
@@ -165,7 +169,7 @@ export default async function handler(req, res) {
             summary.didYouGo += await push(
               part.user_id,
               `Did you go to ${vName}?`,
-              "Tell us in Flanit — it lands in your Been list"
+              "Tell us in Flanit, it lands in your Been list"
             );
           }
         }
@@ -205,7 +209,7 @@ export default async function handler(req, res) {
               ? `Add photos from ${vName} 📸`
               : `Collect photos from ${vName}?`,
             a.is_album
-              ? "Last night's album — while it's still fresh"
+              ? "Last night's album, while it's still fresh"
               : "Create the album while the night's still fresh"
           );
         }
@@ -235,8 +239,47 @@ export default async function handler(req, res) {
         summary.timeups += await push(
           s.host_user_id,
           "⏰ Time's up on your session",
-          `${submitted} sent picks — see the results`
+          `${submitted} sent picks, see the results`
         );
+      }
+    }
+    // ---- 5. EVENT REMINDERS: is_event night starting within the hour ----
+    // Audience = owner + accepted tags on the night. Like plan reminders,
+    // this is the point of the moment — exempt from quiet hours.
+    const { data: events } = await admin
+      .from("activities")
+      .select("id, user_id, venue_id, label, created_at")
+      .eq("kind", "checkin")
+      .eq("is_event", true)
+      .gte("created_at", now.toISOString())
+      .lte("created_at", inHour)
+      .limit(50);
+    for (const ev of events || []) {
+      const { data: venue } = ev.venue_id
+        ? await admin.from("venues").select("name").eq("id", ev.venue_id).maybeSingle()
+        : { data: null };
+      const what = ev.label || venue?.name || "your event";
+      const where = ev.label && venue?.name ? ` at ${venue.name}` : "";
+      const timeTxt = new Date(ev.created_at).toLocaleTimeString("en-AU", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Australia/Melbourne",
+      });
+      const { data: tags } = await admin
+        .from("activity_tags")
+        .select("tagged_user_id")
+        .eq("activity_id", ev.id)
+        .eq("status", "accepted");
+      const people = new Set([ev.user_id, ...(tags || []).map((t) => t.tagged_user_id)]);
+      for (const uid of people) {
+        if (!uid) continue;
+        if (await claim("event_reminder", ev.id, uid)) {
+          summary.eventReminders += await push(
+            uid,
+            `${what} is tonight 🎉`,
+            `${timeTxt}${where}, see you there`
+          );
+        }
       }
     }
   } catch (e) {

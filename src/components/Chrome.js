@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 // HeartHandshake/ListChecks = the mode icons everywhere (Aug 21, Mark:
 // "Why did you not update all the instances" — all-surfaces rule).
-import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, HeartHandshake, ListChecks } from "lucide-react";
+import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, HeartHandshake, ListChecks, CalendarDays } from "lucide-react";
 
 export function FloatingActionButton({
   tab,
@@ -186,6 +186,19 @@ export function BottomTabBar({ tab, setTab, unreadCount = 0, profileDot = false 
             )}
           </span>
           <span className="text-xs font-medium">Activity</span>
+        </button>
+        {/* EVENTS — fifth tab (Aug 29, Mark confirmed; iOS convention caps
+            at five, and Profile collapses to an avatar when Feed arrives,
+            per the June nav plan). */}
+        <button
+          type="button"
+          onClick={() => setTab("events")}
+          className={`flex-1 flex flex-col items-center gap-1 py-3 transition ${
+            tab === "events" ? "text-[#455d3b]" : "text-neutral-400"
+          }`}
+        >
+          <CalendarDays size={20} />
+          <span className="text-xs font-medium">Events</span>
         </button>
         <button
           type="button"
