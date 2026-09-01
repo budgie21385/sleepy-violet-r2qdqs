@@ -106,10 +106,13 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     });
   }
   const addInvitees = Array.from(whoIds);
-  // EVENT toggles — Collect photos maps to is_album (the event's album is the
-  // point), Open guest list to guests_can_invite. Both default ON per Mark.
+  // EVENT toggle — Collect photos maps to is_album (the event's album is
+  // the point). "Open guest list" was REMOVED Aug 30 (Mark: "not at all
+  // good for people not on it") — it governed a Flanit-only door that
+  // wasn't built; it returns with the guest package (anon invite + RSVP +
+  // public ?when= page + cover), all at once or not at all. The card's
+  // settings toggle still controls guests_can_invite on any night.
   const [collectPhotos, setCollectPhotos] = useState(true);
-  const [openGuests, setOpenGuests] = useState(true);
   // PERSONAL ADDRESS (Aug 30, Mark: "What if it's a personal address?") —
   // suburb goes on the personal venue row (world sees "Mark's house party ·
   // Fitzroy" and nothing more); the street address goes to
@@ -201,10 +204,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     if (act && (bornAlbum || isEvent)) {
       const up = {};
       if (bornAlbum) up.is_album = true;
-      if (isEvent) {
-        up.is_event = true;
-        up.guests_can_invite = openGuests;
-      }
+      if (isEvent) up.is_event = true;
       await supabase.from("activities").update(up).eq("id", act.id);
     }
     if (act && label && !act.label) {
@@ -227,7 +227,9 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           show_live: showLive,
           is_album: bornAlbum, // night-level flag lives on the root
           is_event: isEvent,
-          guests_can_invite: isEvent ? openGuests : false,
+          // guests_can_invite deliberately NOT written — the DB default
+          // rules until the guest package lands; the card's settings
+          // toggle remains the control.
         })
         .select("id, created_at, label")
         .single();
@@ -709,10 +711,10 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         )}
         {isEvent ? (
           <>
-            {/* Collect photos (default ON, above the guest-list toggle —
-                Mark's field order) + Open guest list. No live-map toggle:
-                events are never live at creation. */}
-            <div className="mb-2 rounded-2xl border border-[#c5d4c2] bg-[#edf2eb]/40 px-3.5 py-2.5">
+            {/* Collect photos (default ON). No live-map toggle (events are
+                never live at creation) and no guest-list toggle (removed
+                Aug 30 — returns with the guest package). */}
+            <div className="mb-3 rounded-2xl border border-[#c5d4c2] bg-[#edf2eb]/40 px-3.5 py-2.5">
               <div className="flex items-center gap-3">
                 <span className="flex-1">
                   <span className="block text-sm font-medium text-neutral-800">
@@ -734,33 +736,6 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
                   <span
                     className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
                       collectPhotos ? "left-[22px]" : "left-0.5"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-            <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
-              <div className="flex items-center gap-3">
-                <span className="flex-1">
-                  <span className="block text-sm font-medium text-neutral-800">
-                    Open guest list
-                  </span>
-                  <span className="block text-[11px] text-neutral-500">
-                    Guests can invite others
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={openGuests}
-                  onClick={() => setOpenGuests((v) => !v)}
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-                    openGuests ? "bg-[#455d3b]" : "bg-neutral-300"
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-                      openGuests ? "left-[22px]" : "left-0.5"
                     }`}
                   />
                 </button>
