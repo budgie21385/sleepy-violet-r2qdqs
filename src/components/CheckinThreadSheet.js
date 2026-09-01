@@ -404,6 +404,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // Street address of a personal-place night — RLS returns it only to the
   // guest list, so non-null means this viewer is allowed to see it.
   const [privateAddress, setPrivateAddress] = useState(null);
+  // Collect-link existence for the card-face signpost (Aug 30). null =
+  // loading (row hidden), false = none yet ("Set up"), truthy = minted
+  // ("Share"). Re-checked when the card view fronts, so minting or revoking
+  // in settings updates the row on the way back.
+  const [faceLink, setFaceLink] = useState(null);
   const iAmRootOwner = nightPerms?.ownerId === userId;
   const mayInvite = !nightPerms || iAmRootOwner || nightPerms.canInvite;
   const mayShareLink = mayInvite;
@@ -419,6 +424,25 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .eq("revoked", false)
         .maybeSingle();
       if (!cancelled) setCollectLink(data || false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, uploadTargetId]);
+
+  // Card-face signpost state — checked when the card view fronts, so a mint
+  // or revoke in settings is reflected on the way back.
+  useEffect(() => {
+    if (view !== "card" || !uploadTargetId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("checkin_collect_links")
+        .select("id")
+        .eq("activity_id", uploadTargetId)
+        .eq("revoked", false)
+        .maybeSingle();
+      if (!cancelled) setFaceLink(data || false);
     })();
     return () => {
       cancelled = true;
@@ -2127,6 +2151,37 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 {albumBusy
                   ? "Creating…"
                   : "Create album — collect photos from the night"}
+              </span>
+            </button>
+          </div>
+        )}
+        {/* COLLECT-LINK SIGNPOST (Aug 30, Mark: "the collect link is hidden
+            in the settings — should it be?"). Every album card carries the
+            row; tapping it goes to SETTINGS, the one counter where the link
+            actually lives (share/copy/revoke) — no duplicated share plumbing
+            on the face. Events arrive minted (auto-mint at creation), casual
+            albums read "Set up" until someone chooses — the link stays a
+            deliberate act outside events. */}
+        {view === "card" && albumNight && uploadTargetId && mayShareLink && faceLink !== null && (
+          <div className="px-4 pt-3">
+            <button
+              type="button"
+              onClick={() => setView("settings")}
+              className="w-full rounded-2xl border border-[#c5d4c2] bg-[#edf2eb]/60 flex items-center gap-2.5 px-3.5 py-2.5 text-left active:scale-[0.99] transition"
+            >
+              <span className="text-base shrink-0">🔗</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-xs font-medium text-[#2f4429]">
+                  {faceLink
+                    ? "Anyone can add photos with this link"
+                    : "Collect photos from anyone"}
+                </span>
+                <span className="block text-[10px] text-[#6b7c63]">
+                  No app needed
+                </span>
+              </span>
+              <span className="shrink-0 rounded-full bg-[#455d3b] px-3.5 py-1.5 text-xs font-medium text-white">
+                {faceLink ? "Share" : "Set up"}
               </span>
             </button>
           </div>

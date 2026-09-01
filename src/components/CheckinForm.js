@@ -261,6 +261,31 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       }
     }
 
+    // AUTO-MINT the collect link for events with photos on (Aug 30, Mark:
+    // the link was buried in settings). An event that toggled Collect
+    // photos wants the link by definition — the card-face signpost reads
+    // "Share" from birth instead of asking the owner to find a Create
+    // button. Casual albums stay deliberate. Failure is silent: settings
+    // can still mint.
+    if (isEvent && collectPhotos && act?.id) {
+      const { data: existingLink } = await supabase
+        .from("checkin_collect_links")
+        .select("id")
+        .eq("activity_id", act.id)
+        .eq("revoked", false)
+        .maybeSingle();
+      if (!existingLink) {
+        const token = (
+          crypto.randomUUID?.() ||
+          `${Date.now()}${Math.random().toString(36).slice(2)}`
+        ).replace(/-/g, "");
+        const { error: linkErr } = await supabase
+          .from("checkin_collect_links")
+          .insert({ activity_id: act.id, token });
+        if (linkErr) console.error("Event link auto-mint failed:", linkErr);
+      }
+    }
+
     // The trail: legs point at the root via joined_from — the cluster folds
     // them into one card, one album, one guest list (July 31 doctrine).
     const rest = addVenues.slice(1);

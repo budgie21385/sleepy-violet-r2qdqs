@@ -7,7 +7,7 @@
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect, useRef } from "react";
-import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock } from "lucide-react";
+import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock, CalendarDays } from "lucide-react";
 import { pushState, enablePush, sendPush } from "../lib/push";
 import {
   sendFriendRequest,
@@ -26,6 +26,7 @@ const KIND_WEIGHT = {
   photo_nudge: 1,
   plan_reminder: 1, // today's plan — outranks ambient news, still dismissible
   session_timeup: 1, // your session ended on the clock — go decide
+  event_reminder: 1, // today's event — same tier as the plan reminder
 };
 function itemWeight(i) {
   return KIND_WEIGHT[i.kind] ?? 2;
@@ -1067,13 +1068,21 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       // Night = my shard's root + one level (same walk as the photo items).
       let commentItems = [];
       let reactionItems = [];
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      // 60 DAYS, not 7 (Aug 30, Mark's field find: "New comment" pushes on
+      // older nights had no drawer item). The window is on MY SHARD's
+      // timestamp, but pushes have no window — and the cron era made late
+      // activity on old nights normal (morning-after invites, backdated
+      // did-you-go check-ins), so a week silently ate real items. The
+      // comment/reaction queries stay recency-capped by order+limit.
+      const lookback = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
       const { data: myActs } = await supabase
         .from("activities")
         .select("id, venue_id, created_at, label, joined_from")
         .eq("user_id", userId)
         .eq("kind", "checkin")
-        .gte("created_at", weekAgo);
+        .gte("created_at", lookback)
+        .order("created_at", { ascending: false })
+        .limit(200);
       if (myActs && myActs.length > 0) {
         const cRootIds = Array.from(
           new Set(myActs.map((a) => a.joined_from || a.id))
@@ -1564,6 +1573,131 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
     // Each block is FUSED (July 25: one failing block was blanking the whole
     // drawer — Promise.all rejects as a unit). A failure logs its name and
     // contributes nothing; everyone else still renders.
+    // ---- TAG ACCEPTED (Aug 30, Mark's field find: the "Tag accepted 🎉"
+    // push had no drawer twin). Accepted tags on MY nights, newest first.
+    // reciprocal=false excludes the auto-inserted counter-tags the accept
+    // flow writes on the ACCEPTER's shard (drawer_parity.sql). Requires that
+    // SQL — before it runs this block errors and the fuse eats it.
+    const tagAcceptedP = (async () => {
+      const out = [];
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: mine } = await supabase
+        .from("activities")
+        .select("id, venue_id, label, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (!mine || mine.length === 0) return out;
+      const byId = Object.fromEntries(mine.map((a) => [a.id, a]));
+      const { data: accs } = await supabase
+        .from("activity_tags")
+        .select("id, activity_id, tagged_user_id, responded_at")
+        .in("activity_id", mine.map((a) => a.id))
+        .eq("status", "accepted")
+        .eq("reciprocal", false)
+        .neq("tagged_user_id", userId)
+        .gte("responded_at", since)
+        .order("responded_at", { ascending: false })
+        .limit(10);
+      if (!accs || accs.length === 0) return out;
+      const pIds = Array.from(new Set(accs.map((t) => t.tagged_user_id)));
+      const vIds = Array.from(
+        new Set(accs.map((t) => byId[t.activity_id]?.venue_id).filter(Boolean))
+      );
+      const [profsRes, vensRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", pIds),
+        vIds.length
+          ? supabase.from("venues").select("*").in("id", vIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+      const pById = Object.fromEntries((profsRes.data || []).map((p) => [p.id, p]));
+      const vById = Object.fromEntries((vensRes.data || []).map((v) => [v.id, v]));
+      for (const t of accs) {
+        const act = byId[t.activity_id];
+        if (!act) continue;
+        out.push({
+          kind: "tag_accepted",
+          id: `tacc_${t.id}`,
+          activityId: act.id,
+          ownerId: userId,
+          profile: pById[t.tagged_user_id] || null,
+          otherId: t.tagged_user_id,
+          venueName: vById[act.venue_id]?.name || "your check-in",
+          venueObj: vById[act.venue_id] || null,
+          label: act.label || null,
+          checkinTimestamp: act.created_at,
+          timestamp: t.responded_at,
+        });
+      }
+      return out;
+    })();
+
+    // ---- EVENT REMINDERS (Aug 30) — the cron's job 5 pushes an hour out;
+    // this is its drawer twin: today's is_event nights, mine + accepted
+    // invites, from 3h before the slot until midnight after. Errors quietly
+    // pre-events_stage2.sql, per the fuse.
+    const eventReminderP = (async () => {
+      const out = [];
+      const nowMs = Date.now();
+      const horizon = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+      const past3h = new Date(nowMs - 3 * 60 * 60 * 1000).toISOString();
+      const { data: myEv } = await supabase
+        .from("activities")
+        .select("id, user_id, venue_id, label, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .eq("is_event", true)
+        .gte("created_at", past3h)
+        .lte("created_at", horizon)
+        .limit(10);
+      const { data: myTags } = await supabase
+        .from("activity_tags")
+        .select("activity_id")
+        .eq("tagged_user_id", userId)
+        .eq("status", "accepted")
+        .limit(200);
+      let invEv = [];
+      const tIds = (myTags || []).map((t) => t.activity_id);
+      if (tIds.length > 0) {
+        const { data } = await supabase
+          .from("activities")
+          .select("id, user_id, venue_id, label, created_at")
+          .in("id", tIds)
+          .eq("is_event", true)
+          .gte("created_at", past3h)
+          .lte("created_at", horizon);
+        invEv = data || [];
+      }
+      const seen = new Set();
+      const evs = [...(myEv || []), ...invEv].filter((a) =>
+        seen.has(a.id) ? false : seen.add(a.id)
+      );
+      if (evs.length === 0) return out;
+      const vIds = Array.from(new Set(evs.map((a) => a.venue_id).filter(Boolean)));
+      const { data: vens } = vIds.length
+        ? await supabase.from("venues").select("*").in("id", vIds)
+        : { data: [] };
+      const vById = Object.fromEntries((vens || []).map((v) => [v.id, v]));
+      for (const a of evs) {
+        out.push({
+          kind: "event_reminder",
+          id: `evrem_${a.id}`,
+          activityId: a.id,
+          ownerId: a.user_id,
+          venueName: vById[a.venue_id]?.name || "your event",
+          venueObj: vById[a.venue_id] || null,
+          label: a.label || null,
+          checkinTimestamp: a.created_at,
+          timestamp: a.created_at,
+        });
+      }
+      return out;
+    })();
+
     const fuse = (p, name, empty = []) =>
       p.catch((e) => {
         console.error(`Drawer block failed: ${name}`, e);
@@ -1587,6 +1721,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       venueShareItems,
       guestUploadItems,
       meetPeopleItems,
+      tagAcceptedItems,
+      eventReminderItems,
     ] = await Promise.all([
       fuse(requestsP, "requests", [[], []]),
       fuse(submittedP, "submitted"),
@@ -1605,6 +1741,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       fuse(venueShareP, "venueShares"),
       fuse(guestUploadP, "guestUploads"),
       fuse(meetPeopleP, "meetPeople"),
+      fuse(tagAcceptedP, "tagAccepted"),
+      fuse(eventReminderP, "eventReminders"),
     ]);
 
     const all = [
@@ -1627,6 +1765,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...venueShareItems,
       ...guestUploadItems,
       ...meetPeopleItems,
+      ...tagAcceptedItems,
+      ...eventReminderItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -1842,6 +1982,8 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             tagged_user_id: item.otherId,
             status: "accepted",
             responded_at: new Date().toISOString(),
+            reciprocal: true, // not a real accept — the tag_accepted drawer
+            // item must never fire for these (drawer_parity.sql)
           },
           { onConflict: "activity_id,tagged_user_id", ignoreDuplicates: true }
         );
@@ -2790,6 +2932,78 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-[11px] text-neutral-500 truncate">“{item.body}”{whenSuffix}</p>
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
+      </button>
+    );
+  }
+
+  if (item.kind === "tag_accepted") {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenThread?.({
+            activityId: item.activityId,
+            ownerId: item.ownerId,
+            ownerName: "You",
+            venueName: item.venueName,
+            venueObj: item.venueObj || null,
+            label: item.label || null,
+            timestamp: item.checkinTimestamp || item.timestamp,
+          })
+        }
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <FriendAvatar profile={item.profile} small />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{name}</strong> is in 🎉 They
+            accepted your check-in at{" "}
+            <strong className="font-medium">{item.venueName}</strong>
+          </p>
+          <p className="text-[11px] text-neutral-500">
+            They're on the night now.{whenSuffix}
+          </p>
+        </div>
+      </button>
+    );
+  }
+
+  if (item.kind === "event_reminder") {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenThread?.({
+            activityId: item.activityId,
+            ownerId: item.ownerId,
+            ownerName: item.ownerId ? "Host" : "You",
+            venueName: item.venueName,
+            venueObj: item.venueObj || null,
+            label: item.label || null,
+            timestamp: item.checkinTimestamp || item.timestamp,
+          })
+        }
+        className={`w-full text-left rounded-2xl ${bg} border border-[#cdd9c6] p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+          <CalendarDays size={16} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">
+              {item.label || item.venueName}
+            </strong>{" "}
+            is today 🎉
+          </p>
+          <p className="text-[11px] text-[#455d3b]">
+            {new Date(item.checkinTimestamp).toLocaleTimeString("en-AU", {
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+            {item.label && item.venueName ? ` at ${item.venueName}` : ""} · tap
+            to open
+          </p>
+        </div>
       </button>
     );
   }
