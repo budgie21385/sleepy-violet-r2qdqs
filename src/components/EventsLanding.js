@@ -26,23 +26,23 @@ export const CREATE_EVENT_INTENT_KEY = "flanit_create_event_intent";
 const COPY = {
   weddings: {
     hero: "Every guest's wedding photos. One album.",
-    sub: "Create your wedding on Flanit and the album is ready before the day. Guests add photos with a link or QR code — no app, no sign-up needed.",
+    sub: "Create your wedding on Flanit and the album is ready before the day. Guests add photos with a link or QR code. No app, no sign-up needed.",
     steps: [
-      "Create your wedding — takes two minutes",
+      "Create your wedding, in two minutes",
       "Share the link, or print the QR for the tables",
       "Every photo lands in one album, yours to keep",
     ],
-    cta: "Create your wedding album — free",
+    cta: "Create your wedding album, free",
   },
   events: {
     hero: "One link. Every guest's photos.",
-    sub: "Create your event and the album is ready before the night. Guests add photos with a link or QR — no app needed.",
+    sub: "Create your event and the album is ready before the night. Guests add photos with a link or QR. No app needed.",
     steps: [
-      "Create your event — takes two minutes",
+      "Create your event, in two minutes",
       "Share the link, or print the QR",
       "Every photo lands in one album",
     ],
-    cta: "Create your event — free",
+    cta: "Create your event, free",
   },
 };
 
@@ -123,7 +123,7 @@ export function EventsLanding({ variant = "events" }) {
       setPhase("code");
     } catch (e) {
       console.error("Landing OTP failed:", e);
-      setErr("Couldn't send the code — try again.");
+      setErr("Couldn't send the code. Try again.");
     }
     setBusy(false);
   }
@@ -145,7 +145,7 @@ export function EventsLanding({ variant = "events" }) {
       goCreate();
     } catch (e) {
       console.error("Landing code failed:", e);
-      setErr("That code didn't work — check it and try again.");
+      setErr("That code didn't work. Check it and try again.");
       setBusy(false);
     }
   }
@@ -206,7 +206,7 @@ export function EventsLanding({ variant = "events" }) {
               </p>
               <p className="mt-1 text-xs text-neutral-500">
                 {mode === "create"
-                  ? "Your email gets you started — we'll send a code."
+                  ? "Your email gets you started. We'll send a code."
                   : "We'll email you a code. This lands in your Events tab everywhere you're signed in."}
               </p>
               <input
@@ -231,7 +231,7 @@ export function EventsLanding({ variant = "events" }) {
                 type="button"
                 disabled={busy || !email.trim() || !captcha}
                 onClick={sendCode}
-                className="mt-2 w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:bg-neutral-300 active:scale-[0.99] transition"
+                className="mt-2 w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:opacity-60 active:scale-[0.99] transition"
               >
                 {busy ? "Sending…" : "Email me a code"}
               </button>
@@ -265,7 +265,7 @@ export function EventsLanding({ variant = "events" }) {
                 type="button"
                 disabled={busy || !code.trim()}
                 onClick={submitCode}
-                className="mt-2 w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:bg-neutral-300 active:scale-[0.99] transition"
+                className="mt-2 w-full rounded-full bg-[#455d3b] py-3 text-sm font-medium text-white disabled:opacity-60 active:scale-[0.99] transition"
               >
                 {busy ? "Checking…" : "Continue"}
               </button>
