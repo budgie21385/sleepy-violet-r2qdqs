@@ -422,7 +422,6 @@ export default function RestaurantSwipeMVP() {
         setCheckinForm({ event: true });
       }
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, profile]);
   // "Create an album?" after a check-in saves (Aug 21) — holds the thread
   // object while the person decides; either answer opens the card.
