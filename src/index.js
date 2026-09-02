@@ -6,6 +6,7 @@ import App from "./App";
 import { PublicVenuePage } from "./components/PublicVenuePage";
 import { InstallScreen } from "./components/InstallScreen";
 import { CollectScreen } from "./components/CollectScreen";
+import { EventsLanding } from "./components/EventsLanding";
 import { UpdatePill } from "./components/UpdatePill";
 
 const rootElement = document.getElementById("root");
@@ -19,6 +20,9 @@ const publicVenue = window.location.pathname.match(/^\/v\/(\d+)/);
 const installPage = /^\/install\/?$/.test(window.location.pathname);
 // Collect link: flanit.co/c/<token> — guest photo drop for a check-in.
 const collectPage = window.location.pathname.match(/^\/c\/([A-Za-z0-9_-]+)/);
+// Organiser landings (Aug 30): /weddings = wedding framing (Say I Do links
+// here — source IS intent), /events = generic skin. Same component.
+const landingPage = window.location.pathname.match(/^\/(weddings|events)\/?$/);
 
 // Keep the push service worker alive across visits (push-only SW — it never
 // intercepts fetches, so it can't serve stale bundles).
@@ -36,6 +40,8 @@ root.render(
       <InstallScreen />
     ) : collectPage ? (
       <CollectScreen token={collectPage[1]} />
+    ) : landingPage ? (
+      <EventsLanding variant={landingPage[1]} />
     ) : (
       <App />
     )}

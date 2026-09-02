@@ -402,6 +402,28 @@ export default function RestaurantSwipeMVP() {
   // you are on") — CheckinForm overlays whatever is on screen; no tab
   // switch, no navigation. {venue?, date, time, mode, invitees}.
   const [checkinForm, setCheckinForm] = useState(null);
+  // LANDING → EVENT intent (Aug 30): /weddings and /events set a flag
+  // before signup; consumed ONCE here, only after a real session exists AND
+  // profile onboarding is done (username present) — so the event form is
+  // the very next thing a new organiser sees, and an existing user gets it
+  // immediately.
+  useEffect(() => {
+    if (
+      !session?.user?.id ||
+      session.user.is_anonymous ||
+      !profile?.username ||
+      checkinForm
+    )
+      return;
+    try {
+      if (localStorage.getItem("flanit_create_event_intent")) {
+        localStorage.removeItem("flanit_create_event_intent");
+        setTab("events");
+        setCheckinForm({ event: true });
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, profile]);
   // "Create an album?" after a check-in saves (Aug 21) — holds the thread
   // object while the person decides; either answer opens the card.
   const [albumPromptFor, setAlbumPromptFor] = useState(null);
@@ -4909,6 +4931,30 @@ if (authLoading || guestLoading) {
             if (t.isEvent) {
               showToast("Event created — share it from the card");
               setThreadCheckin(t);
+              // Brevo: EVENT_CREATED flips the welcome email's framing and
+              // arms the date-based sends. Fire-and-forget.
+              (async () => {
+                try {
+                  const { data } = await supabase.auth.getSession();
+                  const tok = data?.session?.access_token;
+                  if (!tok) return;
+                  fetch("/api/brevo-contact", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${tok}`,
+                    },
+                    body: JSON.stringify({
+                      attributes: {
+                        EVENT_CREATED: true,
+                        EVENT_DATE: (t.timestamp || "").slice(0, 10),
+                        EVENT_LABEL: t.label || t.venueName || "",
+                      },
+                      event: { name: "event_created" },
+                    }),
+                  }).catch(() => {});
+                } catch {}
+              })();
             } else if (t.bornAlbum) setThreadCheckin(t);
             else setAlbumPromptFor(t); // "Create an album?" first (Aug 21)
           }}

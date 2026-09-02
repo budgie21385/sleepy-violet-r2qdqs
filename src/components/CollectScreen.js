@@ -406,6 +406,32 @@ export function CollectScreen({ token }) {
 
   const landedCount = uploads.filter((u) => u.url).length;
 
+  // ALBUM TEASER (Aug 30, Mark's level-2 ruling): once their photo lands,
+  // show the anon a BLURRED taste of the album + honest counts, so "See all
+  // the photos" is a promise with evidence. Served by /api/collect-teaser
+  // (service role — the resolver RPC is deliberately media-free); own
+  // uploads excluded from thumbs, included in totals.
+  const [teaser, setTeaser] = useState(null);
+  useEffect(() => {
+    if (landedCount === 0 || !me?.isAnon) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch(
+          `/api/collect-teaser?token=${encodeURIComponent(token)}&exclude=${
+            me?.id || ""
+          }`
+        );
+        if (!resp.ok) return;
+        const json = await resp.json();
+        if (!cancelled) setTeaser(json);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [landedCount, me, token]);
+
   // ---------- render ----------
   if (ctx === undefined) {
     return (
@@ -573,6 +599,59 @@ export function CollectScreen({ token }) {
                     The old "or get the app" install link let the highest-
                     intent moment leak into a generic install page with no
                     identity attached. */}
+                {/* Level-2 teaser, tiered by what's actually in the album
+                    beyond their own uploads: 3+ others = blurred grid with
+                    honest counts; 1–2 = count line only (two blurred tiles
+                    reads like a broken page); 0 = they're FIRST — sell the
+                    future, not the present (weddings send the link with the
+                    invite, so first-in is a mainline case, not an edge). */}
+                {me.isAnon && teaser && (() => {
+                  const others = Math.max(0, (teaser.total || 0) - landedCount);
+                  const thumbs = (teaser.thumbs || []).slice(0, 4);
+                  if (others >= 3 && thumbs.length >= 3) {
+                    return (
+                      <div className="mt-3">
+                        <div className="grid grid-cols-4 gap-1.5 overflow-hidden rounded-xl">
+                          {thumbs.map((u, i) => (
+                            <div
+                              key={u}
+                              className="relative aspect-square overflow-hidden rounded-lg"
+                            >
+                              <img
+                                src={u}
+                                alt=""
+                                aria-hidden="true"
+                                className="h-full w-full scale-110 object-cover blur-md"
+                              />
+                              {i === thumbs.length - 1 && others > thumbs.length && (
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/30 text-sm font-semibold text-white">
+                                  +{others - thumbs.length}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-xs text-neutral-500">
+                          {teaser.total} photos from {teaser.people}{" "}
+                          {teaser.people === 1 ? "person" : "people"} so far
+                        </p>
+                      </div>
+                    );
+                  }
+                  if (others >= 1) {
+                    return (
+                      <p className="mt-3 text-xs text-neutral-500">
+                        More photos are already in — and they keep landing.
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="mt-3 text-xs text-neutral-500">
+                      You're first in 🎉 Everyone's photos land here — sign up
+                      and you'll see them as they arrive.
+                    </p>
+                  );
+                })()}
                 {me.isAnon && claimPhase === null && (
                   <button
                     type="button"
