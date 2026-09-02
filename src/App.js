@@ -1270,7 +1270,6 @@ useEffect(() => {
     const mode = guestSessionData?.mode;
     let shouldFlip = false;
 
-    let flipByExpiry = false;
     if (mode === "concurrent") {
       // Flip when the match target is reached OR the guest finishes the queue —
       // so a Right now guest always lands on the matches / sign-up screen and
@@ -1283,7 +1282,6 @@ useEffect(() => {
         guestSessionData?.expires_at &&
         Date.now() > new Date(guestSessionData.expires_at).getTime();
       const targetReached = target > 0 && sessionMatches.length >= target;
-      flipByExpiry = !!expired && !targetReached && !reachedEnd && !queueEmpty;
       shouldFlip = targetReached || reachedEnd || queueEmpty || !!expired;
     } else if (mode === "curated") {
       // "Send options": the guest votes the WHOLE shortlist — no target-based
@@ -1296,17 +1294,11 @@ useEffect(() => {
 
     if (shouldFlip) {
       setGuestStage("submitted");
-      // Time ended this guest's game mid-deck → tell the HOST it's decision
-      // time (no server cron, so a participant's device is the only clock
-      // that can speak up; several guests expiring together may each send
-      // one — rate-limited and better than silence).
-      if (flipByExpiry && guestSessionData?.host_user_id) {
-        sendPush(
-          guestSessionData.host_user_id,
-          "⏰ Time's up on your session",
-          "See the results and make the call"
-        );
-      }
+      // The time's-up HOST push moved to the server clock (Aug 21, cron job
+      // 4: one clean send via nudge_log, app closed or not) — the client
+      // send that lived here predated the cron and could fire once per
+      // expiring guest device. An expiry flip still records submitted_at
+      // below, like any other ending.
       // Fire-and-forget — failure here doesn't block the end screen.
       if (session?.user?.id && guestSessionId) {
         supabase
@@ -1333,7 +1325,7 @@ useEffect(() => {
               sendPush(
                 hostId,
                 "Everyone's in 🎉",
-                "All picks are submitted — make the call"
+                "All picks are submitted, make the call"
               );
             }
           });
