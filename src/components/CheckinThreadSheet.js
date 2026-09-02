@@ -2150,7 +2150,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
               <span className="text-xs font-medium">
                 {albumBusy
                   ? "Creating…"
-                  : "Create album — collect photos from the night"}
+                  : `Create album, collect photos from the ${
+                      // Daypart-aware (Aug 30, Mark: a lunch check-in
+                      // shouldn't offer "the night"). 5am–5pm = day.
+                      (() => {
+                        const h = new Date(thread.timestamp).getHours();
+                        return h >= 5 && h < 17 ? "day" : "night";
+                      })()
+                    }`}
               </span>
             </button>
           </div>
@@ -2414,7 +2421,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           {comments !== null && comments.length === 0 && (
             <div className="py-4 text-center">
               <p className="text-sm text-neutral-500">
-                No comments yet — say something.
+                No comments yet. Say something.
               </p>
             </div>
           )}
