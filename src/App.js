@@ -402,27 +402,6 @@ export default function RestaurantSwipeMVP() {
   // you are on") — CheckinForm overlays whatever is on screen; no tab
   // switch, no navigation. {venue?, date, time, mode, invitees}.
   const [checkinForm, setCheckinForm] = useState(null);
-  // LANDING → EVENT intent (Aug 30): /weddings and /events set a flag
-  // before signup; consumed ONCE here, only after a real session exists AND
-  // profile onboarding is done (username present) — so the event form is
-  // the very next thing a new organiser sees, and an existing user gets it
-  // immediately.
-  useEffect(() => {
-    if (
-      !session?.user?.id ||
-      session.user.is_anonymous ||
-      !profile?.username ||
-      checkinForm
-    )
-      return;
-    try {
-      if (localStorage.getItem("flanit_create_event_intent")) {
-        localStorage.removeItem("flanit_create_event_intent");
-        setTab("events");
-        setCheckinForm({ event: true });
-      }
-    } catch {}
-  }, [session, profile]);
   // "Create an album?" after a check-in saves (Aug 21) — holds the thread
   // object while the person decides; either answer opens the card.
   const [albumPromptFor, setAlbumPromptFor] = useState(null);
@@ -458,6 +437,28 @@ export default function RestaurantSwipeMVP() {
   const [matches, setMatches] = useState([]);
   const [passed, setPassed] = useState([]);
   const [profile, setProfile] = useState(null);
+  // LANDING → EVENT intent (Aug 30): /weddings and /events set a flag
+  // before signup; consumed ONCE here, only after a real session exists AND
+  // profile onboarding is done (username present) — so the event form is
+  // the very next thing a new organiser sees, and an existing user gets it
+  // immediately. Lives BELOW the profile declaration on purpose: the first
+  // draft sat above it and TDZ'd the whole app into a white screen.
+  useEffect(() => {
+    if (
+      !session?.user?.id ||
+      session.user.is_anonymous ||
+      !profile?.username ||
+      checkinForm
+    )
+      return;
+    try {
+      if (localStorage.getItem("flanit_create_event_intent")) {
+        localStorage.removeItem("flanit_create_event_intent");
+        setTab("events");
+        setCheckinForm({ event: true });
+      }
+    } catch {}
+  }, [session, profile]);
   const [savedVenueIds, setSavedVenueIds] = useState(() => new Set());
   // BEEN STATE for the swipe deck (July 31) — marks + per-venue check-in
   // counts, fetched once (own rows only, cheap) so each card reads state with
