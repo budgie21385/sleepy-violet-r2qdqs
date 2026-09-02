@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { Camera, Check } from "lucide-react";
 import { pushState, enablePush } from "../lib/push";
+import { realName } from "../lib/names";
 
 export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
   // Two steps (Mark, July 21): profile → install/notifications. The alerts
@@ -15,7 +16,32 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
   // app if this gets said yes to. Skipped when already granted/unsupported.
   const [step, setStep] = useState("profile");
   const [enabling, setEnabling] = useState(false);
-  const [displayName, setDisplayName] = useState(profile?.display_name || "");
+  // NAME RULE v2 (July 31, extended here Aug 30 — Mark: "setting up profile
+  // shouldn't capture the email for the display name"): new profiles get
+  // seeded with the email's local part ("budgie21385+wedding2"). A seeded
+  // name is NOT a chosen name — the field starts EMPTY so the person types
+  // a real one. realName() catches the obvious seeds at init; the effect
+  // below runs the definitive test (matches the auth email's local part)
+  // once the session is readable, same rule as the claim flow.
+  const [displayName, setDisplayName] = useState(() => {
+    const cur = (profile?.display_name || "").trim();
+    return realName(cur) ? cur : "";
+  });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const email = data?.session?.user?.email || "";
+      if (!email || cancelled) return;
+      const localPart = email.split("@")[0].trim().toLowerCase();
+      setDisplayName((cur) =>
+        cur.trim().toLowerCase() === localPart ? "" : cur
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [username, setUsername] = useState(profile?.username || "");
   const [status, setStatus] = useState({ state: "idle" });
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || "");
@@ -90,7 +116,11 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
   // to skip username — the app will break later"). Handles feed /u/@ invites,
   // friend search and profile identity; an account without one is half-real.
   // Photo stays optional. Done is the only exit from this step.
-  const canDone = !saving && !uploading && usernameValid;
+  // DISPLAY NAME also required (Aug 30): the field now starts empty when the
+  // stored name is the email seed — letting Done through blank would keep
+  // the seed in the database forever.
+  const canDone =
+    !saving && !uploading && usernameValid && displayName.trim().length > 0;
 
   // After the profile step: show the alerts step only when it can do good.
   function finishOrAlerts() {
@@ -285,9 +315,11 @@ export function OnboardingScreen({ userId, profile, setProfile, onDone }) {
           >
             {saving ? "Saving…" : "Done"}
           </button>
-          {!usernameValid && (
+          {(!usernameValid || displayName.trim().length === 0) && (
             <p className="mt-2 text-center text-xs text-neutral-400">
-              Pick a username to continue
+              {displayName.trim().length === 0
+                ? "Add your name and pick a username to continue"
+                : "Pick a username to continue"}
             </p>
           )}
         </div>
