@@ -434,8 +434,19 @@ export function SessionResultsView({
                     >
                       <div className="flex items-center gap-2">
                         <p className="font-medium truncate">{venue.name}</p>
-                        {likeCount >= 2 && isMatch && (
-                          <span className="inline-flex items-center rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#3f5a3a] border border-[#c5d4c2] shrink-0 max-w-[140px] truncate">
+                        {/* WHO VOTED, on every row (Sep 3, Mark's option b:
+                            the ended board is the host's decision moment —
+                            "Raya · Resha" vs "Regulars · You" IS the
+                            information). Consensus keeps the olive pop;
+                            solo votes go quiet grey. */}
+                        {view === "matches" && likerNames(venue.id) && (
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 max-w-[140px] truncate ${
+                              likeCount >= 2
+                                ? "bg-[#edf2eb] text-[#3f5a3a] border border-[#c5d4c2]"
+                                : "bg-neutral-100 text-neutral-500"
+                            }`}
+                          >
                             {likerNames(venue.id) || `×${likeCount}`}
                           </span>
                         )}
