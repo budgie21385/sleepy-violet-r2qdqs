@@ -6416,13 +6416,14 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
         // with 2+ likes show as MOMENTUM — liker chips, no decision
         // buttons, never labeled matches. The host sees the game's shape
         // without being handed a false consensus to act on.
+        // ALL votes, ranked (Sep 3 markup: "all our matches show below…
+        // mine and his and Resha's and all of ours together") — the RPC
+        // already orders by support. Decisions stay unarmed until the end.
         const { data: partial } = await supabase.rpc("get_session_likes", {
           p_session_id: selectedSession.id,
         });
         if (cancelled) return;
-        setAgreementRows(
-          (partial || []).filter((r) => (r.like_count || 0) >= 2)
-        );
+        setAgreementRows(partial || []);
         return;
       }
       setAgreementRows([]);
@@ -6790,8 +6791,12 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
             Date.now() < new Date(selectedSession.expires_at).getTime() &&
             agreementRows.length > 0 && (
               <div className="px-4 pt-4">
-                <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                  Agreement so far
+                <p className="px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                  Not everyone's in yet
+                </p>
+                <p className="mb-2 px-1 text-[11px] text-neutral-400">
+                  Votes so far. Matches lock in when everyone's done or time's
+                  up.
                 </p>
                 <div className="space-y-2">
                   {agreementRows.map((r) => {
@@ -6829,7 +6834,15 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                 </div>
               </div>
             )}
-          {selectedSession.mode === "curated" ? (
+          {/* Mid-session with nothing unanimous, the votes list above IS
+              the board — the empty "Matches (0)" view under it was noise
+              (Sep 3 markup: "I don't like how it looks"). */}
+          {selectedSession.mode === "concurrent" &&
+          !selectedSession.decided_venue_id &&
+          selectedSession.expires_at &&
+          Date.now() < new Date(selectedSession.expires_at).getTime() &&
+          (sessionMatches || []).length === 0 ? null : selectedSession.mode ===
+            "curated" ? (
             <CuratedResultsBoard
               sessionId={selectedSession.id}
               venues={venues}
