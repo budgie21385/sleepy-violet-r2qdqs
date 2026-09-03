@@ -184,16 +184,25 @@ export async function uploadViaCollectLink(userId, token, activityId, file, onPr
     .upload(webPath, webBlob, { contentType: "image/jpeg" });
   if (webErr) throw webErr;
 
+  // ORIGINAL: photos try R2 first (stage 1); videos keep TUS on Supabase.
+  let finalOrigPath = origPath;
+  let origStore = "sb";
   try {
     if (isVideo) {
       await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
     } else {
       // Same full-read guard as uploadCheckinPhoto.
       const stableOrig = await materializeFile(file);
-      const { error: origErr } = await supabase.storage
-        .from(BUCKET)
-        .upload(origPath, stableOrig, { contentType: file.type || "image/jpeg" });
-      if (origErr) throw origErr;
+      const r2Path = await putOriginalViaR2(activityId, file, stableOrig);
+      if (r2Path) {
+        finalOrigPath = r2Path;
+        origStore = "r2";
+      } else {
+        const { error: origErr } = await supabase.storage
+          .from(BUCKET)
+          .upload(origPath, stableOrig, { contentType: file.type || "image/jpeg" });
+        if (origErr) throw origErr;
+      }
     }
   } catch (origErr) {
     await supabase.storage.from(BUCKET).remove([webPath]);
@@ -205,13 +214,18 @@ export async function uploadViaCollectLink(userId, token, activityId, file, onPr
     {
       p_token: token,
       p_web_path: webPath,
-      p_orig_path: origPath,
+      p_orig_path: finalOrigPath,
       p_bytes: (file.size || 0) + (webBlob.size || 0),
       p_kind: isVideo ? "video" : "photo",
+      // Only sent on the R2 path — the old 5-arg RPC stays callable until
+      // r2_stage1.sql swaps it (R2 can't be live before that runs).
+      ...(origStore === "r2" ? { p_orig_store: "r2" } : {}),
     }
   );
   if (rpcErr) {
-    await supabase.storage.from(BUCKET).remove([webPath, origPath]);
+    await supabase.storage
+      .from(BUCKET)
+      .remove(origStore === "sb" ? [webPath, finalOrigPath] : [webPath]);
     throw rpcErr;
   }
   const { data: signed } = await supabase.storage
@@ -228,6 +242,64 @@ function extOf(file) {
   const fromName = (file.name || "").split(".").pop()?.toLowerCase();
   if (fromName && fromName.length <= 5) return fromName;
   return (file.type || "image/jpeg").split("/").pop() || "jpg";
+}
+
+// R2 STAGE 1 (Aug 30): photo ORIGINALS go to Cloudflare R2 when the pipe is
+// live — the server mints a presigned PUT (own-uid path, derived from the
+// verified JWT) and the bytes go straight there. ANY failure, or R2 env
+// unset, returns null and the caller falls back to Supabase — the app can
+// never break on a missing bucket. Videos keep TUS on Supabase this stage.
+async function putOriginalViaR2(activityId, file, stableOrig) {
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess?.session?.access_token;
+    if (!token) return null;
+    const resp = await fetch("/api/sign-upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ activityId, ext: extOf(file) }),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    if (json.store !== "r2" || !json.url || !json.path) return null;
+    const put = await fetch(json.url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": json.contentType || file.type || "image/jpeg",
+      },
+      body: stableOrig,
+    });
+    if (!put.ok) return null;
+    return json.path;
+  } catch {
+    return null;
+  }
+}
+
+// Signed GETs for R2-stored originals (download button, future zip export).
+// 'sb' rows keep signing through Supabase storage as they always have.
+export async function signR2Originals(photoIds) {
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess?.session?.access_token;
+    if (!token) return {};
+    const resp = await fetch("/api/sign-original", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ ids: photoIds }),
+    });
+    if (!resp.ok) return {};
+    const json = await resp.json();
+    return json.urls || {};
+  } catch {
+    return {};
+  }
 }
 
 // Upload one photo (original + derivative) onto the user's own check-in.
@@ -249,12 +321,21 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
     .upload(webPath, webBlob, { contentType: "image/jpeg" });
   if (webErr) throw webErr;
 
-  const { error: origErr } = await supabase.storage
-    .from(BUCKET)
-    .upload(origPath, stableOrig, { contentType: file.type || "image/jpeg" });
-  if (origErr) {
-    await supabase.storage.from(BUCKET).remove([webPath]);
-    throw origErr;
+  // ORIGINAL → R2 when the pipe is live (stage 1), Supabase otherwise.
+  let finalOrigPath = origPath;
+  let origStore = "sb";
+  const r2Path = await putOriginalViaR2(activityId, file, stableOrig);
+  if (r2Path) {
+    finalOrigPath = r2Path;
+    origStore = "r2";
+  } else {
+    const { error: origErr } = await supabase.storage
+      .from(BUCKET)
+      .upload(origPath, stableOrig, { contentType: file.type || "image/jpeg" });
+    if (origErr) {
+      await supabase.storage.from(BUCKET).remove([webPath]);
+      throw origErr;
+    }
   }
 
   const { data: row, error: insErr } = await supabase
@@ -263,13 +344,21 @@ export async function uploadCheckinPhoto(userId, activityId, file) {
       activity_id: activityId,
       user_id: userId,
       web_path: webPath,
-      orig_path: origPath,
+      orig_path: finalOrigPath,
       bytes: (file.size || 0) + (webBlob.size || 0),
+      // Only written on the R2 path — keeps this insert valid before
+      // r2_stage1.sql runs (R2 can't be live before the column exists,
+      // since flipping it on is part of the same rollout step).
+      ...(origStore === "r2" ? { orig_store: "r2" } : {}),
     })
     .select("*")
     .single();
   if (insErr) {
-    await supabase.storage.from(BUCKET).remove([webPath, origPath]);
+    // R2 orphans (rare: insert failed after a successful PUT) get reaped by
+    // a future janitor pass; the sb objects we can clean now.
+    await supabase.storage
+      .from(BUCKET)
+      .remove(origStore === "sb" ? [webPath, origPath] : [webPath]);
     throw insErr;
   }
   return row;
@@ -500,8 +589,32 @@ export async function fetchCheckinPhotosMany(activityIds) {
   }));
 }
 
-// Delete one of your own photos (row + both storage objects).
+// Delete one of your own photos (row + storage objects). R2-stored
+// originals route through api/delete-media — only the server holds the R2
+// key, and the endpoint already allows uploader self-delete.
 export async function deleteCheckinPhoto(row) {
+  if ((row.orig_store || "sb") === "r2") {
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      const resp = await fetch("/api/delete-media", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ photoId: row.id }),
+      });
+      if (resp.ok) return;
+    } catch (e) {
+      console.error("R2 delete route failed:", e);
+    }
+    // Endpoint unavailable → at least remove the row + web derivative; the
+    // R2 orphan waits for the janitor pass.
+    await supabase.from("activity_photos").delete().eq("id", row.id);
+    await supabase.storage.from(BUCKET).remove([row.web_path]);
+    return;
+  }
   await supabase.from("activity_photos").delete().eq("id", row.id);
   await supabase.storage.from(BUCKET).remove([row.web_path, row.orig_path]);
 }

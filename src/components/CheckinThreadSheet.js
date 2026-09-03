@@ -27,6 +27,7 @@ import {
 import { acceptFriendRequest } from "../lib/friendships";
 import {
   fetchCheckinPhotosMany,
+  signR2Originals,
   uploadCheckinMedia,
   deleteCheckinPhoto,
   trackUpload,
@@ -300,12 +301,22 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setDownloading(true);
     try {
       const filename = saveFilename(row);
-      const { data, error } = await supabase.storage
-        .from("checkin-photos")
-        .createSignedUrl(row.orig_path, 60);
-      if (error || !data?.signedUrl) throw error || new Error("no url");
+      // STORE-AWARE (Aug 30, R2 stage 1): R2-stored originals sign through
+      // our API; Supabase rows sign as they always have.
+      let signedUrl = null;
+      if ((row.orig_store || "sb") === "r2") {
+        const urls = await signR2Originals([row.id]);
+        signedUrl = urls[row.id] || null;
+      } else {
+        const { data, error } = await supabase.storage
+          .from("checkin-photos")
+          .createSignedUrl(row.orig_path, 60);
+        if (error || !data?.signedUrl) throw error || new Error("no url");
+        signedUrl = data.signedUrl;
+      }
+      if (!signedUrl) throw new Error("no url");
 
-      const resp = await fetch(data.signedUrl);
+      const resp = await fetch(signedUrl);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = await resp.blob();
       const type = blob.type || (row.kind === "video" ? "video/mp4" : "image/jpeg");

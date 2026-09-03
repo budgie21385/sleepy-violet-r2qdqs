@@ -1313,14 +1313,21 @@ useEffect(() => {
             }
             // Was that the LAST one in? Nudge the host to pick (Mark's
             // simplified flow: host waits, gets told, then chooses).
+            // EXPECTED count, not joined count (Sep 3, Mark's field find:
+            // with 2 invited and 1 joined, the lone submitter fired
+            // "Everyone's in" — someone who hasn't opened the link yet has
+            // no participant row, so counting rows can't see them missing).
             const hostId = guestSessionData?.host_user_id;
             const { data: parts } = await supabase
               .from("session_participants")
               .select("user_id, submitted_at")
               .eq("session_id", guestSessionId);
             const others = (parts || []).filter((p) => p.user_id !== hostId);
+            const expected = guestSessionData?.expected_others || 0;
             const allIn =
-              others.length > 0 && others.every((p) => p.submitted_at);
+              others.length > 0 &&
+              others.length >= expected &&
+              others.every((p) => p.submitted_at);
             if (allIn && hostId) {
               sendPush(
                 hostId,
@@ -6372,9 +6379,13 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
     setMatchesError("");
 
     // Matches (reconciliation RPC — unanimous under the group rule). When a
-    // session ends with NOTHING unanimous (the timeout case), fall back to
+    // session ENDS with nothing unanimous (the timeout case), fall back to
     // the VOTES (get_session_likes, best-supported first) so the board the
     // host lands on has something to decide from instead of sitting empty.
+    // ENDED-ONLY (Sep 3, Mark's field find: with one swiper outstanding the
+    // fallback fired mid-session, dressing every vote up as a "Match" with
+    // "We're going here" armed — the board must never show votes as matches
+    // while someone can still swipe).
     (async () => {
       const { data, error } = await supabase.rpc("get_session_matches", {
         p_session_id: selectedSession.id,
@@ -6388,6 +6399,15 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
       }
       if (data?.length) {
         setSessionMatches(data);
+        return;
+      }
+      const ended =
+        !!selectedSession.decided_venue_id ||
+        selectedSession.status !== "open" ||
+        (selectedSession.expires_at &&
+          new Date(selectedSession.expires_at).getTime() < Date.now());
+      if (!ended) {
+        setSessionMatches([]); // nothing unanimous YET — say so, not "votes"
         return;
       }
       const { data: likes } = await supabase.rpc("get_session_likes", {
@@ -6425,7 +6445,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
     (async () => {
       const { data: pData, error: pErr } = await supabase
         .from("session_participants")
-        .select("user_id, display_name, joined_at")
+        .select("user_id, display_name, joined_at, submitted_at")
         .eq("session_id", selectedSession.id)
         .order("joined_at", { ascending: true });
       if (cancelled) return;
@@ -6659,7 +6679,23 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
             Date.now() < new Date(selectedSession.expires_at).getTime() && (
               <div className="bg-[#edf2eb] border-b border-[#cdd9c6] px-4 py-3 flex items-center gap-3">
                 <p className="flex-1 text-xs text-[#2f3f29]">
-                  Still running — friends can keep swiping until time's up.
+                  {/* WHO'S OUTSTANDING (Sep 3, Mark's field find: with one
+                      swiper missing the board gave no sign anyone was) —
+                      submitted vs EXPECTED, since a friend who hasn't
+                      opened the link has no participant row to count. */}
+                  {(() => {
+                    const expected = selectedSession.expected_others || 0;
+                    const inCount = participants.filter(
+                      (p) =>
+                        p.user_id !== selectedSession.host_user_id &&
+                        p.submitted_at
+                    ).length;
+                    return expected > 0
+                      ? `Still running. ${inCount} of ${expected} ${
+                          expected === 1 ? "friend has" : "friends have"
+                        } sent picks.`
+                      : "Still running. Friends can keep swiping until time's up.";
+                  })()}
                 </p>
                 <button
                   type="button"

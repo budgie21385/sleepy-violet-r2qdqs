@@ -8,6 +8,7 @@
 //
 // Env (Vercel): SUPABASE_SERVICE_ROLE_KEY, REACT_APP_SUPABASE_URL (or SUPABASE_URL).
 import { createClient } from "@supabase/supabase-js";
+import { r2Ready, r2Delete } from "./_lib/r2.js";
 
 const SUPABASE_URL =
   process.env.REACT_APP_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -32,7 +33,7 @@ export default async function handler(req, res) {
 
   const { data: photo } = await admin
     .from("activity_photos")
-    .select("id, activity_id, user_id, web_path, orig_path, via_link")
+    .select("*") // star: orig_store may not exist pre-r2_stage1.sql
     .eq("id", photoId)
     .maybeSingle();
   if (!photo) return res.status(404).json({ error: "not found" });
@@ -50,7 +51,18 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "not yours to delete" });
   }
 
-  await admin.storage.from(BUCKET).remove([photo.web_path, photo.orig_path]);
+  // STORE-AWARE (Aug 30, R2 stage 1): the original may live on R2 now;
+  // web derivatives always live on Supabase.
+  if ((photo.orig_store || "sb") === "r2" && r2Ready()) {
+    try {
+      await r2Delete(photo.orig_path);
+    } catch (e) {
+      console.error("R2 delete failed:", e.message);
+    }
+    await admin.storage.from(BUCKET).remove([photo.web_path]);
+  } else {
+    await admin.storage.from(BUCKET).remove([photo.web_path, photo.orig_path]);
+  }
   const { error: delErr } = await admin
     .from("activity_photos")
     .delete()
