@@ -6228,8 +6228,6 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
   const [deepLinked, setDeepLinked] = useState(false);
   const [sessionMatches, setSessionMatches] = useState(null); // null = loading
   const [matchesError, setMatchesError] = useState("");
-  // Mid-session momentum rows (venues with 2+ likes) — see effect below.
-  const [agreementRows, setAgreementRows] = useState([]);
   // My personal likes in this session (everything I swiped right on, whether
   // or not it became a mutual match). Hydrated separately because RLS only
   // lets me read my own rows in session_swipes.
@@ -6373,14 +6371,12 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
       setMyLikedIds(null);
       setParticipants([]);
       setMatchesError("");
-      setAgreementRows([]);
       return;
     }
     let cancelled = false;
     setSessionMatches(null);
     setMyLikedIds(null);
     setMatchesError("");
-    setAgreementRows([]);
 
     // Matches (reconciliation RPC — unanimous under the group rule). When a
     // session ENDS with nothing unanimous (the timeout case), fall back to
@@ -6411,22 +6407,26 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
         (selectedSession.expires_at &&
           new Date(selectedSession.expires_at).getTime() < Date.now());
       if (!ended) {
-        setSessionMatches([]); // nothing unanimous YET — say so, not "votes"
-        // AGREEMENT SO FAR (Sep 3, Mark's option 1): mid-session, venues
-        // with 2+ likes show as MOMENTUM — liker chips, no decision
-        // buttons, never labeled matches. The host sees the game's shape
-        // without being handed a false consensus to act on.
-        // ALL votes, ranked (Sep 3 markup: "all our matches show below…
-        // mine and his and Resha's and all of ours together") — the RPC
-        // already orders by support. Decisions stay unarmed until the end.
+        // PROVISIONAL MATCHES (Sep 3, Mark's final markup: "just the
+        // regular screen with our current matches… only show ACOFFEE, You
+        // and Resha"): mid-session the Matches tab holds the INTERSECTION
+        // of everyone who has voted so far — venues every current voter
+        // liked, on the normal board. When the third person votes, the bar
+        // rises and the list re-trims itself; the full unanimity RPC takes
+        // over the moment it has rows. Needs 2+ voters, or a lone host's
+        // likes would all call themselves matches.
         const { data: partial } = await supabase.rpc("get_session_likes", {
           p_session_id: selectedSession.id,
         });
         if (cancelled) return;
-        setAgreementRows(partial || []);
+        const rows = partial || [];
+        const voters = new Set(rows.flatMap((r) => r.liker_user_ids || []))
+          .size;
+        setSessionMatches(
+          voters >= 2 ? rows.filter((r) => (r.like_count || 0) >= voters) : []
+        );
         return;
       }
-      setAgreementRows([]);
       const { data: likes } = await supabase.rpc("get_session_likes", {
         p_session_id: selectedSession.id,
       });
@@ -6781,68 +6781,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
                 </button>
               </div>
             )}
-          {/* AGREEMENT SO FAR (Sep 3, Mark's option 1) — mid-session
-              momentum: venues 2+ people liked, with liker chips. Explicitly
-              NOT matches (a match is unanimous) and carries NO decision
-              buttons — nothing here can be acted on until the game ends. */}
-          {selectedSession.mode === "concurrent" &&
-            !selectedSession.decided_venue_id &&
-            selectedSession.expires_at &&
-            Date.now() < new Date(selectedSession.expires_at).getTime() &&
-            agreementRows.length > 0 && (
-              <div className="px-4 pt-4">
-                <p className="px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                  Not everyone's in yet
-                </p>
-                <p className="mb-2 px-1 text-[11px] text-neutral-400">
-                  Votes so far. Matches lock in when everyone's done or time's
-                  up.
-                </p>
-                <div className="space-y-2">
-                  {agreementRows.map((r) => {
-                    const venue = venues.find((v) => v.id === r.venue_id);
-                    const names = (r.liker_user_ids || [])
-                      .map((uid) =>
-                        uid === userId
-                          ? "You"
-                          : (
-                              participants.find((p) => p.user_id === uid)
-                                ?.display_name || ""
-                            ).split(" ")[0] || "A friend"
-                      )
-                      .filter(Boolean);
-                    return (
-                      <div
-                        key={r.venue_id}
-                        className="rounded-2xl bg-white border border-neutral-100 p-3 flex items-center gap-3"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-neutral-900 truncate">
-                            {venue?.name || "A spot"}
-                          </p>
-                          <p className="text-[11px] text-neutral-500 truncate">
-                            {names.join(", ")} liked this
-                          </p>
-                        </div>
-                        <span className="shrink-0 rounded-full bg-[#edf2eb] border border-[#cdd9c6] px-2.5 py-1 text-[11px] font-medium text-[#3f5a3a]">
-                          {r.like_count} of{" "}
-                          {(selectedSession.expected_others || 0) + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          {/* Mid-session with nothing unanimous, the votes list above IS
-              the board — the empty "Matches (0)" view under it was noise
-              (Sep 3 markup: "I don't like how it looks"). */}
-          {selectedSession.mode === "concurrent" &&
-          !selectedSession.decided_venue_id &&
-          selectedSession.expires_at &&
-          Date.now() < new Date(selectedSession.expires_at).getTime() &&
-          (sessionMatches || []).length === 0 ? null : selectedSession.mode ===
-            "curated" ? (
+          {selectedSession.mode === "curated" ? (
             <CuratedResultsBoard
               sessionId={selectedSession.id}
               venues={venues}
