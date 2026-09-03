@@ -1091,6 +1091,26 @@ useEffect(() => {
   }, [matchMode, screen, matchLimit, sessionMatches.length]);
 
 
+  // HOST'S OWN submitted_at (Sep 3, Mark's field find: "it's put me in the
+  // still to vote") — the GUEST flow stamps submitted_at when picks go in;
+  // the host flow predates the column and never did, so the vote ledger
+  // read the host as not-voted. Stamp it when the host lands on the
+  // post-swipe waiting card; where-null keeps it idempotent.
+  useEffect(() => {
+    if (screen !== "matches" || matchMode !== "concurrent") return;
+    const uid = session?.user?.id;
+    if (!uid || !currentSessionId) return;
+    supabase
+      .from("session_participants")
+      .update({ submitted_at: new Date().toISOString() })
+      .eq("session_id", currentSessionId)
+      .eq("user_id", uid)
+      .is("submitted_at", null)
+      .then(({ error }) => {
+        if (error) console.error("Host submitted_at failed:", error);
+      });
+  }, [screen, matchMode, currentSessionId, session]);
+
   // TIME'S UP (July 31) — Right Now runs on a clock now (default 30 min).
   // A group that never reaches unanimity has to end SOMEHOW, and the timeout
   // is how: at expiry the host's game flips to the matches screen, where the
@@ -6450,6 +6470,31 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
             return;
           }
           setMyLikedIds((data || []).map((r) => r.venue_id));
+          // SELF-HEAL (Sep 3): sessions from before the host wrote
+          // submitted_at — a host with likes on the board has plainly
+          // voted; stamp the row (where-null) and patch the local strip.
+          if (
+            userId === selectedSession.host_user_id &&
+            (data || []).length > 0
+          ) {
+            supabase
+              .from("session_participants")
+              .update({ submitted_at: new Date().toISOString() })
+              .eq("session_id", selectedSession.id)
+              .eq("user_id", userId)
+              .is("submitted_at", null)
+              .select("user_id, submitted_at")
+              .then(({ data: healed }) => {
+                if (cancelled || !healed || healed.length === 0) return;
+                setParticipants((prev) =>
+                  (prev || []).map((p) =>
+                    p.user_id === userId
+                      ? { ...p, submitted_at: healed[0].submitted_at }
+                      : p
+                  )
+                );
+              });
+          }
         });
     } else {
       setMyLikedIds([]);
