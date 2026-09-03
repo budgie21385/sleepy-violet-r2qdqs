@@ -6814,6 +6814,21 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               showConfetti={false}
               showToast={showToast}
               onScheduleNight={onScheduleNight}
+              // Voted / Still-to-vote split only while the game can still
+              // grow — a finished session's strip shows who actually came.
+              expectedTotal={
+                !selectedSession.decided_venue_id &&
+                selectedSession.expires_at &&
+                Date.now() < new Date(selectedSession.expires_at).getTime()
+                  ? (selectedSession.expected_others || 0) + 1
+                  : 0
+              }
+              voteSplit={
+                selectedSession.mode === "concurrent" &&
+                !selectedSession.decided_venue_id &&
+                selectedSession.expires_at &&
+                Date.now() < new Date(selectedSession.expires_at).getTime()
+              }
             />
           )}
         </>

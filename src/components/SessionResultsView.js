@@ -93,6 +93,8 @@ export function SessionResultsView({
   // instantly; after locking, "Set up the album" hands (venue, dateStr|"")
   // up to App, which opens the Been add form prefilled. "" = going right now.
   onScheduleNight,
+  expectedTotal = 0, // party size incl. host — strip shows who's missing
+  voteSplit = false, // running session: strip groups Voted / Still to vote
 }) {
   const [view, setView] = useState("matches");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -278,6 +280,9 @@ export function SessionResultsView({
         hostUserId={hostUserId}
         onOpenProfile={onOpenProfile}
         showToast={showToast}
+        expectedTotal={expectedTotal}
+        sessionId={sessionId}
+        voteSplit={voteSplit}
       />
 
       {/* GUEST, MATCHED, PRE-LOCK (Mark, Aug 20): the board shows the match,
