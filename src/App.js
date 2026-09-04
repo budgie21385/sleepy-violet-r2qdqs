@@ -800,7 +800,7 @@ useEffect(() => {
     let cancelled = false;
     supabase
       .from("match_sessions")
-      .select("id, host_user_id, mode, source_type, filters, target_matches, expected_others, event_at, expires_at, status, name, created_at")
+      .select("id, host_user_id, mode, source_type, filters, target_matches, expected_others, event_at, expires_at, status, name, created_at, decided_venue_id")
       .eq("id", sessionId)
       .maybeSingle()
       .then(({ data, error }) => {
@@ -3121,7 +3121,18 @@ if (authLoading || guestLoading) {
       (guestSessionData.expires_at &&
         Date.now() > new Date(guestSessionData.expires_at).getTime());
     const isHostCurating = guestSessionData.status === "host_curating";
-    const isOpen = guestSessionData.status === "open";
+    // OPEN = status AND the clock AND undecided (Sep 5, Mark: "the link
+    // should die" — status never flips at expiry, so the join door stayed
+    // open for days; guests joined and voted on a finished session, "5 of
+    // 2 sent picks"). The DB trigger (dead_links.sql) enforces the same
+    // rule server-side; this is the graceful face of it.
+    const isOpen =
+      guestSessionData.status === "open" &&
+      !guestSessionData.decided_venue_id &&
+      !(
+        guestSessionData.expires_at &&
+        Date.now() > new Date(guestSessionData.expires_at).getTime()
+      );
     // Post-join stub — B.4.4 replaces this with the guest swipe queue.
     if (guestStage === "joined") {
       const guestCurrentVenue = guestQueue[guestCardIndex];
@@ -3490,7 +3501,7 @@ if (authLoading || guestLoading) {
                 Time's up
               </h1>
               <p className="mt-2 text-sm text-neutral-600">
-                No matches this time — not everyone got to swipe.
+                No matches this time. Not everyone got to swipe.
               </p>
               <button
                 type="button"
@@ -3526,7 +3537,7 @@ if (authLoading || guestLoading) {
                   {guestDecidedVenueId
                     ? "The plan is locked 🎉"
                     : resultsAreVotes
-                      ? "Time's up — the votes are in"
+                      ? "Time's up, the votes are in"
                       : gateStillRunning
                         ? "Your choices are in"
                         : "It's a match"}
@@ -3881,7 +3892,7 @@ if (authLoading || guestLoading) {
                   )
                 ) : splashEnd?.likesCount > 0 ? (
                   <p className="text-sm text-neutral-600">
-                    Time's up — {hostName} is picking from{" "}
+                    Time's up. {hostName} is picking from{" "}
                     {splashEnd.likesCount} place
                     {splashEnd.likesCount === 1 ? "" : "s"} people liked.
                   </p>
