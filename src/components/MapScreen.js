@@ -1,7 +1,7 @@
 // The full-screen map surface: clustered emoji markers over a Leaflet map, the
 // All/My List toggle, the independent map filter sheet, and the tap-to-open
 // venue sheet. Extracted from App.js; App.js is the only consumer.
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
@@ -525,12 +525,32 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     };
   }, [wantPast, userId]);
 
+  // The map filters apply to the memory layers too (Mark, Sep 6: "all the
+  // coffee places my friends have been") — same venue predicates as browse,
+  // minus the verified/saved gating (a night there IS the qualification).
+  const matchesMapFilters = useCallback((v) => {
+    const todayKey = getTodayDayKey();
+    if (fAreas.length > 0 && !venueMatchesAreas(v, fAreas, 0, mapAreaExtents))
+      return false;
+    if (fCuisines.length > 0 && !fCuisines.includes(v.cuisine_bucket))
+      return false;
+    if (fOccasions.length > 0 && !venueMatchesOccasions(v, fOccasions, todayKey))
+      return false;
+    if (fOpenNow && !isVenueOpenNow(v)) return false;
+    if (fMinRating > 0 && !(Number(v.rating) >= fMinRating)) return false;
+    if (fPrices.length > 0 && !venueMatchesPrice(v, fPrices)) return false;
+    if (fAmenities.length > 0 && !venueMatchesAmenities(v, fAmenities))
+      return false;
+    return true;
+  }, [fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, mapAreaExtents]);
+
   // The two views over the same data. Friends/Past: only venues where a
   // FRIEND has a night or mark, pin faces friends-only. My List/Been: only
   // venues where YOU have a night or mark, pin is your icon.
   const friendPastPins = useMemo(() => {
     if (!pastGroups) return [];
     return pastGroups
+      .filter((g) => matchesMapFilters(g.venue))
       .map((g) => ({
         ...g,
         friendNights: g.nights.filter((n) =>
@@ -539,11 +559,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         friendMarks: g.marks.filter((m) => m.user_id !== userId),
       }))
       .filter((g) => g.friendNights.length > 0 || g.friendMarks.length > 0);
-  }, [pastGroups, userId]);
+  }, [pastGroups, userId, matchesMapFilters]);
 
   const myBeenPins = useMemo(() => {
     if (!pastGroups) return [];
     return pastGroups
+      .filter((g) => matchesMapFilters(g.venue))
       .map((g) => {
         const ownNights = g.nights.filter((n) =>
           n.entries.some((e) => e.user_id === userId)
@@ -556,7 +577,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         return { ...g, ownNights, ownMark, ownProfile };
       })
       .filter((g) => g.ownNights.length > 0 || g.ownMark);
-  }, [pastGroups, userId]);
+  }, [pastGroups, userId, matchesMapFilters]);
 
   // PERSON FILTER (profile "Places"): the whole trail of ONE friend — every
   // venue they've checked in, grouped per venue with visit counts. RLS

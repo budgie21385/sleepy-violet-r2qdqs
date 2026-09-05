@@ -4,7 +4,7 @@
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Send, ChevronLeft, ChevronRight, UserPlus, Plus, Settings, Home, Download } from "lucide-react";
+import { X, Send, UserPlus, Plus, Settings, Home } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
@@ -18,6 +18,7 @@ function whenLine(ts) {
 }
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
+import { MediaViewer } from "./MediaViewer";
 import { timeAgoShort, whenAgo, FRESH_MS } from "../lib/checkins";
 import {
   searchPlaces,
@@ -354,7 +355,6 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     setDownloading(false);
   }
 
-  const touchX = useRef(null); // lightbox swipe start
   // Flip between the night's photos without leaving the lightbox — comments
   // and reactions re-key off lightbox.id automatically.
   const lightboxIdx = lightbox
@@ -2613,230 +2613,41 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         )}
       </div>
       {lightbox && (
-        // One floating card — the photo with its reactions + comments
-        // attached directly beneath it, centered and detached from the
-        // screen edges (Mark: too many things rising from the bottom).
-        <div className="fixed inset-0 z-[3800] flex items-center justify-center p-4">
-          <button
-            type="button"
-            aria-label="Close photo"
-            onClick={() => setLightbox(null)}
-            className="absolute inset-0 bg-black/85"
-          />
-          <div className="relative w-full max-w-sm max-h-[90%] flex flex-col bg-white rounded-3xl overflow-hidden shadow-2xl">
-            <div
-              className="relative shrink-0 bg-black"
-              onTouchStart={(e) => {
-                touchX.current = e.touches[0]?.clientX ?? null;
-              }}
-              onTouchEnd={(e) => {
-                if (touchX.current === null) return;
-                const dx =
-                  (e.changedTouches[0]?.clientX ?? touchX.current) -
-                  touchX.current;
-                touchX.current = null;
-                if (Math.abs(dx) > 40) stepLightbox(dx < 0 ? 1 : -1);
-              }}
-            >
-              {lightbox.kind === "video" && lightbox.videoUrl ? (
-                <video
-                  src={lightbox.videoUrl}
-                  poster={lightbox.url || undefined}
-                  controls
-                  playsInline
-                  autoPlay
-                  className="w-full max-h-[50vh] object-contain"
-                />
-              ) : (
-                <img
-                  src={lightbox.url}
-                  alt=""
-                  className="w-full max-h-[50vh] object-contain"
-                />
-              )}
-              <button
-                type="button"
-                aria-label="Close photo"
-                onClick={() => setLightbox(null)}
-                className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center"
-              >
-                <X size={16} />
-              </button>
-              {/* DOWNLOAD THE ORIGINAL (July 31, Mark's call: "make it explicit
-                  and useful"). Storage RLS has always allowed a night
-                  participant to read orig_path — the same clause covers both
-                  paths — but nothing in the app ever asked for it, so people
-                  got the 1280px derivative via long-press and no way to the
-                  full file. That's the worst of both: permitted but hidden,
-                  and 1280px is only ~4in at 300dpi, which fails exactly the
-                  print case (weddings, parties) this album is for. */}
-              {lightbox.orig_path && (
-                <button
-                  type="button"
-                  disabled={downloading}
-                  onClick={() => downloadOriginal(lightbox)}
-                  className="absolute bottom-2 right-2 inline-flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-white active:scale-95 transition disabled:opacity-70"
-                >
-                  {downloading ? (
-                    <>
-                      <span className="h-3 w-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                      Preparing…
-                    </>
-                  ) : (
-                    <>
-                      <Download size={14} /> Save image
-                    </>
-                  )}
-                </button>
-              )}
-              {photos.length > 1 && (
-                <>
-                  <span className="absolute top-2 left-2 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
-                    {lightboxIdx + 1}/{photos.length}
-                  </span>
-                  {lightboxIdx > 0 && (
-                    <button
-                      type="button"
-                      aria-label="Previous photo"
-                      onClick={() => stepLightbox(-1)}
-                      className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition"
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                  )}
-                  {lightboxIdx < photos.length - 1 && (
-                    <button
-                      type="button"
-                      aria-label="Next photo"
-                      onClick={() => stepLightbox(1)}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition"
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-            {/* iOS only: the share sheet is coming and it isn't ours, so say
-                what to tap before it lands. Shown while the file downloads —
-                the wait and the instruction share the same beat. Android saves
-                straight to Downloads (Gallery picks it up), no sheet, no hint. */}
-            {downloading && isIOS && (
-              <div className="shrink-0 border-t border-[#cdd9c6] bg-[#edf2eb] px-4 py-2.5">
-                <p className="text-xs leading-snug text-[#2f3f29]">
-                  <strong className="font-medium">Choose "Save Image"</strong> to
-                  put it in your camera roll.
-                </p>
-              </div>
-            )}
-            <div className="px-4 pt-3 pb-1">
-              <div className="flex items-center gap-2 mb-2">
-                <button
-                  type="button"
-                  onClick={() => onOpenProfile?.(lightbox.user_id)}
-                  className="flex items-center gap-2 flex-1 min-w-0 text-left"
-                >
-                  <FriendAvatar
-                    profile={mediaProfiles[lightbox.user_id]}
-                    small
-                  />
-                  <span className="truncate text-xs text-neutral-700">
-                    <span className="font-medium">
-                      {lightbox.user_id === userId
-                        ? "Your"
-                        : `${
-                            (
-                              mediaProfiles[lightbox.user_id]?.display_name ||
-                              "Someone"
-                            ).split(" ")[0]
-                          }'s`}
-                    </span>{" "}
-                    {lightbox.kind === "video" ? "video" : "photo"} ·{" "}
-                    {timeAgoShort(lightbox.created_at)}
-                  </span>
-                </button>
-                {(lightbox.user_id === userId ||
-                  (lightbox.via_link &&
-                    lightbox.activity_id === uploadTargetId)) && (
-                  <button
-                    type="button"
-                    disabled={deleting}
-                    onClick={() =>
-                      deleteArm ? removeMedia() : setDeleteArm(true)
-                    }
-                    className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium active:scale-95 transition disabled:opacity-50 ${
-                      deleteArm
-                        ? "border-red-500 bg-red-500 text-white"
-                        : "border-neutral-200 text-neutral-500"
-                    }`}
-                  >
-                    {deleting
-                      ? "Deleting…"
-                      : deleteArm
-                      ? "Really delete?"
-                      : "Delete"}
-                  </button>
-                )}
-              </div>
-              <ReactionBar
-                counts={summarizeReactions(reactions, userId, lightbox.id).counts}
-                mine={summarizeReactions(reactions, userId, lightbox.id).mine}
-                disabled={reacting}
-                onTap={(e) => react(e, lightbox)}
-                onSeeWho={() => setReactSheet({ photoId: lightbox.id })}
-              />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-2">
-              {photoComments === null && (
-                <p className="text-xs text-neutral-400 py-1">Loading…</p>
-              )}
-              {photoComments !== null && photoComments.length === 0 && (
-                <p className="text-xs text-neutral-400 py-1">
-                  No comments on this photo yet.
-                </p>
-              )}
-              <div className="space-y-2.5">
-                {(photoComments || []).map((c) => (
-                  <div key={c.id} className="flex items-start gap-2.5">
-                    <FriendAvatar profile={c.profile} small />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-neutral-500">
-                        <span className="font-medium text-neutral-800">
-                          {c.profile?.display_name || "Someone"}
-                        </span>{" "}
-                        · {timeAgoShort(c.created_at)}
-                      </p>
-                      <p className="text-sm text-neutral-900 break-words">
-                        {c.body}
-                      </p>
-                      {commentReactionRow(c)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="px-3 py-2.5 border-t border-neutral-100 flex items-center gap-2">
-              {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
-              <input
-                value={photoBody}
-                onChange={(e) => setPhotoBody(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && sendPhotoComment()}
-                placeholder="Comment on this photo"
-                maxLength={500}
-                className="flex-1 rounded-full border border-neutral-200 px-4 py-2.5 text-base focus:outline-none focus:border-[#455d3b]"
-              />
-              <button
-                type="button"
-                onClick={sendPhotoComment}
-                disabled={photoSending || !photoBody.trim()}
-                aria-label="Send"
-                className="w-10 h-10 shrink-0 rounded-full bg-[#455d3b] text-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
-              >
-                <Send size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
+        // Full-screen viewer (Mark's Sept 2026 design) — see MediaViewer.js.
+        // Data stays here; the viewer is chrome + gestures.
+        <MediaViewer
+          photos={photos}
+          photo={lightbox}
+          onStep={stepLightbox}
+          onClose={() => setLightbox(null)}
+          userId={userId}
+          mediaProfiles={mediaProfiles}
+          onOpenProfile={onOpenProfile}
+          reactions={reactions}
+          reacting={reacting}
+          onReact={(emoji, photo, comment) => react(emoji, photo, comment)}
+          comments={photoComments}
+          commentBody={photoBody}
+          onCommentBodyChange={setPhotoBody}
+          onSendComment={sendPhotoComment}
+          sending={photoSending}
+          canDelete={
+            lightbox.user_id === userId ||
+            (lightbox.via_link && lightbox.activity_id === uploadTargetId)
+          }
+          deleteArm={deleteArm}
+          onArmDelete={() => setDeleteArm(true)}
+          onDelete={removeMedia}
+          deleting={deleting}
+          downloading={downloading}
+          onSave={downloadOriginal}
+          isIOS={isIOS}
+          initialSheet={
+            thread.photoId === lightbox.id && thread.openComments
+              ? "comments"
+              : null
+          }
+        />
       )}
       {/* "See reactions ›" who-list. z-3850: above the lightbox (3800),
           below ProfileLookupScreen (3900) so profile tap-throughs land on

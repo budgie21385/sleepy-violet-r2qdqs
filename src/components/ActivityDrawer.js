@@ -2915,7 +2915,8 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             ownerName: "You",
             venueName: item.venueName,
             venueObj: item.venueObj || null,
-            photoId: item.photoId || null, // photo comment → lightbox opens
+            photoId: item.photoId || null, // photo comment → viewer opens
+            openComments: !!item.photoId, // …with the comments sheet up
             label: item.label || null,
             timestamp: item.checkinTimestamp || item.timestamp,
           })
