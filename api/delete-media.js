@@ -59,7 +59,10 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error("R2 delete failed:", e.message);
     }
-    await admin.storage.from(BUCKET).remove([photo.web_path]);
+    // Also clear the Supabase copy: backfilled rows keep their old original
+    // there until stage 4, and a user's delete must kill BOTH (Sep 5, Mark's
+    // question). No-op for post-migration uploads with nothing at that path.
+    await admin.storage.from(BUCKET).remove([photo.web_path, photo.orig_path]);
   } else {
     await admin.storage.from(BUCKET).remove([photo.web_path, photo.orig_path]);
   }

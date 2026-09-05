@@ -748,10 +748,11 @@ export async function deleteCheckinPhoto(row) {
     } catch (e) {
       console.error("R2 delete route failed:", e);
     }
-    // Endpoint unavailable → at least remove the row + web derivative; the
-    // R2 orphan waits for the janitor pass.
+    // Endpoint unavailable → at least remove the row + Supabase objects
+    // (incl. any pre-migration original still parked there); the R2 orphan
+    // waits for the janitor pass.
     await supabase.from("activity_photos").delete().eq("id", row.id);
-    await supabase.storage.from(BUCKET).remove([row.web_path]);
+    await supabase.storage.from(BUCKET).remove([row.web_path, row.orig_path]);
     return;
   }
   await supabase.from("activity_photos").delete().eq("id", row.id);

@@ -16,6 +16,7 @@
 // via REACT_APP_SUPABASE_URL (already set for api/share.js) or SUPABASE_URL.
 import { createClient } from "@supabase/supabase-js";
 import { deriveCuisineBucket } from "./_lib/cuisineBucket.js";
+import { r2VenuesReady, r2PutPublic, R2_VENUES_PUBLIC_BASE } from "./_lib/r2.js";
 
 const MAX_PHOTOS = 3; // matches Swipes/cacheVenuePhotos.js
 const BUCKET = "venue-photos";
@@ -200,24 +201,34 @@ function decomposeOpeningHours(regularOpeningHours) {
   return out;
 }
 
-// Download up to MAX_PHOTOS photos and cache them in the public bucket.
-// Non-blocking failures — a venue without CDN photos falls back to the proxy.
+// Download up to MAX_PHOTOS photos and cache them publicly. R2 first
+// (Sep 5 — the July 10 storage-squeeze cap died with the migration; up to
+// 10 photos now), Supabase public bucket as the fallback while the R2
+// venue env is unset. Non-blocking failures — a venue without CDN photos
+// falls back to the proxy.
 async function cachePhotos(supabase, key, venueId, photoNames) {
+  const useR2 = r2VenuesReady();
+  const cap = useR2 ? 10 : MAX_PHOTOS;
   const cdnUrls = [];
-  for (let i = 0; i < Math.min(photoNames.length, MAX_PHOTOS); i++) {
+  for (let i = 0; i < Math.min(photoNames.length, cap); i++) {
     try {
       // 800px (July 25, derivatives pass): plenty for a max-w-sm card at
       // 2-3x DPR, and ~40% fewer bytes than the old 1000px pulls.
       const resp = await fetch(`${photoMediaUrl(photoNames[i], 800)}&key=${key}`);
       if (!resp.ok) continue;
       const buf = Buffer.from(await resp.arrayBuffer());
-      const path = `${venueId}/${i}.jpg`;
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(path, buf, { contentType: "image/jpeg", upsert: true });
-      if (error) continue;
-      const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-      if (data?.publicUrl) cdnUrls.push(data.publicUrl);
+      const path = useR2 ? `venues/${venueId}/${i}.jpg` : `${venueId}/${i}.jpg`;
+      if (useR2) {
+        await r2PutPublic(path, buf, "image/jpeg");
+        cdnUrls.push(`${R2_VENUES_PUBLIC_BASE}/${path}`);
+      } else {
+        const { error } = await supabase.storage
+          .from(BUCKET)
+          .upload(path, buf, { contentType: "image/jpeg", upsert: true });
+        if (error) continue;
+        const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+        if (data?.publicUrl) cdnUrls.push(data.publicUrl);
+      }
     } catch {
       // skip this photo
     }

@@ -69,6 +69,33 @@ export function r2Delete(key) {
   );
 }
 
+// ---- Public venue-photo bucket (Sep 5 — the July 10 storage-squeeze cap
+// died with the migration; venue photos are public Google-attributed
+// content, so they serve straight off R2's public URL, no signing). ----
+export const R2_VENUES_BUCKET = process.env.R2_VENUES_BUCKET || "";
+export const R2_VENUES_PUBLIC_BASE = (process.env.R2_VENUES_PUBLIC_BASE || "").replace(/\/$/, "");
+
+export function r2VenuesReady() {
+  return !!(
+    process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID &&
+    process.env.R2_SECRET_ACCESS_KEY &&
+    R2_VENUES_BUCKET &&
+    R2_VENUES_PUBLIC_BASE
+  );
+}
+
+export function r2PutPublic(key, body, contentType) {
+  return r2Client().send(
+    new PutObjectCommand({
+      Bucket: R2_VENUES_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType || "image/jpeg",
+    })
+  );
+}
+
 // ---- Multipart (stage 2: video originals) ----------------------------------
 export async function multipartInit(key, contentType) {
   const out = await r2Client().send(
