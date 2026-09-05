@@ -29,6 +29,7 @@ import {
   MapAreaFilter,
 } from "./MapFilters";
 import { MapVenueSheet } from "./MapVenueSheet";
+import { VenueNightsSheet } from "./VenueNightsSheet";
 import { AddVenueSheet } from "./AddVenueSheet";
 import { supabase } from "../supabaseClient";
 import { timeAgoShort, FRESH_MS } from "../lib/checkins";
@@ -84,6 +85,67 @@ function createFriendsIcon(group) {
     className: "friend-checkin-icon",
     iconSize: [90, 52],
     iconAnchor: [45, 48],
+  });
+}
+
+// --- Past lens icons (Sep 6 — the memory map) ----------------------------
+// Three pin weights, by how much lives at the venue: one person's one night
+// = their avatar; multiple nights/people = an olive cluster chip (repeat
+// venues visibly accumulate weight); bare been-marks only = a quiet dot.
+
+function pastAvatarHtml(profile, size, extra = "") {
+  const style = `width:${size}px;height:${size}px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.25);${extra}`;
+  if (profile?.avatar_url) {
+    return `<img src="${esc(profile.avatar_url)}" style="${style}object-fit:cover;background:#fff;" />`;
+  }
+  const initial = esc(
+    (profile?.display_name || "?").trim().charAt(0).toUpperCase()
+  );
+  return `<div style="${style}background:#455d3b;color:#fff;display:flex;align-items:center;justify-content:center;font:600 ${Math.round(size * 0.42)}px sans-serif;">${initial}</div>`;
+}
+
+function createPastSingleIcon(profile) {
+  return L.divIcon({
+    html: `<div style="display:flex;">${pastAvatarHtml(profile, 30, "border-color:#455d3b;")}</div>`,
+    className: "friend-checkin-icon",
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+}
+
+function createPastClusterIcon(group) {
+  const people = [];
+  const seen = new Set();
+  for (const n of group.nights) {
+    for (const e of n.entries) {
+      if (!seen.has(e.user_id)) {
+        seen.add(e.user_id);
+        people.push(e.profile);
+      }
+      if (people.length >= 2) break;
+    }
+    if (people.length >= 2) break;
+  }
+  const avatars = people
+    .map((p, i) => pastAvatarHtml(p, 20, i > 0 ? "margin-left:-8px;" : ""))
+    .join("");
+  return L.divIcon({
+    html: `<div style="display:inline-flex;align-items:center;gap:5px;background:#455d3b;border-radius:9999px;padding:3px 9px 3px 3px;box-shadow:0 1px 3px rgba(0,0,0,0.3);">
+      <div style="display:flex;">${avatars}</div>
+      <span style="font:600 11px sans-serif;color:#fff;">${group.nights.length}</span>
+    </div>`,
+    className: "friend-checkin-icon",
+    iconSize: [70, 28],
+    iconAnchor: [35, 14],
+  });
+}
+
+function createPastMarkIcon() {
+  return L.divIcon({
+    html: `<div style="width:18px;height:18px;border-radius:50%;background:#455d3b;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;"><div style="width:6px;height:6px;border-radius:50%;background:#fff;"></div></div>`,
+    className: "friend-checkin-icon",
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
   });
 }
 
@@ -321,6 +383,141 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     };
   }, [mapFilter, userId]);
 
+  // --- Past lens data (Sep 6 — the memory map) ---------------------------
+  // Friends segment splits into two time lenses: Now = live presence (the
+  // 24h/show_live fetch above), Past = every venue with a night among you +
+  // your friends, plus bare been-marks (friend-readable since Aug 20, still
+  // SILENT — passive visibility only). Zero new SQL: activities read rides
+  // can_see_activity, marks ride been_marks_friends_read. No show_live
+  // filter here: presence is a choice, memory is not.
+  const [friendLens, setFriendLens] = useState("now"); // "now" | "past"
+  const [pastGroups, setPastGroups] = useState(null); // null = loading
+  useEffect(() => {
+    if (mapFilter !== "friends" || friendLens !== "past" || !userId) return;
+    let cancelled = false;
+    setPastGroups(null);
+    (async () => {
+      const { data: fr } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      const everyone = Array.from(
+        new Set([
+          userId,
+          ...(fr || []).map((f) =>
+            f.requester_id === userId ? f.addressee_id : f.requester_id
+          ),
+        ])
+      );
+      const [actsRes, marksRes] = await Promise.all([
+        supabase
+          .from("activities")
+          .select("id, user_id, venue_id, created_at, label, joined_from, is_album")
+          .eq("kind", "checkin")
+          .in("user_id", everyone)
+          .not("venue_id", "is", null)
+          // Upcoming nights are plans, not memories.
+          .lte("created_at", new Date().toISOString())
+          .order("created_at", { ascending: false })
+          .limit(500),
+        supabase
+          .from("been_marks")
+          .select("user_id, venue_id, created_at")
+          .in("user_id", everyone)
+          .limit(500),
+      ]);
+      const acts = actsRes.data || [];
+      const marks = marksRes.data || [];
+      const venueIds = Array.from(
+        new Set([...acts.map((a) => a.venue_id), ...marks.map((m) => m.venue_id)])
+      );
+      if (venueIds.length === 0) {
+        if (!cancelled) setPastGroups([]);
+        return;
+      }
+      const profIds = Array.from(
+        new Set([...acts.map((a) => a.user_id), ...marks.map((m) => m.user_id)])
+      );
+      const [profsRes, vensRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", profIds),
+        supabase.from("venues").select("*").in("id", venueIds),
+      ]);
+      if (cancelled) return;
+      const profById = Object.fromEntries(
+        (profsRes.data || []).map((p) => [p.id, p])
+      );
+      const venById = Object.fromEntries(
+        (vensRes.data || []).map((v) => [v.id, v])
+      );
+      // Group per venue, then merge shared nights inside each venue via
+      // joined_from edges (union toward the topmost ancestor present) — the
+      // same edge the card merge uses, scoped to one venue so it stays cheap.
+      const byVenue = new Map();
+      const ensure = (venueId) => {
+        const venue = venById[venueId];
+        if (
+          !venue ||
+          !Number.isFinite(Number(venue.latitude)) ||
+          !Number.isFinite(Number(venue.longitude))
+        )
+          return null;
+        if (!byVenue.has(venueId))
+          byVenue.set(venueId, { venue, rows: [], marks: [] });
+        return byVenue.get(venueId);
+      };
+      for (const a of acts) {
+        const g = ensure(a.venue_id);
+        if (g) g.rows.push({ ...a, profile: profById[a.user_id] || null });
+      }
+      for (const m of marks) {
+        const g = ensure(m.venue_id);
+        // A mark is redundant next to that person's own check-in there.
+        if (g && !g.rows.some((r) => r.user_id === m.user_id))
+          g.marks.push({ ...m, profile: profById[m.user_id] || null });
+      }
+      const groups = [];
+      for (const g of byVenue.values()) {
+        const byId = new Map(g.rows.map((r) => [r.id, r]));
+        const rootOf = (row) => {
+          let cur = row;
+          const seen = new Set();
+          while (
+            cur.joined_from &&
+            byId.has(cur.joined_from) &&
+            !seen.has(cur.id)
+          ) {
+            seen.add(cur.id);
+            cur = byId.get(cur.joined_from);
+          }
+          return cur.id;
+        };
+        const nightMap = new Map();
+        for (const r of g.rows) {
+          const root = rootOf(r);
+          if (!nightMap.has(root)) nightMap.set(root, []);
+          nightMap.get(root).push(r); // rows arrive newest-first
+        }
+        const nights = Array.from(nightMap.values()).map((entries) => ({
+          key: entries[0].id,
+          entries,
+        }));
+        nights.sort(
+          (a, b) =>
+            new Date(b.entries[0].created_at) - new Date(a.entries[0].created_at)
+        );
+        groups.push({ venue: g.venue, nights, marks: g.marks });
+      }
+      setPastGroups(groups);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mapFilter, friendLens, userId]);
+
   // PERSON FILTER (profile "Places"): the whole trail of ONE friend — every
   // venue they've checked in, grouped per venue with visit counts. RLS
   // trims to friends-only for free.
@@ -369,6 +566,32 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       cancelled = true;
     };
   }, [personFilter?.userId]);
+
+  // Past-lens tap: one night and nothing else = straight into the card (no
+  // list of one); anything richer opens the venue's nights sheet.
+  const [nightsSheet, setNightsSheet] = useState(null); // a past group or null
+  function openNight(night, venue) {
+    const t =
+      night.entries.find((e) => e.user_id === userId) || night.entries[0];
+    const isSelf = t.user_id === userId;
+    onOpenThread?.({
+      activityId: t.id,
+      ownerId: t.user_id,
+      ownerName: isSelf ? "You" : t.profile?.display_name || "A friend",
+      ownerProfile: isSelf ? null : t.profile || null,
+      venueName: venue.name,
+      label: t.label || null,
+      venueObj: venue,
+      timestamp: t.created_at,
+    });
+  }
+  function handlePastTap(group) {
+    if (group.nights.length === 1 && group.marks.length === 0) {
+      openNight(group.nights[0], group.venue);
+    } else {
+      setNightsSheet(group);
+    }
+  }
 
   // Group visible check-ins by venue — the per-viewer "Mark and John are at X"
   // clustering. One pin per venue, entries newest-first.
@@ -575,7 +798,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               )}
             </button>
             <span className="text-sm font-medium text-neutral-700 whitespace-nowrap">
-              {mapFilter === "friends"
+              {mapFilter === "friends" && friendLens === "past"
+                ? `${(pastGroups || []).length} ${
+                    (pastGroups || []).length === 1 ? "place" : "places"
+                  }`
+                : mapFilter === "friends"
                 ? `${(friendCheckins || []).length} ${
                     (friendCheckins || []).length === 1 ? "friend" : "friends"
                   } out`
@@ -637,6 +864,42 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 }}
               />
             ))
+          ) : mapFilter === "friends" && friendLens === "past" ? (
+            // The memory map: every venue with a night (clustered — history
+            // is dense in a way presence never is). Pin weight = what lives
+            // there: avatar, olive count chip, or a quiet been-mark dot.
+            <MarkerClusterGroup
+              chunkedLoading
+              disableClusteringAtZoom={16}
+              spiderfyOnMaxZoom={true}
+              showCoverageOnHover={false}
+              maxClusterRadius={50}
+            >
+              {(pastGroups || []).map((group) => {
+                const people = new Set(
+                  group.nights.flatMap((n) => n.entries.map((e) => e.user_id))
+                );
+                const icon =
+                  group.nights.length === 0
+                    ? createPastMarkIcon()
+                    : group.nights.length === 1 && people.size === 1
+                    ? createPastSingleIcon(group.nights[0].entries[0].profile)
+                    : createPastClusterIcon(group);
+                return (
+                  <Marker
+                    key={`past_${group.venue.id}`}
+                    position={[
+                      Number(group.venue.latitude),
+                      Number(group.venue.longitude),
+                    ]}
+                    icon={icon}
+                    eventHandlers={{
+                      click: () => handlePastTap(group),
+                    }}
+                  />
+                );
+              })}
+            </MarkerClusterGroup>
           ) : mapFilter === "friends" ? (
             // Friend pins: one per venue, avatar stack + name label, no
             // clustering (there are few, and each pin IS the information).
@@ -691,7 +954,28 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </button>
         </div>
       )}
-      {!personFilter && mapFilter === "friends" && friendCheckins !== null && friendPins.length === 0 && (
+      {!personFilter && mapFilter === "friends" && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-[2050] flex gap-1.5"
+          style={{ top: chips.length > 0 ? 106 : 66 }}
+        >
+          {["now", "past"].map((lens) => (
+            <button
+              key={lens}
+              type="button"
+              onClick={() => setFriendLens(lens)}
+              className={`rounded-full px-4 py-1 text-[11px] font-medium shadow-sm transition border ${
+                friendLens === lens
+                  ? "bg-[#edf2eb] border-[#455d3b] text-[#455d3b]"
+                  : "bg-white/95 border-neutral-200 text-neutral-500"
+              }`}
+            >
+              {lens === "now" ? "Now" : "Past"}
+            </button>
+          ))}
+        </div>
+      )}
+      {!personFilter && mapFilter === "friends" && friendLens === "now" && friendCheckins !== null && friendPins.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
@@ -702,6 +986,30 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             </p>
           </div>
         </div>
+      )}
+      {!personFilter && mapFilter === "friends" && friendLens === "past" && pastGroups !== null && pastGroups.length === 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
+          <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
+            <p className="text-sm font-medium text-neutral-800">
+              No nights on the map yet
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Check in somewhere and it starts remembering
+            </p>
+          </div>
+        </div>
+      )}
+      {nightsSheet && (
+        <VenueNightsSheet
+          group={nightsSheet}
+          userId={userId}
+          onClose={() => setNightsSheet(null)}
+          onOpenNight={(night) => {
+            const venue = nightsSheet.venue;
+            setNightsSheet(null);
+            openNight(night, venue);
+          }}
+        />
       )}
       {selectedVenue && (
         <MapVenueSheet
