@@ -116,8 +116,7 @@ export function MediaViewer({
     if (sheet?.kind === "comments" && initialSheet !== "comments") {
       inputRef.current?.focus?.();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet?.kind]);
+  }, [sheet?.kind, initialSheet]);
 
   const isVideo = photo.kind === "video" && photo.videoUrl;
   const authorProfile = mediaProfiles[photo.user_id];
