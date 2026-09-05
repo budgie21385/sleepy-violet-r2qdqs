@@ -147,6 +147,11 @@ export function MediaViewer({
     if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy)) {
       if (dx < 0 && hasNext) onStep(1);
       if (dx > 0 && hasPrev) onStep(-1);
+    } else if (dy > SWIPE_PX && Math.abs(dy) > Math.abs(dx)) {
+      // Swipe DOWN dismisses (Sep 6, Mark) — the photo-viewer convention.
+      // Down only: up is reserved (and up-to-close feels like a throw).
+      if (sheet) setSheet(null);
+      else onClose();
     }
   }
 
