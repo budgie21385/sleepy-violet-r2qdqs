@@ -390,10 +390,17 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   // SILENT — passive visibility only). Zero new SQL: activities read rides
   // can_see_activity, marks ride been_marks_friends_read. No show_live
   // filter here: presence is a choice, memory is not.
+  // Whose map is this? (Mark, Sep 6): Friends/Past pins are FRIENDS ONLY —
+  // your own footprint lives under My List's Been lens, as your icon. Either
+  // way the tap shows the venue's FULL picture, you and friends together.
   const [friendLens, setFriendLens] = useState("now"); // "now" | "past"
+  const [myListLens, setMyListLens] = useState("saved"); // "saved" | "been"
   const [pastGroups, setPastGroups] = useState(null); // null = loading
+  const wantPast =
+    (mapFilter === "friends" && friendLens === "past") ||
+    (mapFilter === "my_list" && myListLens === "been");
   useEffect(() => {
-    if (mapFilter !== "friends" || friendLens !== "past" || !userId) return;
+    if (!wantPast || !userId) return;
     let cancelled = false;
     setPastGroups(null);
     (async () => {
@@ -516,7 +523,40 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     return () => {
       cancelled = true;
     };
-  }, [mapFilter, friendLens, userId]);
+  }, [wantPast, userId]);
+
+  // The two views over the same data. Friends/Past: only venues where a
+  // FRIEND has a night or mark, pin faces friends-only. My List/Been: only
+  // venues where YOU have a night or mark, pin is your icon.
+  const friendPastPins = useMemo(() => {
+    if (!pastGroups) return [];
+    return pastGroups
+      .map((g) => ({
+        ...g,
+        friendNights: g.nights.filter((n) =>
+          n.entries.some((e) => e.user_id !== userId)
+        ),
+        friendMarks: g.marks.filter((m) => m.user_id !== userId),
+      }))
+      .filter((g) => g.friendNights.length > 0 || g.friendMarks.length > 0);
+  }, [pastGroups, userId]);
+
+  const myBeenPins = useMemo(() => {
+    if (!pastGroups) return [];
+    return pastGroups
+      .map((g) => {
+        const ownNights = g.nights.filter((n) =>
+          n.entries.some((e) => e.user_id === userId)
+        );
+        const ownMark = g.marks.find((m) => m.user_id === userId) || null;
+        const ownProfile =
+          ownNights[0]?.entries.find((e) => e.user_id === userId)?.profile ||
+          ownMark?.profile ||
+          null;
+        return { ...g, ownNights, ownMark, ownProfile };
+      })
+      .filter((g) => g.ownNights.length > 0 || g.ownMark);
+  }, [pastGroups, userId]);
 
   // PERSON FILTER (profile "Places"): the whole trail of ONE friend — every
   // venue they've checked in, grouped per venue with visit counts. RLS
@@ -799,8 +839,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             </button>
             <span className="text-sm font-medium text-neutral-700 whitespace-nowrap">
               {mapFilter === "friends" && friendLens === "past"
-                ? `${(pastGroups || []).length} ${
-                    (pastGroups || []).length === 1 ? "place" : "places"
+                ? `${friendPastPins.length} ${
+                    friendPastPins.length === 1 ? "place" : "places"
+                  }`
+                : mapFilter === "my_list" && myListLens === "been"
+                ? `${myBeenPins.length} ${
+                    myBeenPins.length === 1 ? "place" : "places"
                   }`
                 : mapFilter === "friends"
                 ? `${(friendCheckins || []).length} ${
@@ -865,9 +909,10 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               />
             ))
           ) : mapFilter === "friends" && friendLens === "past" ? (
-            // The memory map: every venue with a night (clustered — history
-            // is dense in a way presence never is). Pin weight = what lives
-            // there: avatar, olive count chip, or a quiet been-mark dot.
+            // The friends memory map: every venue where a FRIEND has a night
+            // or mark (your own footprint pins under My List's Been lens).
+            // Pin weight = what lives there: a friend's avatar, an olive
+            // count chip, or a quiet been-mark dot.
             <MarkerClusterGroup
               chunkedLoading
               disableClusteringAtZoom={16}
@@ -875,19 +920,56 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               showCoverageOnHover={false}
               maxClusterRadius={50}
             >
-              {(pastGroups || []).map((group) => {
-                const people = new Set(
-                  group.nights.flatMap((n) => n.entries.map((e) => e.user_id))
+              {friendPastPins.map((group) => {
+                const friendOnly = group.friendNights.map((n) => ({
+                  entries: n.entries.filter((e) => e.user_id !== userId),
+                }));
+                const friendPeople = new Set(
+                  friendOnly.flatMap((n) => n.entries.map((e) => e.user_id))
                 );
                 const icon =
-                  group.nights.length === 0
+                  friendOnly.length === 0
                     ? createPastMarkIcon()
-                    : group.nights.length === 1 && people.size === 1
-                    ? createPastSingleIcon(group.nights[0].entries[0].profile)
-                    : createPastClusterIcon(group);
+                    : friendOnly.length === 1 && friendPeople.size === 1
+                    ? createPastSingleIcon(friendOnly[0].entries[0].profile)
+                    : createPastClusterIcon({ nights: friendOnly });
                 return (
                   <Marker
                     key={`past_${group.venue.id}`}
+                    position={[
+                      Number(group.venue.latitude),
+                      Number(group.venue.longitude),
+                    ]}
+                    icon={icon}
+                    eventHandlers={{
+                      click: () => handlePastTap(group),
+                    }}
+                  />
+                );
+              })}
+            </MarkerClusterGroup>
+          ) : mapFilter === "my_list" && myListLens === "been" ? (
+            // YOUR been map: every venue you've had a night at or ticked the
+            // Been pill on, pinned as you. Tap = the full picture, you and
+            // friends together.
+            <MarkerClusterGroup
+              chunkedLoading
+              disableClusteringAtZoom={16}
+              spiderfyOnMaxZoom={true}
+              showCoverageOnHover={false}
+              maxClusterRadius={50}
+            >
+              {myBeenPins.map((group) => {
+                const ownOnly = group.ownNights.map((n) => ({
+                  entries: n.entries.filter((e) => e.user_id === userId),
+                }));
+                const icon =
+                  ownOnly.length > 1
+                    ? createPastClusterIcon({ nights: ownOnly })
+                    : createPastSingleIcon(group.ownProfile);
+                return (
+                  <Marker
+                    key={`been_${group.venue.id}`}
                     position={[
                       Number(group.venue.latitude),
                       Number(group.venue.longitude),
@@ -954,25 +1036,44 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </button>
         </div>
       )}
-      {!personFilter && mapFilter === "friends" && (
+      {!personFilter && (mapFilter === "friends" || mapFilter === "my_list") && (
         <div
           className="absolute left-1/2 -translate-x-1/2 z-[2050] flex gap-1.5"
           style={{ top: chips.length > 0 ? 106 : 66 }}
         >
-          {["now", "past"].map((lens) => (
-            <button
-              key={lens}
-              type="button"
-              onClick={() => setFriendLens(lens)}
-              className={`rounded-full px-4 py-1 text-[11px] font-medium shadow-sm transition border ${
-                friendLens === lens
-                  ? "bg-[#edf2eb] border-[#455d3b] text-[#455d3b]"
-                  : "bg-white/95 border-neutral-200 text-neutral-500"
-              }`}
-            >
-              {lens === "now" ? "Now" : "Past"}
-            </button>
-          ))}
+          {(mapFilter === "friends"
+            ? [
+                { key: "now", label: "Now" },
+                { key: "past", label: "Past" },
+              ]
+            : [
+                { key: "saved", label: "Saved" },
+                { key: "been", label: "Been" },
+              ]
+          ).map((lens) => {
+            const active =
+              mapFilter === "friends"
+                ? friendLens === lens.key
+                : myListLens === lens.key;
+            return (
+              <button
+                key={lens.key}
+                type="button"
+                onClick={() =>
+                  mapFilter === "friends"
+                    ? setFriendLens(lens.key)
+                    : setMyListLens(lens.key)
+                }
+                className={`rounded-full px-4 py-1 text-[11px] font-medium shadow-sm transition border ${
+                  active
+                    ? "bg-[#edf2eb] border-[#455d3b] text-[#455d3b]"
+                    : "bg-white/95 border-neutral-200 text-neutral-500"
+                }`}
+              >
+                {lens.label}
+              </button>
+            );
+          })}
         </div>
       )}
       {!personFilter && mapFilter === "friends" && friendLens === "now" && friendCheckins !== null && friendPins.length === 0 && (
@@ -987,14 +1088,26 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
         </div>
       )}
-      {!personFilter && mapFilter === "friends" && friendLens === "past" && pastGroups !== null && pastGroups.length === 0 && (
+      {!personFilter && mapFilter === "friends" && friendLens === "past" && pastGroups !== null && friendPastPins.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
-              No nights on the map yet
+              No friend nights on the map yet
             </p>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Check in somewhere and it starts remembering
+              Their check-ins and been spots will live here
+            </p>
+          </div>
+        </div>
+      )}
+      {!personFilter && mapFilter === "my_list" && myListLens === "been" && pastGroups !== null && myBeenPins.length === 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
+          <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
+            <p className="text-sm font-medium text-neutral-800">
+              Nowhere marked been yet
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Check in, or tick Been on a venue you know
             </p>
           </div>
         </div>
