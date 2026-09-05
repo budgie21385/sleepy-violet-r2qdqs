@@ -18,7 +18,10 @@ const WEB_QUALITY = 0.8;
 export const SIGNED_URL_TTL = 60 * 60; // seconds
 // No client-side transcode exists, so videos upload as-is under a hard cap
 // (~30-60s of phone footage). Bucket limit raised to match (checkin_videos.sql).
-export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 150 * 1024 * 1024; // R2 multipart cap (Sep 5 — Mark's real phone video was 62MB; R2 makes size cheap)
+// The Supabase TUS FALLBACK is still bound by the bucket's 50MB file limit
+// (checkin_videos.sql) — over that, a failed R2 attempt can't fall back.
+const SB_VIDEO_BYTES = 50 * 1024 * 1024;
 
 // Force a COMPLETE read of the picked file (July 25 — desktop uploads from
 // cloud-synced folders (OneDrive placeholders) can stream partial bytes;
@@ -170,7 +173,7 @@ export async function uploadViaCollectLink(userId, token, activityId, file, onPr
   let webBlob;
   if (isVideo) {
     if ((file.size || 0) > MAX_VIDEO_BYTES) {
-      const err = new Error("Video over the 50MB limit");
+      const err = new Error("Video over the 150MB limit");
       err.code = "too_big";
       throw err;
     }
@@ -194,6 +197,11 @@ export async function uploadViaCollectLink(userId, token, activityId, file, onPr
         finalOrigPath = r2VidPath;
         origStore = "r2";
       } else {
+        if ((file.size || 0) > SB_VIDEO_BYTES) {
+          const err = new Error("Upload hiccup. Videos over 50MB need another try in a minute.");
+          err.code = "too_big";
+          throw err;
+        }
         await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
       }
     } else {
@@ -357,7 +365,10 @@ async function uploadVideoViaR2(activityId, file, onProgress) {
         }
       }
       parts.push({ PartNumber: partNumber, ETag: etag });
-      onProgress?.(Math.min(total, (i + 1) * PART_SIZE), total);
+      if (total > 0)
+        onProgress?.(
+          Math.min(99, Math.round((Math.min(total, (i + 1) * PART_SIZE) / total) * 100))
+        );
     }
     await api(
       { action: "complete", path: init.path, uploadId: init.uploadId, parts },
@@ -526,7 +537,7 @@ async function uploadResumable(path, file, contentType, onProgress) {
 // {code:'too_big'} over the cap so callers can toast a friendly limit.
 export async function uploadCheckinVideo(userId, activityId, file, onProgress) {
   if ((file.size || 0) > MAX_VIDEO_BYTES) {
-    const err = new Error("Video over the 50MB limit");
+    const err = new Error("Video over the 150MB limit");
     err.code = "too_big";
     throw err;
   }
@@ -550,6 +561,12 @@ export async function uploadCheckinVideo(userId, activityId, file, onProgress) {
     finalOrigPath = r2Path;
     origStore = "r2";
   } else {
+    if ((file.size || 0) > SB_VIDEO_BYTES) {
+      await supabase.storage.from(BUCKET).remove([webPath]);
+      const err = new Error("Upload hiccup. Videos over 50MB need another try in a minute.");
+      err.code = "too_big";
+      throw err;
+    }
     try {
       await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
     } catch (origErr) {
