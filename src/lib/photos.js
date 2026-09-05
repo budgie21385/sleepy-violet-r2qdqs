@@ -189,7 +189,13 @@ export async function uploadViaCollectLink(userId, token, activityId, file, onPr
   let origStore = "sb";
   try {
     if (isVideo) {
-      await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
+      const r2VidPath = await uploadVideoViaR2(activityId, file, onProgress);
+      if (r2VidPath) {
+        finalOrigPath = r2VidPath;
+        origStore = "r2";
+      } else {
+        await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
+      }
     } else {
       // Same full-read guard as uploadCheckinPhoto.
       const stableOrig = await materializeFile(file);
@@ -275,6 +281,95 @@ async function putOriginalViaR2(activityId, file, stableOrig) {
     if (!put.ok) return null;
     return json.path;
   } catch {
+    return null;
+  }
+}
+
+// R2 STAGE 2 (Sep 5): VIDEO originals via S3 multipart — resumability
+// rebuilt without TUS. The server initiates/completes; each 6MB part goes
+// straight to R2 on a presigned URL with per-part retries and backoff, so
+// a locked phone resumes where it left off (completed parts persist on R2
+// until the upload completes or aborts). Returns the R2 key, or null on
+// ANY failure — the caller falls back to Supabase TUS, same doctrine as
+// photos. Requires the bucket CORS to EXPOSE the ETag header.
+const PART_SIZE = 6 * 1024 * 1024;
+async function uploadVideoViaR2(activityId, file, onProgress) {
+  async function api(bodyObj, token) {
+    const resp = await fetch("/api/multipart", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(bodyObj),
+    });
+    if (!resp.ok) throw new Error(`multipart api ${resp.status}`);
+    return resp.json();
+  }
+  let token;
+  let init = null;
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    token = sess?.session?.access_token;
+    if (!token) return null;
+    init = await api(
+      {
+        action: "init",
+        activityId,
+        ext: extOf(file),
+        contentType: file.type || "video/mp4",
+      },
+      token
+    );
+    if (init.store !== "r2" || !init.path || !init.uploadId) return null;
+
+    const total = file.size || 0;
+    const partCount = Math.max(1, Math.ceil(total / PART_SIZE));
+    const parts = [];
+    for (let i = 0; i < partCount; i++) {
+      const partNumber = i + 1;
+      const chunk = file.slice(i * PART_SIZE, Math.min(total, (i + 1) * PART_SIZE));
+      let etag = null;
+      // Per-part retry with backoff — this loop IS the resume: a wake-up
+      // after suspension just retries the part that was in flight.
+      for (let attempt = 0; attempt < 6 && !etag; attempt++) {
+        try {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * 2 ** attempt)));
+            // Presigned URLs may have aged out during a long suspension —
+            // mint a fresh one each retry.
+          }
+          const { url } = await api(
+            {
+              action: "sign_part",
+              path: init.path,
+              uploadId: init.uploadId,
+              partNumber,
+            },
+            token
+          );
+          const put = await fetch(url, { method: "PUT", body: chunk });
+          if (!put.ok) throw new Error(`part ${partNumber} HTTP ${put.status}`);
+          etag = put.headers.get("ETag") || put.headers.get("etag");
+          if (!etag) throw new Error("no ETag (bucket CORS must expose it)");
+        } catch (e) {
+          if (attempt === 5) throw e;
+        }
+      }
+      parts.push({ PartNumber: partNumber, ETag: etag });
+      onProgress?.(Math.min(total, (i + 1) * PART_SIZE), total);
+    }
+    await api(
+      { action: "complete", path: init.path, uploadId: init.uploadId, parts },
+      token
+    );
+    return init.path;
+  } catch (e) {
+    console.error("R2 multipart failed, falling back to TUS:", e?.message);
+    // Best-effort abort so R2 doesn't hold orphan parts.
+    if (init?.path && init?.uploadId && token) {
+      api({ action: "abort", path: init.path, uploadId: init.uploadId }, token).catch(() => {});
+    }
     return null;
   }
 }
@@ -447,11 +542,20 @@ export async function uploadCheckinVideo(userId, activityId, file, onProgress) {
     .upload(webPath, thumbBlob, { contentType: "image/jpeg" });
   if (webErr) throw webErr;
 
-  try {
-    await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
-  } catch (origErr) {
-    await supabase.storage.from(BUCKET).remove([webPath]);
-    throw origErr;
+  // ORIGINAL → R2 multipart when the pipe is live (stage 2), TUS otherwise.
+  let finalOrigPath = origPath;
+  let origStore = "sb";
+  const r2Path = await uploadVideoViaR2(activityId, file, onProgress);
+  if (r2Path) {
+    finalOrigPath = r2Path;
+    origStore = "r2";
+  } else {
+    try {
+      await uploadResumable(origPath, file, file.type || "video/mp4", onProgress);
+    } catch (origErr) {
+      await supabase.storage.from(BUCKET).remove([webPath]);
+      throw origErr;
+    }
   }
 
   const { data: row, error: insErr } = await supabase
@@ -460,14 +564,17 @@ export async function uploadCheckinVideo(userId, activityId, file, onProgress) {
       activity_id: activityId,
       user_id: userId,
       web_path: webPath,
-      orig_path: origPath,
+      orig_path: finalOrigPath,
       bytes: (file.size || 0) + (thumbBlob.size || 0),
       kind: "video",
+      ...(origStore === "r2" ? { orig_store: "r2" } : {}),
     })
     .select("*")
     .single();
   if (insErr) {
-    await supabase.storage.from(BUCKET).remove([webPath, origPath]);
+    await supabase.storage
+      .from(BUCKET)
+      .remove(origStore === "sb" ? [webPath, origPath] : [webPath]);
     throw insErr;
   }
   return row;
@@ -569,23 +676,38 @@ export async function fetchCheckinPhotosMany(activityIds) {
   const urlByPath = new Map(
     (signed || []).filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl])
   );
-  // Videos also need a playable URL for their original.
+  // Videos also need a playable URL for their original — STORE-AWARE
+  // (Sep 5, stage 2): sb originals sign through Supabase as ever, r2 ones
+  // through our API.
   const vidRows = rows.filter((r) => r.kind === "video");
   let vidByPath = new Map();
+  let r2VidById = {};
   if (vidRows.length > 0) {
-    const { data: signedV } = await supabase.storage
-      .from(BUCKET)
-      .createSignedUrls(vidRows.map((r) => r.orig_path), SIGNED_URL_TTL);
-    vidByPath = new Map(
-      (signedV || [])
-        .filter((s) => s.signedUrl)
-        .map((s) => [s.path, s.signedUrl])
-    );
+    const sbVids = vidRows.filter((r) => (r.orig_store || "sb") !== "r2");
+    if (sbVids.length > 0) {
+      const { data: signedV } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrls(sbVids.map((r) => r.orig_path), SIGNED_URL_TTL);
+      vidByPath = new Map(
+        (signedV || [])
+          .filter((s) => s.signedUrl)
+          .map((s) => [s.path, s.signedUrl])
+      );
+    }
+    const r2Vids = vidRows.filter((r) => (r.orig_store || "sb") === "r2");
+    if (r2Vids.length > 0) {
+      r2VidById = await signR2Originals(r2Vids.map((r) => r.id));
+    }
   }
   return rows.map((r) => ({
     ...r,
     url: urlByPath.get(r.web_path) || null,
-    videoUrl: r.kind === "video" ? vidByPath.get(r.orig_path) || null : null,
+    videoUrl:
+      r.kind === "video"
+        ? (r.orig_store || "sb") === "r2"
+          ? r2VidById[r.id] || null
+          : vidByPath.get(r.orig_path) || null
+        : null,
   }));
 }
 

@@ -35,6 +35,9 @@ const BUCKET_R2 = need("R2_BUCKET");
 const BUCKET_SB = "checkin-photos";
 const BATCH = Number(process.env.BATCH || 25);
 const DRY = !!process.env.DRY_RUN;
+// Stage 1 = photo, stage 2 = video (set KIND=video after the multipart
+// upload path is field-verified on a real phone).
+const KIND = process.env.KIND === "video" ? "video" : "photo";
 
 async function main() {
   let moved = 0;
@@ -44,7 +47,7 @@ async function main() {
       .from("activity_photos")
       .select("id, orig_path, bytes")
       .eq("orig_store", "sb")
-      .eq("kind", "photo")
+      .eq("kind", KIND)
       .order("id", { ascending: true })
       .limit(BATCH);
     if (error) throw error;
@@ -69,7 +72,8 @@ async function main() {
             Bucket: BUCKET_R2,
             Key: row.orig_path, // same key — nothing else needs to change
             Body: buf,
-            ContentType: blob.type || "image/jpeg",
+            ContentType:
+              blob.type || (KIND === "video" ? "video/mp4" : "image/jpeg"),
           })
         );
         // Verify before flipping: the copy must exist and match.
