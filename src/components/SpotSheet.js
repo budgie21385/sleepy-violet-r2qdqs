@@ -5,8 +5,9 @@
 // Spots lens and from the drawer's spot_added item.
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, ExternalLink, Heart, Bookmark, Send } from "lucide-react";
+import { X, Trash2, ExternalLink, Bookmark, Send } from "lucide-react";
 import { timeAgoShort } from "../lib/checkins";
+import { REACTION_SET } from "../lib/reactions";
 import { supabase } from "../supabaseClient";
 import { signSpotPhotos, deleteSpotPhotos } from "../lib/photos";
 import { FriendAvatar } from "./FriendAvatar";
@@ -41,7 +42,7 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
   const [deleting, setDeleting] = useState(false);
   // Social (Sep 6): likes + comments for anyone in the circle; save-to-my-
   // map for friends. All silent — the layer stays quiet by doctrine.
-  const [likers, setLikers] = useState([]); // user_ids
+  const [reactions, setReactions] = useState([]); // [{user_id, emoji}]
   const [saved, setSaved] = useState(false);
   const [comments, setComments] = useState(null); // null = loading
   const [commentBody, setCommentBody] = useState("");
@@ -66,7 +67,10 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
         if (!cancelled && data) setProfile(data);
       }
       const [likesRes, savesRes, commentsRes] = await Promise.all([
-        supabase.from("spot_likes").select("user_id").eq("spot_id", spot.id),
+        supabase
+          .from("spot_reactions")
+          .select("user_id, emoji")
+          .eq("spot_id", spot.id),
         userId
           ? supabase
               .from("spot_saves")
@@ -82,7 +86,7 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
           .limit(100),
       ]);
       if (cancelled) return;
-      setLikers((likesRes.data || []).map((r) => r.user_id));
+      setReactions(likesRes.data || []);
       setSaved((savesRes.data || []).length > 0);
       const rows = commentsRes.data || [];
       const pIds = Array.from(new Set(rows.map((c) => c.user_id)));
@@ -102,27 +106,39 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
     };
   }, [spot, userId]);
 
-  const iLike = likers.includes(userId);
+  // The app's ONE reaction contract: one emoji per person, tap yours to
+  // remove it, tap another to switch.
+  const myReaction = reactions.find((r) => r.user_id === userId)?.emoji || null;
+  const reactionCounts = reactions.reduce((acc, r) => {
+    acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+    return acc;
+  }, {});
 
-  async function toggleLike() {
+  async function react(emoji) {
     if (acting || !userId) return;
     setActing(true);
     try {
-      if (iLike) {
+      if (myReaction === emoji) {
         await supabase
-          .from("spot_likes")
+          .from("spot_reactions")
           .delete()
           .eq("spot_id", spot.id)
           .eq("user_id", userId);
-        setLikers((prev) => prev.filter((u) => u !== userId));
+        setReactions((prev) => prev.filter((r) => r.user_id !== userId));
       } else {
         await supabase
-          .from("spot_likes")
-          .insert({ spot_id: spot.id, user_id: userId });
-        setLikers((prev) => [...prev, userId]);
+          .from("spot_reactions")
+          .upsert(
+            { spot_id: spot.id, user_id: userId, emoji },
+            { onConflict: "spot_id,user_id" }
+          );
+        setReactions((prev) => [
+          ...prev.filter((r) => r.user_id !== userId),
+          { user_id: userId, emoji },
+        ]);
       }
     } catch (e) {
-      console.error("Spot like failed:", e);
+      console.error("Spot reaction failed:", e);
     } finally {
       setActing(false);
     }
@@ -274,24 +290,6 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
             <p className="min-w-0 flex-1 text-xs text-neutral-500">
               Added by <span className="font-medium text-neutral-700">{addedName}</span> · {addedDate}
             </p>
-            <button
-              type="button"
-              aria-label={iLike ? "Unlike" : "Like"}
-              disabled={acting}
-              onClick={toggleLike}
-              className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium transition active:scale-95 disabled:opacity-60 ${
-                iLike
-                  ? "border-[#455d3b] bg-[#edf2eb] text-[#455d3b]"
-                  : "border-neutral-200 bg-white text-neutral-500"
-              }`}
-            >
-              <Heart
-                size={13}
-                strokeWidth={1.8}
-                fill={iLike ? "#455d3b" : "none"}
-              />
-              {likers.length > 0 && likers.length}
-            </button>
             {!isMine && (
               <button
                 type="button"
@@ -313,8 +311,43 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
             )}
           </div>
 
+          {/* reactions — the app's one palette, same contract as photos and
+              comments: always visible, yours highlighted, tap to switch. */}
+          <div className="mt-4 flex justify-between border-t border-neutral-100 pt-3.5">
+            {REACTION_SET.map((e) => {
+              const n = reactionCounts[e] || 0;
+              const isMineE = myReaction === e;
+              return (
+                <button
+                  key={e}
+                  type="button"
+                  disabled={acting}
+                  onClick={() => react(e)}
+                  className={`relative flex h-11 w-11 items-center justify-center rounded-full border text-[19px] transition active:scale-90 disabled:opacity-50 ${
+                    isMineE
+                      ? "border-[#455d3b] bg-[#edf2eb]"
+                      : "border-transparent bg-neutral-100"
+                  }`}
+                >
+                  {e}
+                  {n > 0 && (
+                    <span
+                      className={`absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border border-white px-1 text-[10px] font-semibold ${
+                        isMineE
+                          ? "bg-[#455d3b] text-white"
+                          : "bg-neutral-700 text-white"
+                      }`}
+                    >
+                      {n}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {/* comments */}
-          <div className="mt-4 border-t border-neutral-100 pt-3">
+          <div className="mt-3 border-t border-neutral-100 pt-3">
             <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
               {comments === null
                 ? "Comments"

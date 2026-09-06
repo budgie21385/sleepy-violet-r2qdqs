@@ -1105,18 +1105,24 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                   })}
                 </div>
               )}
-            {chips.map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                onClick={c.onRemove}
-                className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-full border border-[#c7d4c0] bg-[#e7ede3] pl-3 pr-2 text-[13px] font-medium text-[#33402c]"
-              >
-                {c.label}
-                <X size={11} />
-              </button>
-            ))}
           </div>
+          {/* Active filter chips on their OWN row (Sep 6, Mark: they were
+              getting cut off sharing a line with the lens pills). */}
+          {chips.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1 pointer-events-auto">
+              {chips.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={c.onRemove}
+                  className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-full border border-[#c7d4c0] bg-[#e7ede3] pl-3 pr-2 text-[13px] font-medium text-[#33402c] shadow-sm"
+                >
+                  {c.label}
+                  <X size={11} />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {/* Place count — bottom centre above the tab bar (Sep 6, Mark: the
