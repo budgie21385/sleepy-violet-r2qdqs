@@ -215,7 +215,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onClearPersonFilter, onFiltersSnapshot }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, onFiltersSnapshot }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -428,6 +428,58 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     setQ("");
     setSearchRes({ venues: [], google: [] });
   }
+
+  // FRIENDS DIRECTORY (Sep 6, Mark: "let me use the search to search my
+  // friends and see their maps") — on the Friends view, opening search lists
+  // your friends before you type; a tap applies the existing person filter
+  // (their whole trail, the profile-Places map). Typing narrows by name.
+  const [friendsDir, setFriendsDir] = useState(null); // null = not loaded
+  useEffect(() => {
+    if (!searchUi || mapFilter !== "friends" || !userId || friendsDir) return;
+    let cancelled = false;
+    (async () => {
+      const { data: fr } = await supabase
+        .from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted")
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      const ids = Array.from(
+        new Set(
+          (fr || []).map((f) =>
+            f.requester_id === userId ? f.addressee_id : f.requester_id
+          )
+        )
+      );
+      if (ids.length === 0) {
+        if (!cancelled) setFriendsDir([]);
+        return;
+      }
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", ids);
+      if (!cancelled)
+        setFriendsDir(
+          (profs || []).sort((a, b) =>
+            (a.display_name || "").localeCompare(b.display_name || "")
+          )
+        );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchUi, mapFilter, userId, friendsDir]);
+
+  const friendMatches = useMemo(() => {
+    if (mapFilter !== "friends" || !friendsDir) return [];
+    const term = q.trim().toLowerCase();
+    if (!term) return friendsDir;
+    return friendsDir.filter(
+      (p) =>
+        (p.display_name || "").toLowerCase().includes(term) ||
+        (p.username || "").toLowerCase().includes(term)
+    );
+  }, [mapFilter, friendsDir, q]);
 
   // Whose map is this? (Mark, Sep 6): Friends/Past pins are FRIENDS ONLY —
   // your own footprint lives under My List's Been lens, as your icon. Either
@@ -1261,11 +1313,57 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
           <div className="absolute inset-x-0 bottom-0 top-[68px] overflow-y-auto overscroll-contain rounded-t-[22px] bg-white px-5 pb-8 shadow-[0_-4px_24px_rgba(30,27,23,0.14)]">
             {(() => {
+              const friendSection =
+                friendMatches.length > 0 ? (
+                  <>
+                    <p className="pt-4 pb-0.5 text-[11.5px] font-medium uppercase tracking-[0.1em] text-[#a79e90]">
+                      Friends
+                    </p>
+                    {friendMatches.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          closeSearch();
+                          onPersonFilter?.({ userId: p.id, profile: p });
+                        }}
+                        className="flex w-full items-center gap-3 py-[11px] text-left active:bg-neutral-50"
+                      >
+                        {p.avatar_url ? (
+                          <img
+                            src={p.avatar_url}
+                            alt=""
+                            className="h-[34px] w-[34px] shrink-0 rounded-full object-cover bg-neutral-100"
+                          />
+                        ) : (
+                          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-[13px] font-semibold text-white">
+                            {(p.display_name || "?").trim().charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14.5px] text-neutral-900">
+                            {p.display_name || p.username || "A friend"}
+                          </span>
+                          <span className="block truncate text-[12.5px] text-neutral-400">
+                            See their places
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </>
+                ) : null;
               if (q.trim().length < 2)
                 return (
-                  <p className="pt-6 text-sm text-neutral-400">
-                    Search places, like Market Lane
-                  </p>
+                  <>
+                    {friendSection}
+                    {!friendSection && (
+                      <p className="pt-6 text-sm text-neutral-400">
+                        {mapFilter === "friends"
+                          ? "Search friends or places"
+                          : "Search places, like Market Lane"}
+                      </p>
+                    )}
+                  </>
                 );
               const dbRows = searchRes.venues;
               const sMine = dbRows.filter(
@@ -1323,6 +1421,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               );
               return (
                 <>
+                  {friendSection}
                   {searching && (
                     <p className="pt-4 text-xs text-neutral-400">Searching…</p>
                   )}
@@ -1396,7 +1495,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                       </span>
                     </button>
                   ))}
-                  {!searching && nothing && (
+                  {!searching && nothing && !friendSection && (
                     <p className="pt-5 text-sm text-neutral-400">
                       Nothing found for "{q.trim()}"
                     </p>

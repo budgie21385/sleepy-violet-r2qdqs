@@ -4755,6 +4755,7 @@ if (authLoading || guestLoading) {
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
           personFilter={mapPersonFilter}
+          onPersonFilter={(pf) => setMapPersonFilter(pf)}
           onClearPersonFilter={() => setMapPersonFilter(null)}
           onVenueAdded={(venue, opts) => {
             // New venue from the search sheet → into the pool state so the
