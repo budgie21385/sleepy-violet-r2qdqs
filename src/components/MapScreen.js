@@ -1019,7 +1019,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const hasPrev = canCycle;
 
   return (
-    <div className="fixed inset-0 z-[1500] bg-white">
+    <div className="fixed inset-0 z-[1500] bg-white lg:left-[84px]">
       {/* FLOATING CHROME (Sep 6, Mark's new map UI): the white header bar is
           gone — the map runs full-bleed and the controls float on it. Row 1:
           segment pills + the search circle. Row 2: lens pills, active filter
@@ -1028,7 +1028,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       {!searchUi && (
         <div className="absolute top-0 left-0 right-0 z-[2000] px-4 pt-3 pointer-events-none">
           <div className="flex items-center gap-2.5 pointer-events-auto">
-            <div className="flex flex-1 min-w-0 gap-0.5 rounded-full bg-white p-1 shadow-[0_2px_10px_rgba(30,27,23,0.14)]">
+            <div className="flex flex-1 min-w-0 gap-0.5 rounded-full bg-white p-1 shadow-[0_2px_10px_rgba(30,27,23,0.14)] lg:flex-none">
               {[
                 { key: "all", label: "All" },
                 { key: "my_list", label: "My List" },
@@ -1044,7 +1044,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                     if (personFilter) onClearPersonFilter?.();
                     setMapFilter(seg.key);
                   }}
-                  className={`h-9 flex-1 rounded-full text-[13.5px] font-medium transition ${
+                  className={`h-9 flex-1 rounded-full text-[13.5px] font-medium transition lg:flex-none lg:px-6 ${
                     mapFilter === seg.key
                       ? "bg-[#455d3b] text-white"
                       : "text-neutral-500"
@@ -1058,7 +1058,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               type="button"
               onClick={() => setSearchUi(true)}
               aria-label="Search places"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition lg:hidden"
             >
               <Search size={17} strokeWidth={1.8} />
             </button>
@@ -1128,7 +1128,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       {/* Place count — bottom centre above the tab bar (Sep 6, Mark: the
           row-2 tally got cut off once the number grew). */}
       {!searchUi && !personFilter && (
-        <div className="absolute left-1/2 -translate-x-1/2 z-[2050] bottom-[104px]">
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2050] bottom-[104px] lg:bottom-[24px]">
           <span className="block rounded-full bg-white/95 px-3.5 py-1.5 text-[12.5px] font-medium text-neutral-700 shadow-[0_2px_10px_rgba(30,27,23,0.14)] whitespace-nowrap">
               {mapFilter === "friends" && friendLens === "spots"
                 ? `${friendSpots.length} ${
@@ -1415,11 +1415,23 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
         </div>
       )}
+      {/* Desktop search: a real centred field over the map (the mock's call:
+          "not a mystery circle"). Opens the same search UI. */}
+      {!searchUi && !personFilter && (
+        <button
+          type="button"
+          onClick={() => setSearchUi(true)}
+          className="hidden lg:flex absolute left-1/2 top-[18px] z-[2000] h-11 w-[320px] -translate-x-1/2 items-center gap-2.5 rounded-full border border-[#ede7df] bg-white px-4 text-left shadow-[0_2px_10px_rgba(30,27,23,0.14)] hover:border-[#ddd7ce] transition"
+        >
+          <Search size={15} className="shrink-0 text-neutral-400" />
+          <span className="text-[14.5px] text-neutral-400">Search places</span>
+        </button>
+      )}
       {/* Zoom stack (left) + the relocated filter button (right, above the
           plus FAB — same sheet, same filters, new home). */}
       {!searchUi && !personFilter && (
         <>
-          <div className="absolute left-4 bottom-[140px] z-[2050] w-11 overflow-hidden rounded-xl bg-white shadow-[0_2px_10px_rgba(30,27,23,0.14)]">
+          <div className="absolute left-4 bottom-[140px] z-[2050] w-11 overflow-hidden rounded-xl bg-white shadow-[0_2px_10px_rgba(30,27,23,0.14)] lg:bottom-[18px]">
             <button
               type="button"
               aria-label="Zoom in"
@@ -1441,7 +1453,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             type="button"
             aria-label="Filters"
             onClick={() => setShowFilters(true)}
-            className="absolute right-4 bottom-[140px] z-[2050] flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.16)] active:scale-95 transition"
+            className="absolute right-4 bottom-[140px] z-[2050] flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.16)] active:scale-95 transition lg:bottom-[86px]"
           >
             <SlidersHorizontal size={17} strokeWidth={1.8} />
             {activeCount > 0 && (
@@ -1458,7 +1470,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           with yours, then friends', then the map, then Google + Add. */}
       {searchUi && (
         <div className="absolute inset-0 z-[2500]">
-          <div className="absolute inset-x-0 top-0 px-4 pt-3">
+          <div className="absolute inset-x-0 top-0 px-4 pt-3 lg:mx-auto lg:max-w-[560px]">
             <div className="flex h-11 items-center gap-1.5 rounded-full bg-white pl-1.5 pr-1.5 shadow-[0_2px_12px_rgba(30,27,23,0.16)]">
               <button
                 type="button"
@@ -1492,7 +1504,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               )}
             </div>
           </div>
-          <div className="absolute inset-x-0 bottom-0 top-[68px] overflow-y-auto overscroll-contain rounded-t-[22px] bg-white px-5 pb-8 shadow-[0_-4px_24px_rgba(30,27,23,0.14)]">
+          <div className="absolute inset-x-0 bottom-0 top-[68px] overflow-y-auto overscroll-contain rounded-t-[22px] bg-white px-5 pb-8 shadow-[0_-4px_24px_rgba(30,27,23,0.14)] lg:inset-x-auto lg:left-1/2 lg:w-[560px] lg:-translate-x-1/2 lg:bottom-auto lg:max-h-[70vh] lg:rounded-[22px] lg:shadow-[0_8px_32px_rgba(30,27,23,0.2)]">
             {(() => {
               const friendSection =
                 friendMatches.length > 0 ? (

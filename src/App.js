@@ -4050,7 +4050,7 @@ if (authLoading || guestLoading) {
   }
  
   return (
-    <div className="min-h-screen bg-[#fdf6f0] text-[#111111]">
+    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] lg:pl-[84px]">
       {tab === "matches" && (
           <div className="flex items-start justify-center p-4 pb-24">
             <div className="w-full max-w-sm">
