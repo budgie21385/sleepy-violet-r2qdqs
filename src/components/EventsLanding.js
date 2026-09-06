@@ -225,13 +225,9 @@ export function EventsLanding({ variant = "events" }) {
   return (
     <div className="min-h-screen bg-[#fdf6f0] text-[#2c2a26]">
       {/* header */}
-      <div className={`${band} pt-6 pb-2 flex items-center gap-2.5`}>
-        <div className="flex h-[26px] w-[26px] items-center justify-center rounded-lg bg-[#455d3b]">
-          <ImagePlus size={14} className="text-[#fdf6f0]" strokeWidth={1.8} />
-        </div>
-        <span style={SERIF} className="text-[17px] font-medium tracking-tight">
-          Flanit
-        </span>
+      <div className={`${band} pt-6 pb-2`}>
+        {/* The real wordmark (Sep 6, Mark's logo — public/flanit-logo.svg). */}
+        <img src="/flanit-logo.svg" alt="Flanit" className="h-6 w-auto" />
       </div>
 
       {/* hero */}

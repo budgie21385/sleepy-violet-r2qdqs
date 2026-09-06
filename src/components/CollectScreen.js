@@ -466,9 +466,7 @@ export function CollectScreen({ token }) {
     <div className="min-h-screen bg-[#fdf6f0] text-[#111111]">
       <div className="mx-auto w-full max-w-sm px-4 pb-16 pt-10">
         {/* Context header — whose night, where, when. Never the album. */}
-        <p className="text-xs font-semibold uppercase tracking-wide text-[#455d3b]">
-          Flanit
-        </p>
+        <img src="/flanit-logo.svg" alt="Flanit" className="h-5 w-auto" />
         {/* Event name leads when there is one; the venue is the fallback
             (Mark, July 25: "the main CTA should be centered around the
             event name"). */}

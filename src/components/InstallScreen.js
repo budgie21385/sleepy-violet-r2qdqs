@@ -80,7 +80,11 @@ export function InstallScreen() {
           alt="Flanit"
           className="mx-auto h-20 w-20 rounded-3xl shadow-md"
         />
-        <h1 className="mt-4 text-2xl font-semibold tracking-tight">Flanit</h1>
+        <img
+          src="/flanit-logo.svg"
+          alt="Flanit"
+          className="mx-auto mt-5 h-7 w-auto"
+        />
         <p className="mt-1 text-sm text-neutral-600">
           Find a place, together.
         </p>
