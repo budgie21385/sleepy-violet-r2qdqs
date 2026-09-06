@@ -1098,10 +1098,14 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 <X size={11} />
               </button>
             ))}
-            <span
-              className="shrink-0 pl-0.5 text-[12.5px] font-medium text-neutral-600 whitespace-nowrap"
-              style={{ textShadow: "0 1px 3px rgba(255,255,255,0.9)" }}
-            >
+          </div>
+        </div>
+      )}
+      {/* Place count — bottom centre above the tab bar (Sep 6, Mark: the
+          row-2 tally got cut off once the number grew). */}
+      {!searchUi && !personFilter && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2050] bottom-[104px]">
+          <span className="block rounded-full bg-white/95 px-3.5 py-1.5 text-[12.5px] font-medium text-neutral-700 shadow-[0_2px_10px_rgba(30,27,23,0.14)] whitespace-nowrap">
               {mapFilter === "friends" && friendLens === "spots"
                 ? `${friendSpots.length} ${
                     friendSpots.length === 1 ? "spot" : "spots"
@@ -1125,8 +1129,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 : `${inViewPlottable.length} ${
                     inViewPlottable.length === 1 ? "place" : "places"
                   }`}
-            </span>
-          </div>
+          </span>
         </div>
       )}
       <div className="absolute left-0 right-0 bottom-0 top-0">
