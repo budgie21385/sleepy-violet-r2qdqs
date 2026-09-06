@@ -5,7 +5,8 @@
 // Spots lens and from the drawer's spot_added item.
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Trash2, ExternalLink } from "lucide-react";
+import { X, Trash2, ExternalLink, Heart, Bookmark, Send } from "lucide-react";
+import { timeAgoShort } from "../lib/checkins";
 import { supabase } from "../supabaseClient";
 import { signSpotPhotos, deleteSpotPhotos } from "../lib/photos";
 import { FriendAvatar } from "./FriendAvatar";
@@ -33,11 +34,19 @@ function mapsUrl(spot) {
   return null;
 }
 
-export function SpotSheet({ spot, userId, onClose, onDeleted, showToast }) {
+export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToast }) {
   const [photoUrls, setPhotoUrls] = useState({});
   const [profile, setProfile] = useState(spot.profile || null);
   const [deleteArm, setDeleteArm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Social (Sep 6): likes + comments for anyone in the circle; save-to-my-
+  // map for friends. All silent — the layer stays quiet by doctrine.
+  const [likers, setLikers] = useState([]); // user_ids
+  const [saved, setSaved] = useState(false);
+  const [comments, setComments] = useState(null); // null = loading
+  const [commentBody, setCommentBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [acting, setActing] = useState(false);
   const isMine = spot.user_id === userId;
   const cat = spotCategory(spot.category);
 
@@ -56,11 +65,117 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, showToast }) {
           .maybeSingle();
         if (!cancelled && data) setProfile(data);
       }
+      const [likesRes, savesRes, commentsRes] = await Promise.all([
+        supabase.from("spot_likes").select("user_id").eq("spot_id", spot.id),
+        userId
+          ? supabase
+              .from("spot_saves")
+              .select("spot_id")
+              .eq("spot_id", spot.id)
+              .eq("user_id", userId)
+          : Promise.resolve({ data: [] }),
+        supabase
+          .from("spot_comments")
+          .select("*")
+          .eq("spot_id", spot.id)
+          .order("created_at", { ascending: true })
+          .limit(100),
+      ]);
+      if (cancelled) return;
+      setLikers((likesRes.data || []).map((r) => r.user_id));
+      setSaved((savesRes.data || []).length > 0);
+      const rows = commentsRes.data || [];
+      const pIds = Array.from(new Set(rows.map((c) => c.user_id)));
+      let pById = {};
+      if (pIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", pIds);
+        pById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      }
+      if (cancelled) return;
+      setComments(rows.map((c) => ({ ...c, profile: pById[c.user_id] || null })));
     })();
     return () => {
       cancelled = true;
     };
-  }, [spot]);
+  }, [spot, userId]);
+
+  const iLike = likers.includes(userId);
+
+  async function toggleLike() {
+    if (acting || !userId) return;
+    setActing(true);
+    try {
+      if (iLike) {
+        await supabase
+          .from("spot_likes")
+          .delete()
+          .eq("spot_id", spot.id)
+          .eq("user_id", userId);
+        setLikers((prev) => prev.filter((u) => u !== userId));
+      } else {
+        await supabase
+          .from("spot_likes")
+          .insert({ spot_id: spot.id, user_id: userId });
+        setLikers((prev) => [...prev, userId]);
+      }
+    } catch (e) {
+      console.error("Spot like failed:", e);
+    } finally {
+      setActing(false);
+    }
+  }
+
+  async function toggleSave() {
+    if (acting || !userId || isMine) return;
+    setActing(true);
+    try {
+      if (saved) {
+        await supabase
+          .from("spot_saves")
+          .delete()
+          .eq("spot_id", spot.id)
+          .eq("user_id", userId);
+        setSaved(false);
+        showToast?.("Removed from your map");
+      } else {
+        await supabase
+          .from("spot_saves")
+          .insert({ spot_id: spot.id, user_id: userId });
+        setSaved(true);
+        showToast?.("On your map, under My List");
+      }
+      onChanged?.();
+    } catch (e) {
+      console.error("Spot save failed:", e);
+      showToast?.("Couldn't update that");
+    } finally {
+      setActing(false);
+    }
+  }
+
+  async function sendComment() {
+    const body = commentBody.trim();
+    if (!body || sending || !userId) return;
+    setSending(true);
+    try {
+      const { data, error } = await supabase
+        .from("spot_comments")
+        .insert({ spot_id: spot.id, user_id: userId, body })
+        .select("*")
+        .single();
+      if (error) throw error;
+      setComments((prev) => [...(prev || []), { ...data, profile: null, mine: true }]);
+      setCommentBody("");
+    } catch (e) {
+      console.error("Spot comment failed:", e);
+      showToast?.("Couldn't send that");
+    } finally {
+      setSending(false);
+    }
+  }
 
   async function doDelete() {
     setDeleting(true);
@@ -156,9 +271,102 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, showToast }) {
           )}
           <div className="mt-4 flex items-center gap-2.5">
             <FriendAvatar profile={isMine ? null : profile} small />
-            <p className="text-xs text-neutral-500">
+            <p className="min-w-0 flex-1 text-xs text-neutral-500">
               Added by <span className="font-medium text-neutral-700">{addedName}</span> · {addedDate}
             </p>
+            <button
+              type="button"
+              aria-label={iLike ? "Unlike" : "Like"}
+              disabled={acting}
+              onClick={toggleLike}
+              className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium transition active:scale-95 disabled:opacity-60 ${
+                iLike
+                  ? "border-[#455d3b] bg-[#edf2eb] text-[#455d3b]"
+                  : "border-neutral-200 bg-white text-neutral-500"
+              }`}
+            >
+              <Heart
+                size={13}
+                strokeWidth={1.8}
+                fill={iLike ? "#455d3b" : "none"}
+              />
+              {likers.length > 0 && likers.length}
+            </button>
+            {!isMine && (
+              <button
+                type="button"
+                disabled={acting}
+                onClick={toggleSave}
+                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium transition active:scale-95 disabled:opacity-60 ${
+                  saved
+                    ? "border-[#455d3b] bg-[#edf2eb] text-[#455d3b]"
+                    : "border-neutral-200 bg-white text-neutral-500"
+                }`}
+              >
+                <Bookmark
+                  size={13}
+                  strokeWidth={1.8}
+                  fill={saved ? "#455d3b" : "none"}
+                />
+                {saved ? "On your map" : "Add to my map"}
+              </button>
+            )}
+          </div>
+
+          {/* comments */}
+          <div className="mt-4 border-t border-neutral-100 pt-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+              {comments === null
+                ? "Comments"
+                : comments.length === 0
+                ? "No comments yet"
+                : comments.length === 1
+                ? "1 comment"
+                : `${comments.length} comments`}
+            </p>
+            <div className="mt-2 space-y-3">
+              {(comments || []).map((c) => (
+                <div key={c.id} className="flex items-start gap-2.5">
+                  <FriendAvatar
+                    profile={c.user_id === userId ? null : c.profile}
+                    small
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11.5px] text-neutral-400">
+                      <span className="font-medium text-neutral-600">
+                        {c.user_id === userId
+                          ? "You"
+                          : (c.profile?.display_name || "A friend").split(" ")[0]}
+                      </span>{" "}
+                      · {timeAgoShort(c.created_at)}
+                    </p>
+                    <p className="mt-0.5 break-words text-sm text-neutral-800">
+                      {c.body}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
+              <input
+                value={commentBody}
+                onChange={(e) => setCommentBody(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendComment()}
+                placeholder="Comment on this spot"
+                maxLength={300}
+                className="h-11 min-w-0 flex-1 rounded-full border border-neutral-200 bg-neutral-50 px-4 text-base focus:border-[#455d3b] focus:outline-none placeholder:text-neutral-400"
+              />
+              <button
+                type="button"
+                aria-label="Send"
+                disabled={sending || !commentBody.trim()}
+                onClick={sendComment}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#455d3b] text-white active:scale-95 transition disabled:opacity-40"
+              >
+                <Send size={15} strokeWidth={1.6} />
+              </button>
+            </div>
           </div>
           <div className="mt-4 flex items-center gap-2">
             {gmaps && (

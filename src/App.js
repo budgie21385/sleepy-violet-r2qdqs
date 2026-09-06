@@ -4958,6 +4958,7 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           onClose={() => setSpotSheet(null)}
           onDeleted={() => setSpotsRefresh((n) => n + 1)}
+          onChanged={() => setSpotsRefresh((n) => n + 1)}
           showToast={showToast}
         />
       )}

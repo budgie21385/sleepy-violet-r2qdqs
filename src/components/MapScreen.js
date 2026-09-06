@@ -685,11 +685,17 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     let cancelled = false;
     setSpots(null);
     (async () => {
-      const { data: rows } = await supabase
-        .from("spots")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(300);
+      const [{ data: rows }, savesRes] = await Promise.all([
+        supabase
+          .from("spots")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(300),
+        supabase.from("spot_saves").select("spot_id").eq("user_id", userId),
+      ]);
+      const savedSet = new Set(
+        (savesRes.data || []).map((r) => r.spot_id)
+      );
       const pIds = Array.from(new Set((rows || []).map((s) => s.user_id)));
       let pById = {};
       if (pIds.length > 0) {
@@ -706,7 +712,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             (s) =>
               Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))
           )
-          .map((s) => ({ ...s, profile: pById[s.user_id] || null }))
+          .map((s) => ({
+            ...s,
+            profile: pById[s.user_id] || null,
+            savedByMe: savedSet.has(s.id),
+          }))
       );
     })();
     return () => {
@@ -718,8 +728,10 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     () => (spots || []).filter((s) => s.user_id !== userId),
     [spots, userId]
   );
+  // Your Spots lens = spots you ADDED plus friends' spots you saved to
+  // your map (spot_saves — the bookmark on a friend's spot card).
   const mySpots = useMemo(
-    () => (spots || []).filter((s) => s.user_id === userId),
+    () => (spots || []).filter((s) => s.user_id === userId || s.savedByMe),
     [spots, userId]
   );
 
