@@ -132,6 +132,9 @@ function placeToCard(place) {
     place_id: place.id,
     name: place.displayName?.text || "",
     address: place.formattedAddress || "",
+    // Spots (Sep 6) pin to real coordinates without minting a venue row.
+    lat: place.location?.latitude ?? null,
+    lng: place.location?.longitude ?? null,
     rating: place.rating ?? null,
     review_count: place.userRatingCount ?? null,
     price_level: place.priceLevel ?? null,

@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Search, Camera, MapPin } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { searchPlaces } from "../lib/venueSearch";
+import { searchPlaces, callAddVenueApi } from "../lib/venueSearch";
 import { uploadSpotPhoto, deleteSpotPhotos } from "../lib/photos";
 import { SPOT_CATEGORIES } from "./SpotSheet";
 
@@ -22,8 +22,10 @@ const DETAIL_HINTS = {
 export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
   const [category, setCategory] = useState("toilet");
   const [placeQuery, setPlaceQuery] = useState("");
-  const [placeResults, setPlaceResults] = useState([]);
-  const [pickedVenue, setPickedVenue] = useState(null); // venue row or null
+  const [placeResults, setPlaceResults] = useState([]); // [{key, kind:'db'|'google', ...}]
+  // picked: {name, venueId|null, lat, lng} — a real pin, however it was found
+  const [picked, setPicked] = useState(null);
+  const [resolving, setResolving] = useState(false);
   const [directions, setDirections] = useState("");
   const [details, setDetails] = useState("");
   const [files, setFiles] = useState([]); // File[]
@@ -32,10 +34,12 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
   const seq = useRef(0);
   const fileRef = useRef(null);
 
-  // Live place search over the app's own venues (Google add isn't needed
-  // here — free text is a valid Where for a spot).
+  // REAL places search (Sep 6, Mark: "we need to be able to pin it to the
+  // map") — the app's venues first, Google behind them for anywhere we've
+  // never heard of. A Google pick fetches details for coordinates WITHOUT
+  // minting a venue row: a toilet's anchor isn't a venue.
   useEffect(() => {
-    if (pickedVenue) return;
+    if (picked) return;
     const term = placeQuery.trim();
     if (term.length < 2) {
       setPlaceResults([]);
@@ -44,10 +48,56 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
     const mySeq = ++seq.current;
     const timer = setTimeout(async () => {
       const res = await searchPlaces(term, userId).catch(() => null);
-      if (mySeq === seq.current && res) setPlaceResults(res.venues.slice(0, 5));
+      if (mySeq !== seq.current || !res) return;
+      setPlaceResults([
+        ...res.venues.slice(0, 4).map((v) => ({
+          key: `db_${v.id}`,
+          kind: "db",
+          name: v.name,
+          sub: v.suburb || "",
+          venue: v,
+        })),
+        ...res.google.slice(0, 4).map((r) => ({
+          key: `g_${r.place_id}`,
+          kind: "google",
+          name: r.name,
+          sub: r.address || "",
+          place_id: r.place_id,
+        })),
+      ]);
     }, 300);
     return () => clearTimeout(timer);
-  }, [placeQuery, pickedVenue, userId]);
+  }, [placeQuery, picked, userId]);
+
+  async function pickResult(r) {
+    if (r.kind === "db") {
+      setPicked({
+        name: r.venue.name,
+        venueId: r.venue.id,
+        lat: Number(r.venue.latitude),
+        lng: Number(r.venue.longitude),
+      });
+      return;
+    }
+    setResolving(true);
+    try {
+      const { card } = await callAddVenueApi({
+        action: "details",
+        placeId: r.place_id,
+      });
+      setPicked({
+        name: card.name || r.name,
+        venueId: null,
+        lat: Number(card.lat),
+        lng: Number(card.lng),
+      });
+    } catch (e) {
+      console.error("Spot place details failed:", e);
+      showToast?.("Couldn't load that place");
+    } finally {
+      setResolving(false);
+    }
+  }
 
   function addFiles(list) {
     const next = Array.from(list || []).filter((f) =>
@@ -60,7 +110,7 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
     );
   }
 
-  const canSave = placeQuery.trim().length > 0 || pickedVenue;
+  const canSave = !!picked;
 
   async function save() {
     if (!canSave || saving) return;
@@ -70,10 +120,10 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
       for (const f of files) {
         uploaded.push(await uploadSpotPhoto(userId, f));
       }
-      const placeName = pickedVenue ? pickedVenue.name : placeQuery.trim();
+      const placeName = picked.name;
       const catLabel = SPOT_CATEGORIES[category]?.label || "Spot";
-      const lat = pickedVenue ? Number(pickedVenue.latitude) : mapCenter?.lat;
-      const lng = pickedVenue ? Number(pickedVenue.longitude) : mapCenter?.lng;
+      const lat = Number.isFinite(picked.lat) ? picked.lat : mapCenter?.lat;
+      const lng = Number.isFinite(picked.lng) ? picked.lng : mapCenter?.lng;
       const { data, error } = await supabase
         .from("spots")
         .insert({
@@ -81,7 +131,7 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
           category,
           title: `${catLabel} at ${placeName}`,
           place_name: placeName,
-          venue_id: pickedVenue?.id || null,
+          venue_id: picked.venueId || null,
           lat: Number.isFinite(lat) ? lat : null,
           lng: Number.isFinite(lng) ? lng : null,
           directions: directions.trim() || null,
@@ -153,17 +203,17 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
           <p className="mt-4 text-xs font-medium text-neutral-500">
             Where is it?
           </p>
-          {pickedVenue ? (
+          {picked ? (
             <div className="mt-1.5 flex items-center gap-2.5 rounded-2xl bg-[#edf2eb] px-4 py-2.5">
               <MapPin size={15} className="shrink-0 text-[#455d3b]" />
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#455d3b]">
-                {pickedVenue.name}
+                {picked.name}
               </span>
               <button
                 type="button"
                 aria-label="Change place"
                 onClick={() => {
-                  setPickedVenue(null);
+                  setPicked(null);
                   setPlaceQuery("");
                 }}
                 className="shrink-0 text-[#455d3b]"
@@ -179,33 +229,40 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
                 <input
                   value={placeQuery}
                   onChange={(e) => setPlaceQuery(e.target.value)}
-                  placeholder="Sofitel Hotel, a street corner, anywhere"
+                  placeholder="Sofitel Hotel, a car park, anywhere"
                   className="h-full min-w-0 flex-1 bg-transparent text-base focus:outline-none placeholder:text-neutral-400"
                 />
+                {resolving && (
+                  <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-neutral-200 border-t-[#455d3b]" />
+                )}
               </div>
               {placeResults.length > 0 && (
                 <div className="mt-1 overflow-hidden rounded-2xl border border-neutral-100">
-                  {placeResults.map((v) => (
+                  {placeResults.map((r) => (
                     <button
-                      key={v.id}
+                      key={r.key}
                       type="button"
-                      onClick={() => setPickedVenue(v)}
-                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left active:bg-neutral-50"
+                      disabled={resolving}
+                      onClick={() => pickResult(r)}
+                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left active:bg-neutral-50 disabled:opacity-60"
                     >
-                      <MapPin size={13} className="shrink-0 text-neutral-400" />
+                      {r.kind === "google" ? (
+                        <Search size={13} className="shrink-0 text-neutral-400" />
+                      ) : (
+                        <MapPin size={13} className="shrink-0 text-neutral-400" />
+                      )}
                       <span className="min-w-0 flex-1 truncate text-sm text-neutral-800">
-                        {v.name}
+                        {r.name}
                       </span>
-                      <span className="shrink-0 text-xs text-neutral-400">
-                        {v.suburb || ""}
+                      <span className="max-w-[40%] shrink-0 truncate text-xs text-neutral-400">
+                        {r.sub}
                       </span>
                     </button>
                   ))}
                 </div>
               )}
               <p className="mt-1 text-[11px] text-neutral-400">
-                No match? Free text is fine. The pin lands where your map is
-                centred.
+                Search finds anywhere, so the spot pins to the map.
               </p>
             </>
           )}
