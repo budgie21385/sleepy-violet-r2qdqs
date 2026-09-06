@@ -347,9 +347,20 @@ export default function RestaurantSwipeMVP() {
   // design — an empty map facet shouldn't wipe a saved preference), and
   // the map's min-rating has no session twin, so it stays behind.
   const mapFiltersRef = useRef(null);
+  // VIEWPORT POOL (Sep 6, Mark): starting a session from the map also pins
+  // the pool to the venues that were ON SCREEN — zoomed to six coffee spots,
+  // those six are the shortlist/match deck. Shown as a removable chip on
+  // setup; captured into the session's filters JSON so guests rebuild the
+  // IDENTICAL deck (unanimity needs identical decks).
+  const [mapViewPool, setMapViewPool] = useState(null); // {ids:Set, count}
   function carryMapFilters() {
     const f = mapFiltersRef.current;
     if (tab !== "map" || !f) return;
+    setMapViewPool(
+      f.viewIds?.length
+        ? { ids: new Set(f.viewIds), count: f.viewIds.length }
+        : null
+    );
     if (f.cuisines?.length) setSelectedCuisines(f.cuisines);
     if (f.areas?.length) {
       // Map areas may be bare {name, lat, lng} — re-key onto the areas rows
@@ -2707,12 +2718,14 @@ loadAreas();
     } else {
       q = filteredVenues;
     }
+    // From-the-map viewport constraint: only what was on screen (Sep 6).
+    if (mapViewPool) q = q.filter((v) => mapViewPool.ids.has(v.id));
     // Groups of 3+ swipe the SAME deck in the SAME order (orderGroupDeck is
     // deterministic — guests apply the identical sort to the identical pool).
     // No cap: every filtered venue is available (Mark, July 31 evening).
     if (matchMode === "concurrent" && expectedOthers >= 2) q = orderGroupDeck(q);
     return q;
-  }, [filteredVenues, matchSource, matchMode, savedVenueIds, expectedOthers]);
+  }, [filteredVenues, matchSource, matchMode, savedVenueIds, expectedOthers, mapViewPool]);
 
   const guestQueueRaw = useMemo(() => {
     if (!isGuest || !guestSessionData) return [];
@@ -2730,6 +2743,11 @@ loadAreas();
       guestSessionData.source_type === "list" ? guestListVenues : venues;
     if (!pool.length) return [];
     const filters = guestSessionData.filters || {};
+    // Host started from the map: the pool is exactly what was on their
+    // screen — same trim here so both sides share one deck (Sep 6).
+    const viewSet = filters.viewVenueIds?.length
+      ? new Set(filters.viewVenueIds)
+      : null;
     const todayKey = getTodayDayKey();
     const sessionAreas = filters.selectedAreaIds && areas.length
       ? areas.filter((a) => filters.selectedAreaIds.includes(a.id))
@@ -2739,6 +2757,7 @@ loadAreas();
     const sessionExtents = buildAreaExtents(pool, sessionAreas);
 
     return pool.filter((venue) => {
+      if (viewSet && !viewSet.has(venue.id)) return false;
       // Same client-side curation as the host pool (see isPoolVenue): open
       // venue reads must not leak strangers' manual venues into guest queues.
       if (
@@ -2869,6 +2888,7 @@ loadAreas();
     setMatches([]);
     setPassed([]);
     setPicked(null);
+    setMapViewPool(null); // a fresh run re-pins from the map if started there
     setScreen("filters");
     setCurrentUser("mark");
     setMarkLikes([]);
@@ -2915,6 +2935,11 @@ loadAreas();
         selectedCuisines,
         selectedPrices,
         selectedAmenities,
+        // Viewport pool (Sep 6): guests must trim to the same on-screen set
+        // or the group deck diverges from the host's.
+        ...(mapViewPool
+          ? { viewVenueIds: Array.from(mapViewPool.ids) }
+          : {}),
       };
 
       const sessionName = eventDate
@@ -4068,17 +4093,36 @@ if (authLoading || guestLoading) {
             onPickRightNow={() => {
               setMatchMode("concurrent");
               setEventDate(null);
+              setMapViewPool(null); // not from the map — no viewport pin
               setScreen("filters");
             }}
             onPickLater={(date) => {
               setMatchMode("curated");
               setEventDate(date);
+              setMapViewPool(null); // not from the map — no viewport pin
               setScreen("filters");
             }}
           />
         )}
         {screen === "filters" && (
           <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+            {mapViewPool && (
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-[#edf2eb] px-4 py-2.5">
+                <span className="text-xs font-medium text-[#455d3b]">
+                  From the map: just the {mapViewPool.count}{" "}
+                  {mapViewPool.count === 1 ? "place" : "places"} that were on
+                  screen
+                </span>
+                <button
+                  type="button"
+                  aria-label="Use all venues instead"
+                  onClick={() => setMapViewPool(null)}
+                  className="shrink-0 text-[#455d3b]"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
             <div className="flex justify-center mb-4 pb-4 border-b border-neutral-100">
               <div className="flex bg-neutral-100 rounded-full p-0.5">
                 <button

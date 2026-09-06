@@ -254,20 +254,6 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const [fPrices, setFPrices] = useState([]); // price_level numbers 1..4
   const [fAmenities, setFAmenities] = useState([]); // amenity column keys
 
-  // MAP → SESSION carry (Aug 21, Mark): snapshot the active filters up to
-  // App so starting a session from the map's ⊕ inherits them. Ref-stored
-  // there; min-rating has no session twin and deliberately stays behind.
-  useEffect(() => {
-    onFiltersSnapshot?.({
-      cuisines: fCuisines,
-      areas: fAreas,
-      occasions: fOccasions, // "What are you after?" — same chips as sessions
-      openNow: fOpenNow,
-      prices: fPrices,
-      amenities: fAmenities,
-    });
-  }, [fCuisines, fAreas, fOccasions, fOpenNow, fPrices, fAmenities]);
-
   // Suburb-first, same as sessions (July 25) — was a blunt 3km circle,
   // which is why the map and a session showed different places.
   const mapAreaExtents = useMemo(
@@ -914,6 +900,24 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     );
   }, [displayedPlottable, mapBounds]);
 
+  // MAP → SESSION carry (Aug 21, Mark; viewport added Sep 6): snapshot the
+  // active filters AND the venues currently on screen up to App, so starting
+  // a session from the map's ⊕ inherits both — "the 6 coffee places I'm
+  // looking at ARE the shortlist pool". Ref-stored there, read at FAB time.
+  // NOTE: this effect must sit BELOW inViewPlottable's declaration (deps
+  // array reads it during render — the TDZ trap class).
+  useEffect(() => {
+    onFiltersSnapshot?.({
+      cuisines: fCuisines,
+      areas: fAreas,
+      occasions: fOccasions, // "What are you after?" — same chips as sessions
+      openNow: fOpenNow,
+      prices: fPrices,
+      amenities: fAmenities,
+      viewIds: inViewPlottable.map((v) => v.id),
+    });
+  }, [fCuisines, fAreas, fOccasions, fOpenNow, fPrices, fAmenities, inViewPlottable]);
+
   // Position of the open card within the venues currently in view, so swiping
   // the card steps venue-to-venue through what's on screen. The order WRAPS:
   // opening the 3rd venue and swiping right goes 4, 5, …, end, then loops to
@@ -1296,7 +1300,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search places"
+                placeholder={
+                  mapFilter === "friends"
+                    ? "Search friends or places"
+                    : "Search places"
+                }
                 className="h-11 min-w-0 flex-1 bg-transparent text-base text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
               />
               {q && (
