@@ -14,6 +14,7 @@ export function FloatingActionButton({
   onCheckIn,
   onRightNow,
   onShortlist,
+  onAddSpot,
 }) {
   const [open, setOpen] = useState(false);
 
@@ -71,6 +72,16 @@ export function FloatingActionButton({
       action: () => {
         setOpen(false);
         onShortlist?.();
+      },
+    },
+    // Spots (Sep 6) — the friend knowledge layer's only add door.
+    {
+      key: "add_spot",
+      icon: <MapPin size={16} />,
+      label: "Add a spot",
+      action: () => {
+        setOpen(false);
+        onAddSpot?.();
       },
     },
     ...profileOptions.filter((o) => o.key !== "add_friend"),

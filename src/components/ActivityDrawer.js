@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef } from "react";
 import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock, CalendarDays } from "lucide-react";
 import { pushState, enablePush, sendPush } from "../lib/push";
+import { spotCategory } from "./SpotSheet";
 import {
   sendFriendRequest,
   acceptFriendRequest,
@@ -154,7 +155,7 @@ function DismissableRow({ canDismiss, onDismiss, children }) {
 // this while load() refreshes in the background (stale-while-revalidate).
 let drawerCache = null; // { uid, items }
 
-export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, onCheckIn, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
+export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, onOpenVenue, onCheckIn, onOpenSpot, profileIncomplete = false, onFinishProfile, showToast, asTab = false }) {
   const [items, setItems] = useState(() =>
     drawerCache && drawerCache.uid === userId ? drawerCache.items : null
   ); // null = loading
@@ -1698,6 +1699,40 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return out;
     })();
 
+    // ---- SPOTS ADDED (Sep 6) — the friend knowledge layer's quiet drawer
+    // item (Mark's ruling: drawer, no push). Friends' spots from the last
+    // 14 days; RLS trims the select to your circle. Born WITH parity — no
+    // push exists to lag behind. Errors quietly pre-spots.sql, per the fuse.
+    const spotAddedP = (async () => {
+      const out = [];
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: rows } = await supabase
+        .from("spots")
+        .select("*")
+        .neq("user_id", userId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (!rows || rows.length === 0) return out;
+      const pIds = Array.from(new Set(rows.map((s) => s.user_id)));
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, username, avatar_url")
+        .in("id", pIds);
+      const pById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      for (const s of rows) {
+        out.push({
+          kind: "spot_added",
+          id: `spot_${s.id}`,
+          spot: { ...s, profile: pById[s.user_id] || null },
+          profile: pById[s.user_id] || null,
+          otherId: s.user_id,
+          timestamp: s.created_at,
+        });
+      }
+      return out;
+    })();
+
     const fuse = (p, name, empty = []) =>
       p.catch((e) => {
         console.error(`Drawer block failed: ${name}`, e);
@@ -1723,6 +1758,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       meetPeopleItems,
       tagAcceptedItems,
       eventReminderItems,
+      spotAddedItems,
     ] = await Promise.all([
       fuse(requestsP, "requests", [[], []]),
       fuse(submittedP, "submitted"),
@@ -1743,6 +1779,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       fuse(meetPeopleP, "meetPeople"),
       fuse(tagAcceptedP, "tagAccepted"),
       fuse(eventReminderP, "eventReminders"),
+      fuse(spotAddedP, "spotsAdded"),
     ]);
 
     const all = [
@@ -1767,6 +1804,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...meetPeopleItems,
       ...tagAcceptedItems,
       ...eventReminderItems,
+      ...spotAddedItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -2328,6 +2366,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
                 onOpenThread={setThread}
+                onOpenSpot={onOpenSpot}
               />
               </DismissableRow>
             ))}
@@ -2370,6 +2409,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
                 onOpenSession={onOpenSession}
                 onOpenVenue={onOpenVenue}
                 onOpenThread={setThread}
+                onOpenSpot={onOpenSpot}
               />
               </DismissableRow>
             ))}
@@ -2446,7 +2486,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
 // Single drawer item row. Visually distinguishes NEW with a soft green tinted
 // background. Friend-request items get inline Accept/Decline; accepted-back
 // items are informational.
-function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAddAnyFriend, onAcceptAnyFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread }) {
+function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, onAddAnyFriend, onAcceptAnyFriend, onAcceptTag, onRemoveTag, onSessionNudgeYes, onSessionNudgeNo, onAcceptJoinReq, onDeclineJoinReq, onOpenProfile, onOpenSession, onOpenVenue, onOpenThread, onOpenSpot }) {
   // In-card timestamp (July 25, Mark: 'it should go here') — appended to
   // each card's own meta line instead of floating in a corner.
   const when = whenLabel(item.timestamp);
@@ -2933,6 +2973,30 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-[11px] text-neutral-500 truncate">“{item.body}”{whenSuffix}</p>
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
+      </button>
+    );
+  }
+
+  if (item.kind === "spot_added") {
+    const cat = spotCategory(item.spot?.category);
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenSpot?.(item.spot)}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 hover:bg-neutral-50 active:scale-[0.99] transition`}
+      >
+        <FriendAvatar profile={item.profile} small />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{name}</strong> added a spot:{" "}
+            <strong className="font-medium">
+              {item.spot?.title || "a spot"}
+            </strong>
+          </p>
+          <p className="text-[11px] text-neutral-500">
+            {cat.emoji} Friends only · tap for directions{whenSuffix}
+          </p>
+        </div>
       </button>
     );
   }

@@ -32,6 +32,20 @@ import { MapVenueSheet } from "./MapVenueSheet";
 import { VenueNightsSheet } from "./VenueNightsSheet";
 import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
 import { ChevronLeft, MapPin, Plus, Minus } from "lucide-react";
+import { spotCategory } from "./SpotSheet";
+
+// Spot pins (Sep 6 — the friend knowledge layer): category emoji in a white
+// circle with the olive ring. Deliberately unlike venue emoji pins — a spot
+// is a tip, not a place to browse.
+function createSpotIcon(category) {
+  const c = spotCategory(category);
+  return L.divIcon({
+    html: `<div style="width:34px;height:34px;border-radius:50%;background:#fff;border:2.5px solid #455d3b;box-shadow:0 1px 3px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;font-size:16px;">${c.emoji}</div>`,
+    className: "friend-checkin-icon",
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+  });
+}
 import { AddVenueSheet } from "./AddVenueSheet";
 import { supabase } from "../supabaseClient";
 import { timeAgoShort, FRESH_MS } from "../lib/checkins";
@@ -215,7 +229,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, onFiltersSnapshot }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, onFiltersSnapshot, onOpenSpot, spotsRefresh = 0 }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -475,7 +489,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const [pastGroups, setPastGroups] = useState(null); // null = loading
   const wantPast =
     (mapFilter === "friends" && friendLens === "past") ||
-    (mapFilter === "my_list" && myListLens === "been") ||
+    (mapFilter === "my_list" &&
+      (myListLens === "been" || myListLens === "not_been")) ||
     searchUi; // search sections need the been/friends sets too
   useEffect(() => {
     if (!wantPast || !userId) return;
@@ -657,6 +672,43 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       .filter((g) => g.ownNights.length > 0 || g.ownMark);
   }, [pastGroups, userId, matchesMapFilters]);
 
+  // --- SPOTS (Sep 6 — toilets, study spots, parking; never public) -------
+  // Plain select: RLS returns yours + accepted friends' rows, nothing else.
+  const [spots, setSpots] = useState(null); // null = loading
+  useEffect(() => {
+    if (mapFilter !== "friends" || friendLens !== "spots" || !userId) return;
+    let cancelled = false;
+    setSpots(null);
+    (async () => {
+      const { data: rows } = await supabase
+        .from("spots")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(300);
+      const pIds = Array.from(new Set((rows || []).map((s) => s.user_id)));
+      let pById = {};
+      if (pIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", pIds);
+        pById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      }
+      if (cancelled) return;
+      setSpots(
+        (rows || [])
+          .filter(
+            (s) =>
+              Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))
+          )
+          .map((s) => ({ ...s, profile: pById[s.user_id] || null }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mapFilter, friendLens, userId, spotsRefresh]);
+
   // Search sections read the RAW past data (map filters don't trim search).
   const searchOwnBeen = useMemo(() => {
     const ids = new Set();
@@ -806,6 +858,10 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         : plottable.filter(
             (v) => v.verified === true || (savedIds && savedIds.has(v.id))
           );
+    // My List's third lens (Sep 6, Mark): saved places you HAVEN'T been to —
+    // the try-next map. Been = own nights + been-marks (searchOwnBeen).
+    if (mapFilter === "my_list" && myListLens === "not_been")
+      list = list.filter((v) => !searchOwnBeen.has(v.id));
     if (fAreas.length > 0)
       list = list.filter((v) =>
         venueMatchesAreas(v, fAreas, 0, mapAreaExtents)
@@ -820,7 +876,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     if (fAmenities.length > 0)
       list = list.filter((v) => venueMatchesAmenities(v, fAmenities));
     return list;
-  }, [plottable, mapFilter, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, friendPins]);
+  }, [plottable, mapFilter, myListLens, searchOwnBeen, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, friendPins]);
 
   const toggleOccasion = (v) =>
     setFOccasions((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
@@ -915,8 +971,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       prices: fPrices,
       amenities: fAmenities,
       viewIds: inViewPlottable.map((v) => v.id),
+      // Where the map is centred — a name-only spot's pin lands here.
+      mapCenter: mapBounds
+        ? { lat: mapBounds.getCenter().lat, lng: mapBounds.getCenter().lng }
+        : null,
     });
-  }, [fCuisines, fAreas, fOccasions, fOpenNow, fPrices, fAmenities, inViewPlottable]);
+  }, [fCuisines, fAreas, fOccasions, fOpenNow, fPrices, fAmenities, inViewPlottable, mapBounds]);
 
   // Position of the open card within the venues currently in view, so swiping
   // the card steps venue-to-venue through what's on screen. The order WRAPS:
@@ -979,10 +1039,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                     ? [
                         { key: "now", label: "Now" },
                         { key: "past", label: "Past" },
+                        { key: "spots", label: "Spots" },
                       ]
                     : [
                         { key: "saved", label: "Saved" },
                         { key: "been", label: "Been" },
+                        { key: "not_been", label: "Haven't been" },
                       ]
                   ).map((lens) => {
                     const active =
@@ -1025,7 +1087,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               className="shrink-0 pl-0.5 text-[12.5px] font-medium text-neutral-600 whitespace-nowrap"
               style={{ textShadow: "0 1px 3px rgba(255,255,255,0.9)" }}
             >
-              {mapFilter === "friends" && friendLens === "past"
+              {mapFilter === "friends" && friendLens === "spots"
+                ? `${(spots || []).length} ${
+                    (spots || []).length === 1 ? "spot" : "spots"
+                  }`
+                : mapFilter === "friends" && friendLens === "past"
                 ? `${friendPastPins.length} ${
                     friendPastPins.length === 1 ? "place" : "places"
                   }`
@@ -1075,6 +1141,19 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 icon={createPersonIcon(group, personFilter.profile)}
                 eventHandlers={{
                   click: () => setSelectedVenue(group.venue),
+                }}
+              />
+            ))
+          ) : mapFilter === "friends" && friendLens === "spots" ? (
+            // The friend knowledge layer: yours + friends' spots, category
+            // emoji pins, tap for the card with directions.
+            (spots || []).map((s) => (
+              <Marker
+                key={`spot_${s.id}`}
+                position={[Number(s.lat), Number(s.lng)]}
+                icon={createSpotIcon(s.category)}
+                eventHandlers={{
+                  click: () => onOpenSpot?.(s),
                 }}
               />
             ))
@@ -1190,6 +1269,18 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           )}
         </MapContainer>
       </div>
+      {!personFilter && !searchUi && mapFilter === "my_list" && myListLens === "not_been" && pastGroups !== null && displayedPlottable.length === 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
+          <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
+            <p className="text-sm font-medium text-neutral-800">
+              You've been to everything on your list
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Save some new spots to try next
+            </p>
+          </div>
+        </div>
+      )}
       {personFilter && (
         <div
           className="absolute left-1/2 -translate-x-1/2 z-[2100]"
@@ -1204,6 +1295,18 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             places · {personPins.length}
             <span className="text-neutral-400">✕</span>
           </button>
+        </div>
+      )}
+      {!personFilter && !searchUi && mapFilter === "friends" && friendLens === "spots" && spots !== null && spots.length === 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
+          <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
+            <p className="text-sm font-medium text-neutral-800">
+              No spots yet
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Know a good toilet, study spot or park? Add it from the plus
+            </p>
+          </div>
         </div>
       )}
       {!personFilter && mapFilter === "friends" && friendLens === "now" && friendCheckins !== null && friendPins.length === 0 && (

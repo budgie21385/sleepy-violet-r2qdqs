@@ -731,6 +731,48 @@ export async function fetchCheckinPhotosMany(activityIds) {
 // Delete one of your own photos (row + storage objects). R2-stored
 // originals route through api/delete-media — only the server holds the R2
 // key, and the endpoint already allows uploader self-delete.
+// ---- SPOT PHOTOS (Sep 6 — the friend knowledge layer) ---------------------
+// Utilitarian shots of doors and stairwells: web derivative ONLY, straight
+// to the private bucket under spots/{uid}/ (storage policy in spots.sql).
+// Reads are signed AFTER the spots row's friends-only RLS let the caller
+// see it — the row gate authorizes, storage just serves.
+export async function uploadSpotPhoto(userId, file) {
+  const webBlob = await makeWebDerivative(file);
+  const path = `spots/${userId}/${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}.jpg`;
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, webBlob, { contentType: "image/jpeg" });
+  if (error) throw error;
+  return path;
+}
+
+export async function signSpotPhotos(paths) {
+  const out = {};
+  await Promise.all(
+    (paths || []).map(async (p) => {
+      try {
+        const { data } = await supabase.storage
+          .from(BUCKET)
+          .createSignedUrl(p, SIGNED_URL_TTL);
+        if (data?.signedUrl) out[p] = data.signedUrl;
+      } catch {}
+    })
+  );
+  return out;
+}
+
+export async function deleteSpotPhotos(paths) {
+  if (paths && paths.length > 0) {
+    try {
+      await supabase.storage.from(BUCKET).remove(paths);
+    } catch (e) {
+      console.error("Spot photo delete failed:", e);
+    }
+  }
+}
+
 export async function deleteCheckinPhoto(row) {
   if ((row.orig_store || "sb") === "r2") {
     try {

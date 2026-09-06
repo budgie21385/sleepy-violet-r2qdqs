@@ -33,6 +33,8 @@ import { EmptyState } from "./components/EmptyState";
 import { MapVenueSheet } from "./components/MapVenueSheet";
 import { MapScreen } from "./components/MapScreen";
 import { FloatingActionButton, Toast, BottomTabBar } from "./components/Chrome";
+import { SpotForm } from "./components/SpotForm";
+import { SpotSheet } from "./components/SpotSheet";
 import { ImportGoogleMapsScreen } from "./components/ImportGoogleMapsScreen";
 import { ParticipantsStrip } from "./components/ParticipantsStrip";
 import { CuratedResultsBoard } from "./components/CuratedResultsBoard";
@@ -518,6 +520,11 @@ export default function RestaurantSwipeMVP() {
   const [lookupHidden, setLookupHidden] = useState(false);
   // Profile "Places" counter → the map wearing one friend's trail.
   const [mapPersonFilter, setMapPersonFilter] = useState(null); // {userId, profile}
+  // SPOTS (Sep 6 — the friend knowledge layer): sheet + add form + a bump
+  // counter so the map's Spots lens refetches after an add or delete.
+  const [spotSheet, setSpotSheet] = useState(null); // a spots row or null
+  const [showSpotForm, setShowSpotForm] = useState(false);
+  const [spotsRefresh, setSpotsRefresh] = useState(0);
   // Post-check-in sheet (what's-on label + tag friends) — its own layer over
   // the venue card, opened on every FRESH check-in. { venue, activity }.
   const [checkinSheet, setCheckinSheet] = useState(null);
@@ -4799,6 +4806,8 @@ if (authLoading || guestLoading) {
           searchOpen={mapSearchOpen}
           onSearchOpenChange={setMapSearchOpen}
           personFilter={mapPersonFilter}
+          onOpenSpot={(s) => setSpotSheet(s)}
+          spotsRefresh={spotsRefresh}
           onPersonFilter={(pf) => setMapPersonFilter(pf)}
           onClearPersonFilter={() => setMapPersonFilter(null)}
           onVenueAdded={(venue, opts) => {
@@ -4848,6 +4857,7 @@ if (authLoading || guestLoading) {
             setCardVenue(v);
           }}
           onCheckIn={handleCheckIn}
+          onOpenSpot={(s) => setSpotSheet(s)}
           profileIncomplete={profileIncomplete}
           onFinishProfile={() => setTab("profile")}
           showToast={showToast}
@@ -4933,6 +4943,24 @@ if (authLoading || guestLoading) {
           zIndex={cardVenueZ}
         />
       )}
+      {showSpotForm && session?.user?.id && (
+        <SpotForm
+          userId={session.user.id}
+          mapCenter={mapFiltersRef.current?.mapCenter || null}
+          onClose={() => setShowSpotForm(false)}
+          onCreated={() => setSpotsRefresh((n) => n + 1)}
+          showToast={showToast}
+        />
+      )}
+      {spotSheet && (
+        <SpotSheet
+          spot={spotSheet}
+          userId={session?.user?.id}
+          onClose={() => setSpotSheet(null)}
+          onDeleted={() => setSpotsRefresh((n) => n + 1)}
+          showToast={showToast}
+        />
+      )}
       {/* Post-signup onboarding (B): real account, no username yet, not
           already dismissed. The came-from-guest deferral is GONE (July 31,
           Mark: "there is no onboarding path... we should get Display Name,
@@ -4957,6 +4985,7 @@ if (authLoading || guestLoading) {
         tab={tab}
         showToast={showToast}
         onAddFriend={() => setShowFindFriends(true)}
+        onAddSpot={() => setShowSpotForm(true)}
         onImportMap={() => setShowImport(true)}
         onCheckIn={() => {
           // The unified form, on THIS page (Aug, Mark: "It should stay on
