@@ -30,6 +30,8 @@ import {
 } from "./MapFilters";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { VenueNightsSheet } from "./VenueNightsSheet";
+import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
+import { ChevronLeft, MapPin, Plus, Minus } from "lucide-react";
 import { AddVenueSheet } from "./AddVenueSheet";
 import { supabase } from "../supabaseClient";
 import { timeAgoShort, FRESH_MS } from "../lib/checkins";
@@ -390,6 +392,43 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   // SILENT — passive visibility only). Zero new SQL: activities read rides
   // can_see_activity, marks ride been_marks_friends_read. No show_live
   // filter here: presence is a choice, memory is not.
+  // --- Inline search (Sep 6, new map UI — Mark: no Recent list, typing
+  // searches places live). The circle expands to a field; results panel
+  // sections lead with YOUR list/been, then friends' venues, then the
+  // curated map, then Google places not on the map yet (dashed Add).
+  const [searchUi, setSearchUi] = useState(false);
+  const [q, setQ] = useState("");
+  const [searchRes, setSearchRes] = useState({ venues: [], google: [] });
+  const [searching, setSearching] = useState(false);
+  const [addingId, setAddingId] = useState(null);
+  const searchSeq = useRef(0);
+  useEffect(() => {
+    if (!searchUi) return;
+    const term = q.trim();
+    if (term.length < 2) {
+      setSearchRes({ venues: [], google: [] });
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const mySeq = ++searchSeq.current;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchPlaces(term, userId);
+        if (mySeq === searchSeq.current) setSearchRes(res);
+      } finally {
+        if (mySeq === searchSeq.current) setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, searchUi, userId]);
+
+  function closeSearch() {
+    setSearchUi(false);
+    setQ("");
+    setSearchRes({ venues: [], google: [] });
+  }
+
   // Whose map is this? (Mark, Sep 6): Friends/Past pins are FRIENDS ONLY —
   // your own footprint lives under My List's Been lens, as your icon. Either
   // way the tap shows the venue's FULL picture, you and friends together.
@@ -398,7 +437,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const [pastGroups, setPastGroups] = useState(null); // null = loading
   const wantPast =
     (mapFilter === "friends" && friendLens === "past") ||
-    (mapFilter === "my_list" && myListLens === "been");
+    (mapFilter === "my_list" && myListLens === "been") ||
+    searchUi; // search sections need the been/friends sets too
   useEffect(() => {
     if (!wantPast || !userId) return;
     let cancelled = false;
@@ -578,6 +618,49 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
       })
       .filter((g) => g.ownNights.length > 0 || g.ownMark);
   }, [pastGroups, userId, matchesMapFilters]);
+
+  // Search sections read the RAW past data (map filters don't trim search).
+  const searchOwnBeen = useMemo(() => {
+    const ids = new Set();
+    for (const g of pastGroups || []) {
+      if (
+        g.nights.some((n) => n.entries.some((e) => e.user_id === userId)) ||
+        g.marks.some((m) => m.user_id === userId)
+      )
+        ids.add(g.venue.id);
+    }
+    return ids;
+  }, [pastGroups, userId]);
+  const searchFriendInfo = useMemo(() => {
+    const map = new Map();
+    for (const g of pastGroups || []) {
+      const names = [];
+      const seen = new Set();
+      let nights = 0;
+      for (const n of g.nights) {
+        const friendEntries = n.entries.filter((e) => e.user_id !== userId);
+        if (friendEntries.length === 0) continue;
+        nights++;
+        for (const e of friendEntries) {
+          if (!seen.has(e.user_id)) {
+            seen.add(e.user_id);
+            names.push(
+              (e.profile?.display_name || "A friend").split(" ")[0]
+            );
+          }
+        }
+      }
+      for (const m of g.marks) {
+        if (m.user_id !== userId && !seen.has(m.user_id)) {
+          seen.add(m.user_id);
+          names.push((m.profile?.display_name || "A friend").split(" ")[0]);
+        }
+      }
+      if (seen.size > 0)
+        map.set(g.venue.id, { names: names.slice(0, 2), count: nights || seen.size });
+    }
+    return map;
+  }, [pastGroups, userId]);
 
   // PERSON FILTER (profile "Places"): the whole trail of ONE friend — every
   // venue they've checked in, grouped per venue with visit counts. RLS
@@ -795,70 +878,97 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
 
   return (
     <div className="fixed inset-0 z-[1500] bg-white">
-      <div className="absolute top-0 left-0 right-0 z-[2000] bg-white/95 backdrop-blur border-b border-neutral-100">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div className="flex gap-0.5 bg-neutral-100 rounded-full p-0.5">
+      {/* FLOATING CHROME (Sep 6, Mark's new map UI): the white header bar is
+          gone — the map runs full-bleed and the controls float on it. Row 1:
+          segment pills + the search circle. Row 2: lens pills, active filter
+          chips, count. The filter button moved to the bottom-right stack,
+          above the plus. */}
+      {!searchUi && (
+        <div className="absolute top-0 left-0 right-0 z-[2000] px-4 pt-3 pointer-events-none">
+          <div className="flex items-center gap-2.5 pointer-events-auto">
+            <div className="flex flex-1 min-w-0 gap-0.5 rounded-full bg-white p-1 shadow-[0_2px_10px_rgba(30,27,23,0.14)]">
+              {[
+                { key: "all", label: "All" },
+                { key: "my_list", label: "My List" },
+                { key: "friends", label: "Friends" },
+              ].map((seg) => (
+                <button
+                  key={seg.key}
+                  type="button"
+                  onClick={() => setMapFilter(seg.key)}
+                  className={`h-9 flex-1 rounded-full text-[13.5px] font-medium transition ${
+                    mapFilter === seg.key
+                      ? "bg-[#455d3b] text-white"
+                      : "text-neutral-500"
+                  }`}
+                >
+                  {seg.label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
-              onClick={() => setMapFilter("all")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                mapFilter === "all"
-                  ? "bg-white text-[#455d3b] shadow-sm"
-                  : "text-neutral-500"
-              }`}
+              onClick={() => setSearchUi(true)}
+              aria-label="Search places"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition"
             >
-              All
-            </button>
-            <button
-              type="button"
-              onClick={() => setMapFilter("my_list")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                mapFilter === "my_list"
-                  ? "bg-white text-[#455d3b] shadow-sm"
-                  : "text-neutral-500"
-              }`}
-            >
-              My List
-            </button>
-            <button
-              type="button"
-              onClick={() => setMapFilter("friends")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                mapFilter === "friends"
-                  ? "bg-white text-[#455d3b] shadow-sm"
-                  : "text-neutral-500"
-              }`}
-            >
-              Friends
+              <Search size={17} strokeWidth={1.8} />
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowSearch(true)}
-              aria-label="Find a place"
-              className="w-9 h-9 rounded-full flex items-center justify-center bg-white border border-neutral-200 text-neutral-600 transition"
-            >
-              <Search size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowFilters(true)}
-              aria-label="Filters"
-              className={`relative w-9 h-9 rounded-full flex items-center justify-center transition ${
-                activeCount > 0
-                  ? "bg-[#455d3b] text-white"
-                  : "bg-white border border-neutral-200 text-neutral-600"
-              }`}
-            >
-              <SlidersHorizontal size={16} />
-              {activeCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[9px] font-medium flex items-center justify-center border-2 border-white">
-                  {activeCount}
-                </span>
+          <div className="mt-2.5 flex items-center gap-2 overflow-x-auto pb-1 pointer-events-auto">
+            {(mapFilter === "friends" || mapFilter === "my_list") &&
+              !personFilter && (
+                <div className="flex shrink-0 gap-0.5 rounded-full bg-white p-[3px] shadow-[0_2px_10px_rgba(30,27,23,0.12)]">
+                  {(mapFilter === "friends"
+                    ? [
+                        { key: "now", label: "Now" },
+                        { key: "past", label: "Past" },
+                      ]
+                    : [
+                        { key: "saved", label: "Saved" },
+                        { key: "been", label: "Been" },
+                      ]
+                  ).map((lens) => {
+                    const active =
+                      mapFilter === "friends"
+                        ? friendLens === lens.key
+                        : myListLens === lens.key;
+                    return (
+                      <button
+                        key={lens.key}
+                        type="button"
+                        onClick={() =>
+                          mapFilter === "friends"
+                            ? setFriendLens(lens.key)
+                            : setMyListLens(lens.key)
+                        }
+                        className={`h-[30px] rounded-full px-3.5 text-[13px] font-medium transition ${
+                          active
+                            ? "bg-[#edf2eb] text-[#455d3b]"
+                            : "text-neutral-500"
+                        }`}
+                      >
+                        {lens.label}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </button>
-            <span className="text-sm font-medium text-neutral-700 whitespace-nowrap">
+            {chips.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={c.onRemove}
+                className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-full border border-[#c7d4c0] bg-[#e7ede3] pl-3 pr-2 text-[13px] font-medium text-[#33402c]"
+              >
+                {c.label}
+                <X size={11} />
+              </button>
+            ))}
+            <span
+              className="shrink-0 pl-0.5 text-[12.5px] font-medium text-neutral-600 whitespace-nowrap"
+              style={{ textShadow: "0 1px 3px rgba(255,255,255,0.9)" }}
+            >
               {mapFilter === "friends" && friendLens === "past"
                 ? `${friendPastPins.length} ${
                     friendPastPins.length === 1 ? "place" : "places"
@@ -877,29 +987,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             </span>
           </div>
         </div>
-        {chips.length > 0 && (
-          <div className="flex items-center gap-2 px-4 pb-2 overflow-x-auto">
-            {chips.map((c) => (
-              <button
-                key={c.key}
-                type="button"
-                onClick={c.onRemove}
-                className="shrink-0 inline-flex items-center gap-1 text-xs bg-[#edf2eb] text-[#455d3b] rounded-full pl-3 pr-2 py-1"
-              >
-                {c.label}
-                <X size={12} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div
-        className="absolute left-0 right-0 bottom-0"
-        style={{ top: chips.length > 0 ? 96 : 56 }}
-      >
+      )}
+      <div className="absolute left-0 right-0 bottom-0 top-0">
         <MapContainer
           center={MELBOURNE_CENTER}
           zoom={MELBOURNE_ZOOM}
+          zoomControl={false}
           style={{ height: "100%", width: "100%" }}
         >
           <MapResizer />
@@ -1057,46 +1150,6 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </button>
         </div>
       )}
-      {!personFilter && (mapFilter === "friends" || mapFilter === "my_list") && (
-        <div
-          className="absolute left-1/2 -translate-x-1/2 z-[2050] flex gap-1.5"
-          style={{ top: chips.length > 0 ? 106 : 66 }}
-        >
-          {(mapFilter === "friends"
-            ? [
-                { key: "now", label: "Now" },
-                { key: "past", label: "Past" },
-              ]
-            : [
-                { key: "saved", label: "Saved" },
-                { key: "been", label: "Been" },
-              ]
-          ).map((lens) => {
-            const active =
-              mapFilter === "friends"
-                ? friendLens === lens.key
-                : myListLens === lens.key;
-            return (
-              <button
-                key={lens.key}
-                type="button"
-                onClick={() =>
-                  mapFilter === "friends"
-                    ? setFriendLens(lens.key)
-                    : setMyListLens(lens.key)
-                }
-                className={`rounded-full px-4 py-1 text-[11px] font-medium shadow-sm transition border ${
-                  active
-                    ? "bg-[#edf2eb] border-[#455d3b] text-[#455d3b]"
-                    : "bg-white/95 border-neutral-200 text-neutral-500"
-                }`}
-              >
-                {lens.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
       {!personFilter && mapFilter === "friends" && friendLens === "now" && friendCheckins !== null && friendPins.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
@@ -1133,6 +1186,228 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
         </div>
       )}
+      {/* Zoom stack (left) + the relocated filter button (right, above the
+          plus FAB — same sheet, same filters, new home). */}
+      {!searchUi && !personFilter && (
+        <>
+          <div className="absolute left-4 bottom-[140px] z-[2050] w-11 overflow-hidden rounded-xl bg-white shadow-[0_2px_10px_rgba(30,27,23,0.14)]">
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={() => mapRef.current?.zoomIn()}
+              className="flex h-11 w-11 items-center justify-center border-b border-neutral-100 text-[#455d3b] active:bg-neutral-50"
+            >
+              <Plus size={17} strokeWidth={1.9} />
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={() => mapRef.current?.zoomOut()}
+              className="flex h-11 w-11 items-center justify-center text-[#455d3b] active:bg-neutral-50"
+            >
+              <Minus size={17} strokeWidth={1.9} />
+            </button>
+          </div>
+          <button
+            type="button"
+            aria-label="Filters"
+            onClick={() => setShowFilters(true)}
+            className="absolute right-4 bottom-[140px] z-[2050] flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.16)] active:scale-95 transition"
+          >
+            <SlidersHorizontal size={17} strokeWidth={1.8} />
+            {activeCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-[#c0492f] px-1 text-[11px] font-semibold text-white">
+                {activeCount}
+              </span>
+            )}
+          </button>
+        </>
+      )}
+
+      {/* INLINE SEARCH (Sep 6 — no Recent list; typing searches places live).
+          Field bar over the map, results panel beneath, sections leading
+          with yours, then friends', then the map, then Google + Add. */}
+      {searchUi && (
+        <div className="absolute inset-0 z-[2500]">
+          <div className="absolute inset-x-0 top-0 px-4 pt-3">
+            <div className="flex h-11 items-center gap-1.5 rounded-full bg-white pl-1.5 pr-1.5 shadow-[0_2px_12px_rgba(30,27,23,0.16)]">
+              <button
+                type="button"
+                aria-label="Back to the map"
+                onClick={closeSearch}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#455d3b] active:bg-neutral-100"
+              >
+                <ChevronLeft size={16} strokeWidth={2} />
+              </button>
+              {/* text-base: sub-16px inputs make iOS Safari auto-zoom. */}
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search places"
+                className="h-11 min-w-0 flex-1 bg-transparent text-base text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
+              />
+              {q && (
+                <button
+                  type="button"
+                  aria-label="Clear"
+                  onClick={() => setQ("")}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 active:bg-neutral-200"
+                >
+                  <X size={12} strokeWidth={2} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="absolute inset-x-0 bottom-0 top-[68px] overflow-y-auto overscroll-contain rounded-t-[22px] bg-white px-5 pb-8 shadow-[0_-4px_24px_rgba(30,27,23,0.14)]">
+            {(() => {
+              if (q.trim().length < 2)
+                return (
+                  <p className="pt-6 text-sm text-neutral-400">
+                    Search places, like Market Lane
+                  </p>
+                );
+              const dbRows = searchRes.venues;
+              const sMine = dbRows.filter(
+                (v) =>
+                  (savedIds && savedIds.has(v.id)) || searchOwnBeen.has(v.id)
+              );
+              const mineIds = new Set(sMine.map((v) => v.id));
+              const sFriends = dbRows.filter(
+                (v) => !mineIds.has(v.id) && searchFriendInfo.has(v.id)
+              );
+              const friendIds = new Set(sFriends.map((v) => v.id));
+              const sMap = dbRows.filter(
+                (v) => !mineIds.has(v.id) && !friendIds.has(v.id)
+              );
+              const nothing =
+                sMine.length + sFriends.length + sMap.length === 0 &&
+                searchRes.google.length === 0;
+              const label = (text) => (
+                <p className="pt-4 pb-0.5 text-[11.5px] font-medium uppercase tracking-[0.1em] text-[#a79e90]">
+                  {text}
+                </p>
+              );
+              const row = (v, badge, sub) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => {
+                    closeSearch();
+                    flyToVenue(v);
+                  }}
+                  className="flex w-full items-center gap-3 py-[11px] text-left active:bg-neutral-50"
+                >
+                  <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                    <MapPin size={15} className="text-neutral-400" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14.5px] text-neutral-900">
+                      {v.name}
+                    </span>
+                    <span className="block truncate text-[12.5px] text-neutral-400">
+                      {sub ||
+                        [v.cuisine_bucket, v.suburb]
+                          .filter(Boolean)
+                          .join(" · ") ||
+                        "On the map"}
+                    </span>
+                  </span>
+                  {badge}
+                </button>
+              );
+              const chip = (text) => (
+                <span className="flex h-6 shrink-0 items-center rounded-full bg-[#e7ede3] px-2.5 text-[11.5px] font-medium text-[#33402c]">
+                  {text}
+                </span>
+              );
+              return (
+                <>
+                  {searching && (
+                    <p className="pt-4 text-xs text-neutral-400">Searching…</p>
+                  )}
+                  {sMine.length > 0 && label("In My List · Been")}
+                  {sMine.map((v) =>
+                    row(
+                      v,
+                      chip(searchOwnBeen.has(v.id) ? "Been" : "Saved")
+                    )
+                  )}
+                  {sFriends.length > 0 && label("Friends have been")}
+                  {sFriends.map((v) => {
+                    const info = searchFriendInfo.get(v.id);
+                    return row(
+                      v,
+                      chip(info.count),
+                      [
+                        v.cuisine_bucket,
+                        v.suburb,
+                        info.names.join(", "),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    );
+                  })}
+                  {sMap.length > 0 && label("On the curated map")}
+                  {sMap.map((v) => row(v, null))}
+                  {searchRes.google.length > 0 && label("Not on the map yet")}
+                  {searchRes.google.map((r) => (
+                    <button
+                      key={r.place_id}
+                      type="button"
+                      disabled={addingId === r.place_id}
+                      onClick={async () => {
+                        if (addingId) return;
+                        setAddingId(r.place_id);
+                        try {
+                          const venue = await addGooglePlace(r.place_id);
+                          onVenueAdded?.(venue, { saved: false });
+                          closeSearch();
+                          flyToVenue(venue);
+                        } catch (e) {
+                          console.error("Search add failed:", e);
+                          showToast?.("Couldn't add that place");
+                        } finally {
+                          setAddingId(null);
+                        }
+                      }}
+                      className="flex w-full items-center gap-3 py-[11px] text-left active:bg-neutral-50 disabled:opacity-60"
+                    >
+                      <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-dashed border-neutral-300 bg-neutral-50">
+                        <Search size={14} className="text-neutral-400" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14.5px] text-neutral-900">
+                          {r.name}
+                        </span>
+                        <span className="block truncate text-[12.5px] text-neutral-400">
+                          {r.address || "From search"}
+                        </span>
+                      </span>
+                      <span className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-dashed border-[#c7d4c0] px-2.5 text-[11.5px] font-medium text-[#4e5c45]">
+                        {addingId === r.place_id ? (
+                          "Adding…"
+                        ) : (
+                          <>
+                            <Plus size={9} strokeWidth={2.2} />
+                            Add
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                  {!searching && nothing && (
+                    <p className="pt-5 text-sm text-neutral-400">
+                      Nothing found for "{q.trim()}"
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {nightsSheet && (
         <VenueNightsSheet
           group={nightsSheet}
