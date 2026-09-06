@@ -1025,7 +1025,13 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 <button
                   key={seg.key}
                   type="button"
-                  onClick={() => setMapFilter(seg.key)}
+                  onClick={() => {
+                    // A segment tap always answers "whose map" — it clears
+                    // any one-friend trail view (Sep 6 field find: Emily's
+                    // places survived a switch to My List).
+                    if (personFilter) onClearPersonFilter?.();
+                    setMapFilter(seg.key);
+                  }}
                   className={`h-9 flex-1 rounded-full text-[13.5px] font-medium transition ${
                     mapFilter === seg.key
                       ? "bg-[#455d3b] text-white"
