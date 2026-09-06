@@ -674,9 +674,14 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
 
   // --- SPOTS (Sep 6 — toilets, study spots, parking; never public) -------
   // Plain select: RLS returns yours + accepted friends' rows, nothing else.
+  // Whose-map split (Mark's field call, same as Past): Friends/Spots pins
+  // FRIENDS' spots only; your own pin under My List's Spots lens.
   const [spots, setSpots] = useState(null); // null = loading
+  const wantSpots =
+    (mapFilter === "friends" && friendLens === "spots") ||
+    (mapFilter === "my_list" && myListLens === "spots");
   useEffect(() => {
-    if (mapFilter !== "friends" || friendLens !== "spots" || !userId) return;
+    if (!wantSpots || !userId) return;
     let cancelled = false;
     setSpots(null);
     (async () => {
@@ -707,7 +712,16 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     return () => {
       cancelled = true;
     };
-  }, [mapFilter, friendLens, userId, spotsRefresh]);
+  }, [wantSpots, userId, spotsRefresh]);
+
+  const friendSpots = useMemo(
+    () => (spots || []).filter((s) => s.user_id !== userId),
+    [spots, userId]
+  );
+  const mySpots = useMemo(
+    () => (spots || []).filter((s) => s.user_id === userId),
+    [spots, userId]
+  );
 
   // Search sections read the RAW past data (map filters don't trim search).
   const searchOwnBeen = useMemo(() => {
@@ -1045,6 +1059,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                         { key: "saved", label: "Saved" },
                         { key: "been", label: "Been" },
                         { key: "not_been", label: "Haven't been" },
+                        { key: "spots", label: "Spots" },
                       ]
                   ).map((lens) => {
                     const active =
@@ -1088,8 +1103,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               style={{ textShadow: "0 1px 3px rgba(255,255,255,0.9)" }}
             >
               {mapFilter === "friends" && friendLens === "spots"
-                ? `${(spots || []).length} ${
-                    (spots || []).length === 1 ? "spot" : "spots"
+                ? `${friendSpots.length} ${
+                    friendSpots.length === 1 ? "spot" : "spots"
+                  }`
+                : mapFilter === "my_list" && myListLens === "spots"
+                ? `${mySpots.length} ${
+                    mySpots.length === 1 ? "spot" : "spots"
                   }`
                 : mapFilter === "friends" && friendLens === "past"
                 ? `${friendPastPins.length} ${
@@ -1144,10 +1163,22 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 }}
               />
             ))
+          ) : mapFilter === "my_list" && myListLens === "spots" ? (
+            // YOUR spots.
+            mySpots.map((s) => (
+              <Marker
+                key={`myspot_${s.id}`}
+                position={[Number(s.lat), Number(s.lng)]}
+                icon={createSpotIcon(s.category)}
+                eventHandlers={{
+                  click: () => onOpenSpot?.(s),
+                }}
+              />
+            ))
           ) : mapFilter === "friends" && friendLens === "spots" ? (
-            // The friend knowledge layer: yours + friends' spots, category
+            // The friend knowledge layer: FRIENDS' spots only, category
             // emoji pins, tap for the card with directions.
-            (spots || []).map((s) => (
+            friendSpots.map((s) => (
               <Marker
                 key={`spot_${s.id}`}
                 position={[Number(s.lat), Number(s.lng)]}
@@ -1297,7 +1328,19 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </button>
         </div>
       )}
-      {!personFilter && !searchUi && mapFilter === "friends" && friendLens === "spots" && spots !== null && spots.length === 0 && (
+      {!personFilter && !searchUi && mapFilter === "friends" && friendLens === "spots" && spots !== null && friendSpots.length === 0 && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
+          <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
+            <p className="text-sm font-medium text-neutral-800">
+              No friend spots yet
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Their toilets, study spots and parks will land here
+            </p>
+          </div>
+        </div>
+      )}
+      {!personFilter && !searchUi && mapFilter === "my_list" && myListLens === "spots" && spots !== null && mySpots.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
