@@ -2448,8 +2448,15 @@ useEffect(() => {
       .eq("venue_id", venueId);
   }
 
+  // One write at a time (Sep 6, Mark: "clicking it 3 to 4 times") — rapid
+  // taps while an insert is in flight must not stack writes or double-create.
+  const sessionWriteBusy = useRef(false);
+
   async function handleDoneAndSend() {
     if (!currentSessionId || !session?.user?.id) return;
+    if (sessionWriteBusy.current) return;
+    sessionWriteBusy.current = true;
+    try {
 
     const swipeRows = [
       ...markLikes.map((venueId) => ({
@@ -2472,6 +2479,9 @@ useEffect(() => {
         .insert(swipeRows);
       if (swipeError) {
         console.error("Failed to write session swipes:", swipeError);
+        // Loud, not console-only (Sep 6): the guard bug hid behind a
+        // silent return and read as a dead button.
+        showToast("Couldn't send your picks. Try again");
         return;
       }
     }
@@ -2486,10 +2496,14 @@ useEffect(() => {
 
     if (updateError) {
       console.error("Failed to update session status:", updateError);
+      showToast("Couldn't send your picks. Try again");
       return;
     }
 
     setScreen("invite_share");
+    } finally {
+      sessionWriteBusy.current = false;
+    }
   }
 
   async function unhideVenue(venueId) {
@@ -2907,6 +2921,9 @@ loadAreas();
   async function startSwiping() {
     // Belt + braces (Aug 21): 0 = unset, must never reach a created session.
     if (matchMode === "concurrent" && expectedOthers < 1) return;
+    if (sessionWriteBusy.current) return; // a tap is already in flight
+    sessionWriteBusy.current = true;
+    try {
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
@@ -2979,6 +2996,7 @@ loadAreas();
 
       if (error || !data) {
         console.error("Failed to create session:", error);
+        showToast("Couldn't start the session. Try again");
         return;
       }
       setSessionExpiresAt(data.expires_at || expiresAt.toISOString());
@@ -3021,9 +3039,11 @@ loadAreas();
     } else {
       setScreen("swipe");
     }
-   
+    } finally {
+      sessionWriteBusy.current = false;
+    }
   }
- 
+
   function nextCard() {
     const nextIndex = cardIndex + 1;
     if (nextIndex >= filteredVenues.length) {
