@@ -79,6 +79,24 @@ export function MediaViewer({
     initialSheet === "comments" ? { kind: "comments" } : null
   );
   const [landscape, setLandscape] = useState(false);
+  // DESKTOP (Mark's design, Sep 6 — "the sheet becomes a rail"): on a wide
+  // screen the pills stop earning their place. The mobile sheets flatten
+  // into a 380px rail on the right — header, reaction palette, thread and
+  // composer all visible at once, nothing ever hidden. The photo keeps the
+  // remaining space; the dark surround is the dismiss target. "N reacted ›"
+  // swaps the rail's lower half to the who-list instead of covering the
+  // photo. railView: {kind:"thread"} | {kind:"who", comment: row|null}.
+  const [desktop, setDesktop] = useState(
+    () => window.matchMedia("(min-width: 768px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onChange = (e) => setDesktop(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const [railView, setRailView] = useState({ kind: "thread" });
+  const [pickerFor, setPickerFor] = useState(null); // comment id with the inline ⊕ picker open
   const touch = useRef(null);
   const inputRef = useRef(null);
 
@@ -95,20 +113,25 @@ export function MediaViewer({
     if (firstPhoto.current === photo.id) return;
     firstPhoto.current = null;
     setSheet(null);
+    setRailView({ kind: "thread" });
+    setPickerFor(null);
     setLandscape(false);
   }, [photo.id]);
 
   useEffect(() => {
     function onKey(e) {
       if (e.key === "Escape") {
-        if (sheet) setSheet(null);
+        if (desktop) {
+          if (railView.kind === "who") setRailView({ kind: "thread" });
+          else onClose();
+        } else if (sheet) setSheet(null);
         else onClose();
       } else if (e.key === "ArrowLeft" && hasPrev) onStep(-1);
       else if (e.key === "ArrowRight" && hasNext) onStep(1);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheet, hasPrev, hasNext, onStep, onClose]);
+  }, [sheet, desktop, railView.kind, hasPrev, hasNext, onStep, onClose]);
 
   // Focus the input when the comments sheet opens so the keyboard is one tap
   // fewer away — but not on the deep-link open (the person came to READ).
@@ -172,6 +195,374 @@ export function MediaViewer({
           return pid === photo.id && cid === null;
         })
       : [];
+
+  const railWhoComment = railView.kind === "who" ? railView.comment : null;
+  const railWhoRows =
+    railView.kind === "who"
+      ? reactions.filter((r) => {
+          const pid = r.photo_id ?? null;
+          const cid = r.comment_id ?? null;
+          if (railWhoComment) return cid === railWhoComment.id;
+          return pid === photo.id && cid === null;
+        })
+      : [];
+
+  if (desktop) {
+    return (
+      <div
+        className="fixed inset-0 z-[3800] flex bg-[#0c0c0e]/95 text-white/85 select-none"
+        role="dialog"
+        aria-modal="true"
+      >
+        {/* MEDIA COLUMN — the dark surround is the dismiss target; arrows
+            and the counter live in it, not over the rail. */}
+        <div className="relative flex-1 min-w-0 flex items-center justify-center p-8">
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="absolute inset-0 cursor-pointer"
+          />
+          {isVideo ? (
+            <video
+              src={photo.videoUrl}
+              poster={photo.url || undefined}
+              controls
+              playsInline
+              autoPlay
+              className="relative z-[1] max-h-full max-w-full rounded-md"
+            />
+          ) : (
+            <img
+              src={photo.url}
+              alt=""
+              draggable={false}
+              className="pointer-events-none relative z-[1] max-h-full max-w-full rounded-md object-contain"
+            />
+          )}
+          {total > 1 && (
+            <div className="pointer-events-none absolute top-6 left-7 z-[3] flex items-center gap-1.5">
+              {total <= 10 &&
+                photos.map((p, i) => (
+                  <span
+                    key={p.id}
+                    className="h-[3px] w-[22px] rounded-sm"
+                    style={{
+                      background:
+                        i === idx ? "#fff" : "rgba(255,255,255,0.34)",
+                    }}
+                  />
+                ))}
+              <span className="ml-2 text-[13px] font-medium text-white/80 tabular-nums">
+                {idx + 1} / {total}
+              </span>
+            </div>
+          )}
+          {hasPrev && (
+            <button
+              type="button"
+              aria-label="Previous"
+              onClick={() => onStep(-1)}
+              className="absolute left-6 top-1/2 z-[3] flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 backdrop-blur-xl transition hover:bg-white/25"
+            >
+              <ChevronLeft size={19} strokeWidth={1.9} />
+            </button>
+          )}
+          {hasNext && (
+            <button
+              type="button"
+              aria-label="Next"
+              onClick={() => onStep(1)}
+              className="absolute right-6 top-1/2 z-[3] flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 backdrop-blur-xl transition hover:bg-white/25"
+            >
+              <ChevronRight size={19} strokeWidth={1.9} />
+            </button>
+          )}
+        </div>
+
+        {/* THE RAIL — everything the mobile sheets hide, visible at once. */}
+        <div className="flex w-[380px] shrink-0 flex-col border-l border-white/10 bg-[#16161a]">
+          {/* header: author · download / delete / close */}
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 px-[22px] pt-5 pb-4">
+            <button
+              type="button"
+              onClick={() => onOpenProfile?.(photo.user_id)}
+              className="flex min-w-0 items-center gap-2.5 text-left"
+            >
+              <FriendAvatar profile={authorProfile} small />
+              <span className="min-w-0">
+                <span className="block truncate text-[14.5px] text-white">
+                  <span className="font-medium">
+                    {isMine ? "Your" : `${firstName(authorProfile)}'s`}
+                  </span>{" "}
+                  {isVideo ? "video" : "photo"}
+                </span>
+                <span className="block text-[12.5px] text-white/50">
+                  {timeAgoShort(photo.created_at)}
+                </span>
+              </span>
+            </button>
+            <div className="flex shrink-0 gap-2">
+              {photo.orig_path && (
+                <button
+                  type="button"
+                  aria-label="Save original"
+                  disabled={downloading}
+                  onClick={() => onSave(photo)}
+                  className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20 disabled:opacity-60"
+                >
+                  {downloading ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : (
+                    <Download size={15} strokeWidth={1.7} />
+                  )}
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  aria-label={deleteArm ? "Really delete?" : "Delete"}
+                  disabled={deleting}
+                  onClick={() => (deleteArm ? onDelete() : onArmDelete())}
+                  className={`flex h-[34px] items-center justify-center rounded-full transition disabled:opacity-60 ${
+                    deleteArm
+                      ? "bg-red-500 px-3 text-[12px] font-medium text-white"
+                      : "w-[34px] bg-white/10 hover:bg-white/20"
+                  }`}
+                >
+                  {deleting ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : deleteArm ? (
+                    "Really delete?"
+                  ) : (
+                    <Trash2 size={15} strokeWidth={1.7} />
+                  )}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={onClose}
+                className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20"
+              >
+                <X size={14} strokeWidth={1.9} />
+              </button>
+            </div>
+          </div>
+
+          {/* reaction palette — photo-scoped, always visible */}
+          <div className="flex shrink-0 flex-col gap-3 border-b border-white/10 px-[22px] py-[18px]">
+            <div className="flex flex-wrap gap-[7px]">
+              {REACTION_SET.map((e) => {
+                const n = photoSummary.counts[e] || 0;
+                const isMineE = photoSummary.mine === e;
+                return (
+                  <button
+                    key={e}
+                    type="button"
+                    disabled={reacting}
+                    onClick={() => onReact(e, photo, null)}
+                    className={`relative flex h-11 w-11 items-center justify-center rounded-full border text-[20px] transition hover:bg-white/25 disabled:opacity-50 ${
+                      isMineE
+                        ? "border-[#b9c6b1]/60 bg-[#b9c6b1]/20"
+                        : "border-transparent bg-white/10"
+                    }`}
+                  >
+                    {e}
+                    {n > 0 && (
+                      <span className="absolute -top-[3px] -right-[3px] flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#f2ede5] px-[5px] text-[11px] font-semibold text-[#1e1b17]">
+                        {n}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {reactionTotal > 0 && (
+              <button
+                type="button"
+                onClick={() => setRailView({ kind: "who", comment: null })}
+                className="self-start text-[13px] text-[#c3d1bb] transition hover:text-[#dde6d8]"
+              >
+                {reactionTotal} reacted ›
+              </button>
+            )}
+          </div>
+
+          {/* lower half — thread, or the who-reacted list in its place */}
+          {railView.kind === "thread" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[22px] py-[18px]">
+              <p className="text-[13px] uppercase tracking-[0.08em] text-white/40">
+                {commentCount === null
+                  ? "Comments"
+                  : commentCount === 1
+                  ? "1 comment"
+                  : `${commentCount} comments`}
+              </p>
+              {comments !== null && comments.length === 0 && (
+                <p className="mt-4 text-sm text-white/50">
+                  No comments on this {isVideo ? "video" : "photo"} yet.
+                </p>
+              )}
+              <div className="mt-5 space-y-5">
+                {(comments || []).map((c) => {
+                  const { counts, mine } = summarizeReactions(
+                    reactions,
+                    userId,
+                    null,
+                    c.id
+                  );
+                  const entries = Object.entries(counts);
+                  const cTotal = entries.reduce((s, [, n]) => s + n, 0);
+                  return (
+                    <div key={c.id} className="flex items-start gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => onOpenProfile?.(c.user_id)}
+                        className="shrink-0"
+                      >
+                        <FriendAvatar profile={c.profile} small />
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[12.5px] text-white/55">
+                          <span className="font-medium text-white/90">
+                            {c.user_id === userId
+                              ? "You"
+                              : c.profile?.display_name || "Someone"}
+                          </span>{" "}
+                          · {timeAgoShort(c.created_at)}
+                        </p>
+                        <p className="mt-1 break-words text-[14.5px] leading-snug text-white">
+                          {c.body}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {entries.map(([e, n]) => (
+                            <button
+                              key={e}
+                              type="button"
+                              disabled={reacting}
+                              onClick={() => onReact(e, null, c)}
+                              className={`flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12.5px] font-medium transition hover:bg-white/20 disabled:opacity-50 ${
+                                mine === e
+                                  ? "border-[#b9c6b1]/60 bg-[#b9c6b1]/20 text-[#dde6d8]"
+                                  : "border-white/15 bg-white/10 text-white/80"
+                              }`}
+                            >
+                              <span className="text-sm">{e}</span> {n}
+                            </button>
+                          ))}
+                          {pickerFor === c.id ? (
+                            REACTION_SET.map((e) => (
+                              <button
+                                key={e}
+                                type="button"
+                                disabled={reacting}
+                                onClick={() => {
+                                  onReact(e, null, c);
+                                  setPickerFor(null);
+                                }}
+                                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-sm transition hover:bg-white/25 disabled:opacity-50"
+                              >
+                                {e}
+                              </button>
+                            ))
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label="Add reaction"
+                              onClick={() => setPickerFor(c.id)}
+                              className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-white/35 text-white/70 transition hover:border-white/70"
+                            >
+                              <Plus size={11} strokeWidth={1.8} />
+                            </button>
+                          )}
+                          {cTotal > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRailView({ kind: "who", comment: c })
+                              }
+                              className="text-[12.5px] text-[#c3d1bb] transition hover:text-[#dde6d8]"
+                            >
+                              {cTotal} reacted ›
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[22px] py-[18px]">
+              <button
+                type="button"
+                onClick={() => setRailView({ kind: "thread" })}
+                className="mb-3 flex items-center gap-2 text-[13px] text-[#c3d1bb] transition hover:text-[#dde6d8]"
+              >
+                <ChevronLeft size={13} strokeWidth={2.2} />
+                Back to comments
+              </button>
+              <p className="mb-2 text-[13px] uppercase tracking-[0.08em] text-white/40">
+                {railWhoComment
+                  ? `On ${
+                      railWhoComment.user_id === userId
+                        ? "your"
+                        : `${firstName(railWhoComment.profile)}'s`
+                    } comment`
+                  : `${railWhoRows.length} reacted`}
+              </p>
+              {railWhoRows.length === 0 ? (
+                <p className="py-1 text-sm text-white/50">No reactions yet.</p>
+              ) : (
+                railWhoRows.map((r) => {
+                  const p = mediaProfiles[r.user_id] || null;
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => onOpenProfile?.(r.user_id)}
+                      className="flex w-full items-center gap-3 border-b border-white/10 py-[11px] text-left last:border-b-0"
+                    >
+                      <FriendAvatar profile={p} small />
+                      <span className="min-w-0 flex-1 truncate text-[15px] text-white">
+                        {r.user_id === userId
+                          ? "You"
+                          : p?.display_name || p?.username || "Someone"}
+                      </span>
+                      <span className="text-xl">{r.emoji}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* composer — pinned, always there */}
+          <div className="flex shrink-0 items-center gap-2.5 border-t border-white/10 px-[22px] pt-4 pb-5">
+            <input
+              value={commentBody}
+              onChange={(e) => onCommentBodyChange(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && onSendComment()}
+              placeholder={`Comment on this ${isVideo ? "video" : "photo"}`}
+              maxLength={500}
+              className="h-11 min-w-0 flex-1 rounded-full border border-white/20 bg-white/10 px-[18px] text-sm text-white placeholder:text-white/60 focus:border-[#b9c6b1] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={onSendComment}
+              disabled={sending || !commentBody.trim()}
+              aria-label="Send"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#b9c6b1] text-[#2b3326] transition hover:bg-[#a6b69d] disabled:opacity-40"
+            >
+              <Send size={16} strokeWidth={1.6} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
