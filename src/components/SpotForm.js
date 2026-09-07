@@ -175,7 +175,7 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
             </button>
           </div>
           <p className="mt-0.5 text-xs text-neutral-500">
-            Only you and your friends will ever see this.
+            Visible to your friends. If they save it, their friends too.
           </p>
         </div>
         <div className="flex-1 overflow-y-auto px-5 pb-6">

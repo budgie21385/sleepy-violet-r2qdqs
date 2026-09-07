@@ -44,6 +44,7 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
   // map for friends. All silent — the layer stays quiet by doctrine.
   const [reactions, setReactions] = useState([]); // [{user_id, emoji}]
   const [saved, setSaved] = useState(false);
+  const [savers, setSavers] = useState([]); // visible savers' profiles, not you
   const [comments, setComments] = useState(null); // null = loading
   const [commentBody, setCommentBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -71,13 +72,12 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
           .from("spot_reactions")
           .select("user_id, emoji")
           .eq("spot_id", spot.id),
-        userId
-          ? supabase
-              .from("spot_saves")
-              .select("spot_id")
-              .eq("spot_id", spot.id)
-              .eq("user_id", userId)
-          : Promise.resolve({ data: [] }),
+        // ALL visible saves (Sep 7 reach): yours flips the bookmark, your
+        // friends' power the "Saved by" provenance line.
+        supabase
+          .from("spot_saves")
+          .select("user_id")
+          .eq("spot_id", spot.id),
         supabase
           .from("spot_comments")
           .select("*")
@@ -87,9 +87,15 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
       ]);
       if (cancelled) return;
       setReactions(likesRes.data || []);
-      setSaved((savesRes.data || []).length > 0);
+      const saveRows = savesRes.data || [];
+      setSaved(saveRows.some((r) => r.user_id === userId));
+      const saverIds = saveRows
+        .map((r) => r.user_id)
+        .filter((u) => u !== userId && u !== spot.user_id);
       const rows = commentsRes.data || [];
-      const pIds = Array.from(new Set(rows.map((c) => c.user_id)));
+      const pIds = Array.from(
+        new Set([...rows.map((c) => c.user_id), ...saverIds])
+      );
       let pById = {};
       if (pIds.length > 0) {
         const { data: profs } = await supabase
@@ -100,6 +106,7 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
       }
       if (cancelled) return;
       setComments(rows.map((c) => ({ ...c, profile: pById[c.user_id] || null })));
+      setSavers(saverIds.map((id) => pById[id]).filter(Boolean));
     })();
     return () => {
       cancelled = true;
@@ -289,6 +296,16 @@ export function SpotSheet({ spot, userId, onClose, onDeleted, onChanged, showToa
             <FriendAvatar profile={isMine ? null : profile} small />
             <p className="min-w-0 flex-1 text-xs text-neutral-500">
               Added by <span className="font-medium text-neutral-700">{addedName}</span> · {addedDate}
+              {savers.length > 0 && (
+                <span className="block text-[11px] text-[#455d3b]">
+                  Saved by{" "}
+                  {savers
+                    .slice(0, 2)
+                    .map((p) => (p.display_name || "a friend").split(" ")[0])
+                    .join(", ")}
+                  {savers.length > 2 ? ` + ${savers.length - 2} more` : ""}
+                </span>
+              )}
             </p>
             {!isMine && (
               <button
