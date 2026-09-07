@@ -9,6 +9,7 @@ import { supabase } from "../supabaseClient";
 import { MapPin } from "lucide-react";
 import {
   VenueHeroCarousel,
+  venueHasHero,
   VenueRating,
   VenueEditorial,
   VenueVibes,
@@ -122,8 +123,11 @@ export function PublicVenuePage({ venueId }) {
                 </div>
               );
             })()}
-            <div className="rounded-[2rem] bg-white p-5 shadow-sm border border-neutral-100">
-              <VenueHeroCarousel venue={venue} />
+            <div className={`overflow-hidden rounded-[2rem] bg-white p-5 shadow-sm border border-neutral-100 ${venueHasHero(venue) ? "pt-0" : ""}`}>
+              <VenueHeroCarousel
+                venue={venue}
+                className="-mx-5 mb-5 h-[320px] rounded-none"
+              />
               {/* Name fallback for venues with no photo (hero renders null). */}
               {!venue.image_urls?.length && !venue.primary_image && (
                 <div className="mb-3">

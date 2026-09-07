@@ -17,6 +17,7 @@ import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
 import {
   VenueHeroCarousel,
+  venueHasHero,
   BeenPill,
   VenueRating,
   VenueEditorial,
@@ -462,12 +463,16 @@ export function MapVenueSheet({
       onTouchMove={navEnabled ? handleSwipeMove : undefined}
       onTouchEnd={navEnabled ? handleSwipeEnd : undefined}
     >
-      <div className="sticky top-0 z-10 flex items-center justify-end bg-white px-4 py-3 rounded-t-3xl">
+      {/* X floats OVER the full-bleed hero (Sep 7, Mark: the photo owns the
+          card's top now). h-0 = the sticky row takes no layout space, so the
+          image starts at the card's very top; the button stays reachable
+          while scrolling. */}
+      <div className="sticky top-0 z-20 h-0 flex items-start justify-end px-3 pt-3">
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-600 shadow-md hover:bg-white"
         >
           <X size={16} />
         </button>
@@ -475,10 +480,13 @@ export function MapVenueSheet({
 
       <div
         key={venue.id}
-        className={`flex-1 overflow-y-auto p-4 space-y-3 ${slideClass}`}
+        className={`flex-1 overflow-y-auto p-4 space-y-3 ${
+          venueHasHero(venue) ? "pt-0" : "pt-12"
+        } ${slideClass}`}
       >
         <VenueHeroCarousel
           venue={venue}
+          className="-mx-4 h-[340px] rounded-t-3xl"
           disableSwipe={navEnabled}
           beenPill={
             userId ? (

@@ -59,7 +59,21 @@ export function BeenPill({ been, visitCount, onToggle }) {
   );
 }
 
-export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null }) {
+// True when the hero will actually render — photoless venues (personal
+// places) need their card's own top padding back, or content jams against
+// the edge where the full-bleed photo would have been.
+export function venueHasHero(venue) {
+  return !!(
+    venue?.image_cdn_urls?.length ||
+    venue?.image_urls?.length ||
+    venue?.primary_image
+  );
+}
+
+// className override (Sep 7, Mark: "the image takes up the whole section of
+// the card at the top") — each card passes negative margins matching its own
+// padding so the photo bleeds to the card's edges and top corners.
+export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null, className = "mb-6 h-[320px] rounded-[1.75rem]" }) {
   // Prefer CDN-cached photos (fast — served from Supabase Storage). Fall back to
   // the live /api/place-photo Google proxy for venues not cached yet.
   const cdn = venue?.image_cdn_urls;
@@ -144,7 +158,7 @@ export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null
   }
   return (
     <div
-      className="relative mb-6 h-[320px] overflow-hidden rounded-[1.75rem] bg-neutral-100"
+      className={`relative overflow-hidden bg-neutral-100 ${className}`}
       onTouchStart={disableSwipe ? undefined : handleTouchStart}
       onTouchMove={disableSwipe ? undefined : handleTouchMove}
       onTouchEnd={disableSwipe ? undefined : handleTouchEnd}
@@ -184,7 +198,9 @@ export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null
           >
             ›
           </button>
-          <div className="absolute right-4 top-4 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
+          {/* Bottom right (Sep 7, Mark) — the top corner belongs to the
+              card's X now that the photo bleeds to the top. */}
+          <div className="absolute right-4 bottom-4 z-10 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
             {imageIndex + 1} / {images.length}
           </div>
         </>
@@ -492,8 +508,12 @@ export function VenueCard({ venue: venueLight, beenPill = null }) {
   // bootstrap only ships light columns now. Body below is unchanged.
   const venue = useVenueDetails(venueLight);
   return (
-    <div className="rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100">
-      <VenueHeroCarousel venue={venue} beenPill={beenPill} />
+    <div className={`overflow-hidden rounded-[2rem] bg-white p-6 shadow-sm border border-neutral-100 ${venueHasHero(venue) ? "pt-0" : ""}`}>
+      <VenueHeroCarousel
+        venue={venue}
+        beenPill={beenPill}
+        className="-mx-6 mb-6 h-[320px] rounded-none"
+      />
       <div className="mb-8 space-y-3">
         <VenueRating venue={venue} />
         <OpeningHours venue={venue} />
