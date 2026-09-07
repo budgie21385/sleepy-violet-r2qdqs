@@ -2573,6 +2573,17 @@ useEffect(() => {
     async function loadVenues() {
       const all = [];
       const PAGE = 1000;
+      // POISONED-CACHE FIX (Sep 7, Mark's field find: "all the recent saves
+      // have disappeared from the map and list" — on his PHONE only). A page
+      // fetch that dies mid-way (flaky mobile, iOS suspending the PWA) used
+      // to fall through to the cache write below, so the on-device cache
+      // held exactly the OLDEST 1,000 venues (id order) and every reopen
+      // repainted it — newest, Flanit-added venues gone from every
+      // pool-derived surface while cards/search (direct fetches) still
+      // worked. Desktop on good wifi always completed, which hid it. Rule
+      // now: an INCOMPLETE fetch may paint (better than nothing on a cold
+      // start) but must NEVER be cached or replace a fuller pool.
+      let complete = true;
       for (let fromIdx = 0; ; fromIdx += PAGE) {
         const { data, error } = await supabase
           .from("venues")
@@ -2586,10 +2597,20 @@ useEffect(() => {
           .range(fromIdx, fromIdx + PAGE - 1);
         if (error) {
           console.error("Error loading venues:", error);
+          complete = false;
           break;
         }
         all.push(...(data || []));
         if (!data || data.length < PAGE) break;
+      }
+      if (!complete) {
+        // Cold start with no cache at all: a partial pool beats an empty
+        // map, but it stays UNCACHED so the next open retries in full.
+        if (all.length > 0 && !cachedIds) {
+          setVenues([...all].sort(() => Math.random() - 0.5));
+        }
+        setLoading(false);
+        return;
       }
       if (all.length > 0) {
         try {
