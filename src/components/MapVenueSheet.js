@@ -467,14 +467,21 @@ export function MapVenueSheet({
           card's top now). h-0 = the sticky row takes no layout space, so the
           image starts at the card's very top; the button stays reachable
           while scrolling. */}
-      <div className="sticky top-0 z-20 h-0 flex items-start justify-end px-3 pt-3">
+      {/* NO padding on this row — with border-box, padding IS height, and
+          h-0 must stay truly zero or a white strip appears above the hero
+          (Sep 7 field find). The button carries its own margins. */}
+      <div className="sticky top-0 z-20 h-0 flex items-start justify-end">
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/90 text-neutral-600 shadow-md hover:bg-white"
+          className={`mt-3.5 mr-4 flex h-9 w-9 shrink-0 items-center justify-center active:scale-90 transition ${
+            venueHasHero(venue)
+              ? "text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.7)]"
+              : "text-neutral-500"
+          }`}
         >
-          <X size={16} />
+          <X size={22} strokeWidth={2.2} />
         </button>
       </div>
 
