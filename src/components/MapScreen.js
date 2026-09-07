@@ -31,7 +31,7 @@ import {
 import { MapVenueSheet } from "./MapVenueSheet";
 import { VenueNightsSheet } from "./VenueNightsSheet";
 import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
-import { ChevronLeft, MapPin, Plus, Minus } from "lucide-react";
+import { ChevronLeft, MapPin, Plus, Minus, List, Map as MapIcon, Star } from "lucide-react";
 import { spotCategory } from "./SpotSheet";
 
 // Spot pins (Sep 6 — the friend knowledge layer): category emoji in a white
@@ -827,6 +827,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     };
   }, [personFilter?.userId]);
 
+  // LIST VIEW (Sep 7, Mark: "can we also get a list view... regardless of
+  // the filter select"): the same content the map is showing — segment,
+  // lens, filter chips all live — rendered as rows instead of pins. Toggle
+  // sits under the zoom stack. Venues sort rating-first (his call).
+  const [listView, setListView] = useState(false);
+
   // Past-lens tap: one night and nothing else = straight into the card (no
   // list of one); anything richer opens the venue's nights sheet.
   const [nightsSheet, setNightsSheet] = useState(null); // a past group or null
@@ -1031,7 +1037,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             <div className="flex flex-1 min-w-0 gap-0.5 rounded-full bg-white p-1 shadow-[0_2px_10px_rgba(30,27,23,0.14)] lg:flex-none">
               {[
                 { key: "all", label: "All" },
-                { key: "my_list", label: "My List" },
+                { key: "my_list", label: "Mine" },
                 { key: "friends", label: "Friends" },
               ].map((seg) => (
                 <button
@@ -1327,7 +1333,141 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           )}
         </MapContainer>
       </div>
-      {!personFilter && !searchUi && mapFilter === "my_list" && myListLens === "not_been" && pastGroups !== null && displayedPlottable.length === 0 && (
+      {/* THE LIST VIEW — same content as the pins, as rows. Header pills
+          stay live above it, so lens/filter switching updates in place. */}
+      {listView && !personFilter && !searchUi && (
+        <div
+          className="absolute inset-x-0 bottom-0 z-[1900] overflow-y-auto overscroll-contain bg-white"
+          style={{ top: chips.length > 0 ? 150 : 110 }}
+        >
+          <div className="mx-auto w-full max-w-lg px-4 pb-32 pt-1">
+            {(() => {
+              const rowShell = (key, onClick, left, title, sub, right) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={onClick}
+                  className="flex w-full items-center gap-3 border-b border-neutral-100 py-3 text-left active:bg-neutral-50"
+                >
+                  {left}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14.5px] font-medium text-neutral-900">
+                      {title}
+                    </span>
+                    {sub && (
+                      <span className="block truncate text-[12.5px] text-neutral-500">
+                        {sub}
+                      </span>
+                    )}
+                  </span>
+                  {right}
+                </button>
+              );
+              const venueThumb = (v) =>
+                v.primary_image ? (
+                  <img
+                    src={v.primary_image}
+                    alt=""
+                    className="h-12 w-12 shrink-0 rounded-xl object-cover bg-neutral-100"
+                  />
+                ) : (
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#edf2eb] text-sm font-semibold text-[#455d3b]">
+                    {(v.name || "?").charAt(0).toUpperCase()}
+                  </span>
+                );
+              const ratingChip = (v) =>
+                Number(v.rating) > 0 ? (
+                  <span className="flex shrink-0 items-center gap-1 text-[12.5px] font-medium text-neutral-600">
+                    <Star size={12} className="text-amber-400" fill="#fbbf24" />
+                    {v.rating}
+                  </span>
+                ) : null;
+              const empty = (text) => (
+                <p className="pt-8 text-center text-sm text-neutral-400">{text}</p>
+              );
+
+              if (mapFilter === "friends" && friendLens === "now") {
+                if (friendPins.length === 0) return empty("No friends out right now");
+                return friendPins.map((g) =>
+                  rowShell(
+                    `now_${g.venue.id}`,
+                    () => setSelectedVenue(g.venue),
+                    venueThumb(g.venue),
+                    g.venue.name,
+                    `${(g.entries[0].profile?.display_name || "A friend").split(" ")[0]}${
+                      g.entries.length > 1 ? ` + ${g.entries.length - 1}` : ""
+                    } · ${timeAgoShort(g.entries[0].created_at)}`,
+                    ratingChip(g.venue)
+                  )
+                );
+              }
+              if (mapFilter === "friends" && friendLens === "past") {
+                if (friendPastPins.length === 0) return empty("No friend nights yet");
+                return friendPastPins.map((g) =>
+                  rowShell(
+                    `fp_${g.venue.id}`,
+                    () => handlePastTap(g),
+                    venueThumb(g.venue),
+                    g.venue.name,
+                    [g.venue.cuisine_bucket, g.venue.suburb].filter(Boolean).join(" · "),
+                    <span className="shrink-0 rounded-full bg-[#edf2eb] px-2.5 py-0.5 text-[11.5px] font-medium text-[#455d3b]">
+                      {g.friendNights.length || g.friendMarks.length}{" "}
+                      {g.friendNights.length === 1 ? "night" : g.friendNights.length > 1 ? "nights" : "been"}
+                    </span>
+                  )
+                );
+              }
+              if (
+                (mapFilter === "friends" && friendLens === "spots") ||
+                (mapFilter === "my_list" && myListLens === "spots")
+              ) {
+                const list = mapFilter === "friends" ? friendSpots : mySpots;
+                if (list.length === 0) return empty("No spots yet");
+                return list.map((s) =>
+                  rowShell(
+                    `sp_${s.id}`,
+                    () => onOpenSpot?.(s),
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#edf2eb] text-lg">
+                      {spotCategory(s.category).emoji}
+                    </span>,
+                    s.title,
+                    s.place_name || null,
+                    null
+                  )
+                );
+              }
+              if (mapFilter === "my_list" && myListLens === "been") {
+                if (myBeenPins.length === 0) return empty("Nowhere marked been yet");
+                return myBeenPins.map((g) =>
+                  rowShell(
+                    `mb_${g.venue.id}`,
+                    () => handlePastTap(g),
+                    venueThumb(g.venue),
+                    g.venue.name,
+                    [g.venue.cuisine_bucket, g.venue.suburb].filter(Boolean).join(" · "),
+                    ratingChip(g.venue)
+                  )
+                );
+              }
+              const venues = [...displayedPlottable].sort(
+                (a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)
+              );
+              if (venues.length === 0) return empty("Nothing matches right now");
+              return venues.map((v) =>
+                rowShell(
+                  `v_${v.id}`,
+                  () => setSelectedVenue(v),
+                  venueThumb(v),
+                  v.name,
+                  [v.cuisine_bucket || v.type, v.suburb].filter(Boolean).join(" · "),
+                  ratingChip(v)
+                )
+              );
+            })()}
+          </div>
+        </div>
+      )}
+      {!personFilter && !searchUi && !listView && mapFilter === "my_list" && myListLens === "not_been" && pastGroups !== null && displayedPlottable.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
@@ -1355,7 +1495,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </button>
         </div>
       )}
-      {!personFilter && !searchUi && mapFilter === "friends" && friendLens === "spots" && spots !== null && friendSpots.length === 0 && (
+      {!personFilter && !searchUi && !listView && mapFilter === "friends" && friendLens === "spots" && spots !== null && friendSpots.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
@@ -1367,7 +1507,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
         </div>
       )}
-      {!personFilter && !searchUi && mapFilter === "my_list" && myListLens === "spots" && spots !== null && mySpots.length === 0 && (
+      {!personFilter && !searchUi && !listView && mapFilter === "my_list" && myListLens === "spots" && spots !== null && mySpots.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
@@ -1379,7 +1519,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
         </div>
       )}
-      {!personFilter && mapFilter === "friends" && friendLens === "now" && friendCheckins !== null && friendPins.length === 0 && (
+      {!personFilter && !listView && mapFilter === "friends" && friendLens === "now" && friendCheckins !== null && friendPins.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
@@ -1391,7 +1531,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           </div>
         </div>
       )}
-      {!personFilter && mapFilter === "friends" && friendLens === "past" && pastGroups !== null && friendPastPins.length === 0 && (
+      {!personFilter && !listView && mapFilter === "friends" && friendLens === "past" && pastGroups !== null && friendPastPins.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[2100] max-w-[85%]" style={{ top: 120 }}>
           <div className="rounded-2xl bg-white/95 border border-neutral-100 shadow-lg px-4 py-3 text-center">
             <p className="text-sm font-medium text-neutral-800">
@@ -1431,6 +1571,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           plus FAB — same sheet, same filters, new home). */}
       {!searchUi && !personFilter && (
         <>
+          {!listView && (
           <div className="absolute left-4 bottom-[140px] z-[2050] w-11 overflow-hidden rounded-xl bg-white shadow-[0_2px_10px_rgba(30,27,23,0.14)] lg:bottom-[18px]">
             <button
               type="button"
@@ -1449,6 +1590,21 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               <Minus size={17} strokeWidth={1.9} />
             </button>
           </div>
+          )}
+          <button
+            type="button"
+            aria-label={listView ? "Show the map" : "Show as a list"}
+            onClick={() => setListView((v) => !v)}
+            className={`absolute left-4 z-[2050] flex h-11 w-11 items-center justify-center rounded-xl bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition ${
+              listView ? "bottom-[140px] lg:bottom-[18px]" : "bottom-[84px] lg:bottom-[74px]"
+            }`}
+          >
+            {listView ? (
+              <MapIcon size={17} strokeWidth={1.8} />
+            ) : (
+              <List size={17} strokeWidth={1.8} />
+            )}
+          </button>
           <button
             type="button"
             aria-label="Filters"
