@@ -311,7 +311,11 @@ export function VenueAmenities({ venue, max = 6 }) {
 // Snippet of the top Google review. reviews is a jsonb array of
 // {rating, text, author, published, relative}; supabase-js returns it parsed,
 // but guard for a stringified value just in case.
+// One review leads; the rest (we store up to Google's max of 5) expand in
+// place behind a quiet "More reviews" line (Sep 7, Mark) — the card stays a
+// fast read unless asked.
 export function VenueReview({ venue }) {
+  const [expanded, setExpanded] = useState(false);
   let reviews = venue.reviews;
   if (typeof reviews === "string") {
     try {
@@ -321,26 +325,47 @@ export function VenueReview({ venue }) {
     }
   }
   if (!Array.isArray(reviews)) return null;
-  const r = reviews.find((x) => x && String(x.text || "").trim());
-  if (!r) return null;
-  const text = String(r.text).trim();
-  const snippet = text.length > 180 ? `${text.slice(0, 180).trimEnd()}…` : text;
-  const stars = Number(r.rating);
+  const withText = reviews.filter((x) => x && String(x.text || "").trim());
+  if (withText.length === 0) return null;
+  const shown = expanded ? withText : withText.slice(0, 1);
   return (
-    <div className="rounded-2xl bg-neutral-50 px-4 py-3">
-      {Number.isFinite(stars) && stars > 0 ? (
-        <p className="mb-1 text-xs text-amber-500">
-          {"★".repeat(Math.round(stars))}
-        </p>
-      ) : null}
-      <p className="text-sm leading-6 text-neutral-600">“{snippet}”</p>
-      {r.author || r.relative ? (
-        <p className="mt-1 text-xs text-neutral-400">
-          {r.author}
-          {r.author && r.relative ? " · " : ""}
-          {r.relative}
-        </p>
-      ) : null}
+    <div className="space-y-2">
+      {shown.map((r, i) => {
+        const text = String(r.text).trim();
+        const snippet =
+          !expanded && text.length > 180
+            ? `${text.slice(0, 180).trimEnd()}…`
+            : text;
+        const stars = Number(r.rating);
+        return (
+          <div key={i} className="rounded-2xl bg-neutral-50 px-4 py-3">
+            {Number.isFinite(stars) && stars > 0 ? (
+              <p className="mb-1 text-xs text-amber-500">
+                {"★".repeat(Math.round(stars))}
+              </p>
+            ) : null}
+            <p className="text-sm leading-6 text-neutral-600">“{snippet}”</p>
+            {r.author || r.relative ? (
+              <p className="mt-1 text-xs text-neutral-400">
+                {r.author}
+                {r.author && r.relative ? " · " : ""}
+                {r.relative}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+      {withText.length > 1 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="px-1 text-xs font-medium text-[#455d3b]"
+        >
+          {expanded
+            ? "Show less"
+            : `More reviews (${withText.length - 1})`}
+        </button>
+      )}
     </div>
   );
 }
