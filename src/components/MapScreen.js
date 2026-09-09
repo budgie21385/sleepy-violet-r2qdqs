@@ -832,6 +832,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   // lens, filter chips all live — rendered as rows instead of pins. Toggle
   // sits under the zoom stack. Venues sort rating-first (his call).
   const [listView, setListView] = useState(false);
+  const [listQuery, setListQuery] = useState(""); // filter-this-list field
 
   // Past-lens tap: one night and nothing else = straight into the card (no
   // list of one); anything richer opens the venue's nights sheet.
@@ -872,11 +873,14 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         !Number.isFinite(Number(venue.longitude))
       )
         continue;
+      // Map filters apply to Now too (Sep 9, Mark) — a coffee filter trims
+      // presence pins the same as every other layer.
+      if (!matchesMapFilters(venue)) continue;
       if (!groups.has(venue.id)) groups.set(venue.id, { venue, entries: [] });
       groups.get(venue.id).entries.push(c);
     }
     return Array.from(groups.values());
-  }, [mapFilter, friendCheckins]);
+  }, [mapFilter, friendCheckins, matchesMapFilters]);
 
   const displayedPlottable = useMemo(() => {
     if (mapFilter === "friends") return friendPins.map((g) => g.venue);
@@ -1341,7 +1345,23 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           style={{ top: chips.length > 0 ? 150 : 110 }}
         >
           <div className="mx-auto w-full max-w-lg px-4 pb-32 pt-1">
+            {/* Filter-this-list (Sep 9, Mark: "search should also work") —
+                narrows the rows by name/suburb/cuisine, per surface. */}
+            <div className="sticky top-0 z-10 bg-white pb-2 pt-2">
+              <input
+                value={listQuery}
+                onChange={(e) => setListQuery(e.target.value)}
+                placeholder="Search this list"
+                className="h-10 w-full rounded-full border border-neutral-200 bg-neutral-50 px-4 text-base focus:border-[#455d3b] focus:outline-none placeholder:text-neutral-400"
+              />
+            </div>
             {(() => {
+              const q = listQuery.trim().toLowerCase();
+              const hit = (...fields) =>
+                !q ||
+                fields.some((f) =>
+                  String(f || "").toLowerCase().includes(q)
+                );
               const rowShell = (key, onClick, left, title, sub, right) => (
                 <button
                   key={key}
@@ -1363,18 +1383,32 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                   {right}
                 </button>
               );
-              const venueThumb = (v) =>
-                v.primary_image ? (
-                  <img
-                    src={v.primary_image}
-                    alt=""
-                    className="h-12 w-12 shrink-0 rounded-xl object-cover bg-neutral-100"
-                  />
-                ) : (
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#edf2eb] text-sm font-semibold text-[#455d3b]">
+              // Google photo refs need the key-adding proxy (same rule as the
+              // hero); R2/storage URLs serve raw. Initial sits BEHIND the img
+              // so a dead URL degrades to the letter, never a broken glyph.
+              const venueThumb = (v) => {
+                const raw = v.primary_image || null;
+                const src = raw
+                  ? raw.includes("googleapis.com")
+                    ? `/api/place-photo?url=${encodeURIComponent(raw)}`
+                    : raw
+                  : null;
+                return (
+                  <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#edf2eb] text-sm font-semibold text-[#455d3b]">
                     {(v.name || "?").charAt(0).toUpperCase()}
+                    {src && (
+                      <img
+                        src={src}
+                        alt=""
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    )}
                   </span>
                 );
+              };
               const ratingChip = (v) =>
                 Number(v.rating) > 0 ? (
                   <span className="flex shrink-0 items-center gap-1 text-[12.5px] font-medium text-neutral-600">
@@ -1387,8 +1421,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               );
 
               if (mapFilter === "friends" && friendLens === "now") {
-                if (friendPins.length === 0) return empty("No friends out right now");
-                return friendPins.map((g) =>
+                const list = friendPins.filter((g) =>
+                  hit(g.venue.name, g.venue.suburb, g.entries[0].profile?.display_name)
+                );
+                if (list.length === 0) return empty("No friends out right now");
+                return list.map((g) =>
                   rowShell(
                     `now_${g.venue.id}`,
                     () => setSelectedVenue(g.venue),
@@ -1402,8 +1439,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 );
               }
               if (mapFilter === "friends" && friendLens === "past") {
-                if (friendPastPins.length === 0) return empty("No friend nights yet");
-                return friendPastPins.map((g) =>
+                const list = friendPastPins.filter((g) =>
+                  hit(g.venue.name, g.venue.suburb, g.venue.cuisine_bucket)
+                );
+                if (list.length === 0) return empty("No friend nights yet");
+                return list.map((g) =>
                   rowShell(
                     `fp_${g.venue.id}`,
                     () => handlePastTap(g),
@@ -1421,7 +1461,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 (mapFilter === "friends" && friendLens === "spots") ||
                 (mapFilter === "my_list" && myListLens === "spots")
               ) {
-                const list = mapFilter === "friends" ? friendSpots : mySpots;
+                const list = (
+                  mapFilter === "friends" ? friendSpots : mySpots
+                ).filter((s) => hit(s.title, s.place_name, s.category));
                 if (list.length === 0) return empty("No spots yet");
                 return list.map((s) =>
                   rowShell(
@@ -1437,8 +1479,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 );
               }
               if (mapFilter === "my_list" && myListLens === "been") {
-                if (myBeenPins.length === 0) return empty("Nowhere marked been yet");
-                return myBeenPins.map((g) =>
+                const list = myBeenPins.filter((g) =>
+                  hit(g.venue.name, g.venue.suburb, g.venue.cuisine_bucket)
+                );
+                if (list.length === 0) return empty("Nowhere marked been yet");
+                return list.map((g) =>
                   rowShell(
                     `mb_${g.venue.id}`,
                     () => handlePastTap(g),
@@ -1449,9 +1494,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                   )
                 );
               }
-              const venues = [...displayedPlottable].sort(
-                (a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)
-              );
+              const venues = displayedPlottable
+                .filter((v) => hit(v.name, v.suburb, v.cuisine_bucket))
+                .sort(
+                  (a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0)
+                );
               if (venues.length === 0) return empty("Nothing matches right now");
               return venues.map((v) =>
                 rowShell(
@@ -1465,6 +1512,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               );
             })()}
           </div>
+          {/* Readability wash for the floating controls (Sep 9, Mark) —
+              rows fade out behind the +, filter and map-toggle buttons. */}
+          <div className="pointer-events-none sticky bottom-0 -mt-28 h-28 bg-gradient-to-t from-white via-white/85 to-transparent" />
         </div>
       )}
       {!personFilter && !searchUi && !listView && mapFilter === "my_list" && myListLens === "not_been" && pastGroups !== null && displayedPlottable.length === 0 && (
@@ -1594,10 +1644,11 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           <button
             type="button"
             aria-label={listView ? "Show the map" : "Show as a list"}
-            onClick={() => setListView((v) => !v)}
-            className={`absolute left-4 z-[2050] flex h-11 w-11 items-center justify-center rounded-xl bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition ${
-              listView ? "bottom-[140px] lg:bottom-[18px]" : "bottom-[84px] lg:bottom-[74px]"
-            }`}
+            onClick={() => {
+              setListView((v) => !v);
+              setListQuery("");
+            }}
+            className="absolute left-4 bottom-[84px] z-[2050] flex h-11 w-11 items-center justify-center rounded-xl bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition lg:bottom-[74px]"
           >
             {listView ? (
               <MapIcon size={17} strokeWidth={1.8} />
