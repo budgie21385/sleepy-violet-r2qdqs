@@ -97,6 +97,13 @@ export function MediaViewer({
   }, []);
   const [railView, setRailView] = useState({ kind: "thread" });
   const [pickerFor, setPickerFor] = useState(null); // comment id with the inline ⊕ picker open
+  // PINCH ZOOM (Sep 19, Mark: "zoom on the images by using fingers"). Two
+  // fingers scale 1x-4x, one finger pans while zoomed. While zoomed, the
+  // other gestures stand down: no tap-to-close, no photo-step swipes, no
+  // swipe-down dismiss — pinching back under ~1x snaps clean and rearms
+  // them. Photos only; videos keep native controls.
+  const [zoom, setZoom] = useState({ s: 1, x: 0, y: 0 });
+  const gesture = useRef(null); // {mode:'pinch'|'pan', ...} while fingers are down
   const touch = useRef(null);
   const inputRef = useRef(null);
 
@@ -115,6 +122,7 @@ export function MediaViewer({
     setSheet(null);
     setRailView({ kind: "thread" });
     setPickerFor(null);
+    setZoom({ s: 1, x: 0, y: 0 });
     setLandscape(false);
   }, [photo.id]);
 
@@ -157,11 +165,79 @@ export function MediaViewer({
     .map(([e]) => e);
   const commentCount = comments ? comments.length : null;
 
+  function touchDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dyy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dyy);
+  }
+  function clampPan(v, scale, span) {
+    const limit = ((scale - 1) * span) / 2;
+    return Math.max(-limit, Math.min(limit, v));
+  }
   function onTouchStart(e) {
+    if (!isVideo && e.touches.length === 2) {
+      gesture.current = {
+        mode: "pinch",
+        startDist: touchDist(e.touches),
+        startScale: zoom.s,
+      };
+      touch.current = null;
+      return;
+    }
+    if (zoom.s > 1 && e.touches.length === 1) {
+      gesture.current = {
+        mode: "pan",
+        lastX: e.touches[0].clientX,
+        lastY: e.touches[0].clientY,
+      };
+      touch.current = null;
+      return;
+    }
     const t = e.touches[0];
     touch.current = t ? { x: t.clientX, y: t.clientY } : null;
   }
+  function onTouchMoveZoom(e) {
+    const g = gesture.current;
+    if (!g) return;
+    if (g.mode === "pinch" && e.touches.length === 2) {
+      const s = Math.min(
+        4,
+        Math.max(1, g.startScale * (touchDist(e.touches) / g.startDist))
+      );
+      setZoom((z) => ({
+        s,
+        x: s === 1 ? 0 : clampPan(z.x, s, window.innerWidth),
+        y: s === 1 ? 0 : clampPan(z.y, s, window.innerHeight),
+      }));
+    } else if (g.mode === "pan" && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - g.lastX;
+      const dyy = t.clientY - g.lastY;
+      g.lastX = t.clientX;
+      g.lastY = t.clientY;
+      setZoom((z) => ({
+        s: z.s,
+        x: clampPan(z.x + dx, z.s, window.innerWidth),
+        y: clampPan(z.y + dyy, z.s, window.innerHeight),
+      }));
+    }
+  }
   function onTouchEnd(e) {
+    if (gesture.current) {
+      if (e.touches.length === 1 && zoom.s > 1) {
+        // One finger lifted mid-pinch — glide into a pan with the survivor.
+        gesture.current = {
+          mode: "pan",
+          lastX: e.touches[0].clientX,
+          lastY: e.touches[0].clientY,
+        };
+      } else if (e.touches.length === 0) {
+        gesture.current = null;
+        setZoom((z) => (z.s <= 1.05 ? { s: 1, x: 0, y: 0 } : z));
+      }
+      return;
+    }
+    if (zoom.s > 1) return; // zoomed: steps and dismiss stand down
     if (!touch.current) return;
     const t = e.changedTouches[0];
     const dx = (t?.clientX ?? touch.current.x) - touch.current.x;
@@ -576,8 +652,10 @@ export function MediaViewer({
         className="absolute inset-x-0 top-0 transition-[bottom] duration-300 ease-out"
         style={{ bottom: sheetOpen && landscape && !isVideo ? "58%" : 0 }}
         onTouchStart={onTouchStart}
+        onTouchMove={onTouchMoveZoom}
         onTouchEnd={onTouchEnd}
         onClick={() => {
+          if (zoom.s > 1) return; // zoomed: taps pan territory, not exits
           if (sheetOpen) setSheet(null);
           else onClose();
         }}
@@ -602,6 +680,10 @@ export function MediaViewer({
               setLandscape(el.naturalWidth > el.naturalHeight);
             }}
             className="h-full w-full object-contain"
+            style={{
+              transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})`,
+              transition: gesture.current ? "none" : "transform 0.15s ease-out",
+            }}
           />
         )}
       </div>
