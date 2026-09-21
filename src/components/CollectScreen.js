@@ -278,10 +278,16 @@ export function CollectScreen({ token }) {
             ? recips.filter((uid) => uid !== me.id)
             : [ctx.owner_id];
         for (const uid of targets) {
-          sendPush(uid, "📸 New photos", body);
+          sendPush(uid, "📸 New photos", body, `/?night=${ctx.activity_id}`, {
+            kind: "photos",
+            data: { activityId: ctx.activity_id },
+          });
         }
       } catch {
-        sendPush(ctx.owner_id, "📸 New photos", body);
+        sendPush(ctx.owner_id, "📸 New photos", body, `/?night=${ctx.activity_id}`, {
+          kind: "photos",
+          data: { activityId: ctx.activity_id },
+        });
       }
       if (me && !me.isAnon) ensureNightTwin(me.id);
     }
@@ -383,7 +389,11 @@ export function CollectScreen({ token }) {
             } from ${ctx.venue_name}`
           : `${nm} is in at ${ctx.venue_name}`;
         for (const r of recips || []) {
-          if (r !== uid) sendPush(r, "🎉 They joined the photos", body);
+          if (r !== uid)
+            sendPush(r, "🎉 They joined the photos", body, `/?night=${ctx.activity_id}`, {
+              kind: "photos",
+              data: { activityId: ctx.activity_id },
+            });
         }
       } catch {}
       // Straight through to the photos (Mark, July 25: no gate ceremony):

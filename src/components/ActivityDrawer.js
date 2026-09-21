@@ -7,7 +7,7 @@
 // Items with their relevant timestamp after last_seen are NEW. Updated when
 // the drawer closes. Extracted verbatim from App.js (July 10, 2026).
 import { useState, useEffect, useRef } from "react";
-import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock, CalendarDays } from "lucide-react";
+import { X, UserPlus, Check, MapPin, MessageCircle, Camera, Clock, CalendarDays, Bell } from "lucide-react";
 import { pushState, enablePush, sendPush } from "../lib/push";
 import { spotCategory } from "./SpotSheet";
 import {
@@ -18,6 +18,14 @@ import {
 
 // Priority tiers for the Activity list (Mark, July 18): items that deal
 // with the person directly outrank ambient news regardless of age.
+// INBOX CUTOVER (Sep 22 — the notifications table, option B ruled Sep 7).
+// Kinds listed here render from the inbox table for rows born after the
+// epoch; their DERIVED twins are capped to before it. One source per item,
+// no dupes, history preserved. Every other kind's rows accumulate silently
+// until that kind is flipped over in a later pass.
+const INBOX_EPOCH_MS = new Date("2026-09-23T00:00:00Z").getTime();
+const INBOX_RENDER_KINDS = new Set(["comment", "photos", "venue_share"]);
+
 const KIND_WEIGHT = {
   tag_nudge: 0, // someone checked you in — answer them
   request_received: 0, // friend request — answer them
@@ -164,6 +172,19 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
   function dismiss(ids) {
     dismissItems(ids);
     setDismissed(readDismissed());
+    // Inbox rows (nx_<id>) dismiss SERVER-SIDE too — this is the whole
+    // point of the table: dismissed follows the account, not the device.
+    const inboxIds = ids
+      .filter((id) => String(id).startsWith("nx_"))
+      .map((id) => Number(String(id).slice(3)))
+      .filter((n) => Number.isFinite(n));
+    if (inboxIds.length > 0) {
+      supabase
+        .from("notifications")
+        .update({ dismissed_at: new Date().toISOString() })
+        .in("id", inboxIds)
+        .then(() => {}, () => {});
+    }
   }
   const [acting, setActing] = useState(null); // friendship.id mid-update
   const [thread, setThread] = useState(null); // open comment thread sheet
@@ -1733,6 +1754,61 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       return out;
     })();
 
+    // ---- INBOX (Sep 22) — rows written at send time by /api/send-push and
+    // the cron. Render only cutover kinds past the epoch (derived twins
+    // cover everything before it); mark fetched rows read server-side so
+    // the unread state follows the account.
+    const inboxP = (async () => {
+      const out = [];
+      const { data: rows } = await supabase
+        .from("notifications")
+        .select("*")
+        .is("dismissed_at", null)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (!rows || rows.length === 0) return out;
+      const unread = rows.filter((r) => !r.read_at).map((r) => r.id);
+      if (unread.length > 0) {
+        supabase
+          .from("notifications")
+          .update({ read_at: new Date().toISOString() })
+          .in("id", unread)
+          .then(() => {}, () => {});
+      }
+      const show = rows.filter(
+        (r) =>
+          INBOX_RENDER_KINDS.has(r.kind) &&
+          new Date(r.created_at).getTime() >= INBOX_EPOCH_MS
+      );
+      if (show.length === 0) return out;
+      const aIds = Array.from(
+        new Set(show.map((r) => r.actor_id).filter(Boolean))
+      );
+      let pById = {};
+      if (aIds.length > 0) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url")
+          .in("id", aIds);
+        pById = Object.fromEntries((profs || []).map((p) => [p.id, p]));
+      }
+      for (const r of show) {
+        out.push({
+          kind: "inbox",
+          id: `nx_${r.id}`,
+          inboxKind: r.kind,
+          title: r.title,
+          body: r.body,
+          url: r.url,
+          data: r.data || {},
+          profile: r.actor_id ? pById[r.actor_id] || null : null,
+          otherId: r.actor_id || null,
+          timestamp: r.created_at,
+        });
+      }
+      return out;
+    })();
+
     const fuse = (p, name, empty = []) =>
       p.catch((e) => {
         console.error(`Drawer block failed: ${name}`, e);
@@ -1759,6 +1835,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       tagAcceptedItems,
       eventReminderItems,
       spotAddedItems,
+      inboxItems,
     ] = await Promise.all([
       fuse(requestsP, "requests", [[], []]),
       fuse(submittedP, "submitted"),
@@ -1780,6 +1857,7 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       fuse(tagAcceptedP, "tagAccepted"),
       fuse(eventReminderP, "eventReminders"),
       fuse(spotAddedP, "spotsAdded"),
+      fuse(inboxP, "inbox"),
     ]);
 
     const all = [
@@ -1791,7 +1869,11 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...connectItems,
       ...inviteItems,
       ...checkinItems,
-      ...commentItems,
+      // Cutover kinds: derived twins cover history BEFORE the epoch, the
+      // inbox owns everything after — one source per item, never both.
+      ...commentItems.filter(
+        (i) => new Date(i.timestamp).getTime() < INBOX_EPOCH_MS
+      ),
       ...reactionItems,
       ...tagNudgeItems,
       ...photoNudgeItems,
@@ -1799,12 +1881,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
       ...reminderItems,
       ...friendNewsItems,
       ...joinReqItems,
-      ...venueShareItems,
-      ...guestUploadItems,
+      ...venueShareItems.filter(
+        (i) => new Date(i.timestamp).getTime() < INBOX_EPOCH_MS
+      ),
+      ...guestUploadItems.filter(
+        (i) => new Date(i.timestamp).getTime() < INBOX_EPOCH_MS
+      ),
       ...meetPeopleItems,
       ...tagAcceptedItems,
       ...eventReminderItems,
       ...spotAddedItems,
+      ...inboxItems,
     ]
       // Weight before recency (Mark, July 18): items that DEAL WITH the
       // person — a pending tag, a friend request — outrank ambient news no
@@ -2973,6 +3060,40 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <p className="text-[11px] text-neutral-500 truncate">“{item.body}”{whenSuffix}</p>
         </div>
         <MessageCircle size={16} className="text-[#455d3b] shrink-0" />
+      </button>
+    );
+  }
+
+  if (item.kind === "inbox") {
+    // A notification ROW — rendered from the table, tapped via the same
+    // deep link the OS push would use (?night= / ?v= are handled at boot).
+    const clickable = item.url && item.url !== "/";
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          if (clickable) window.location.href = item.url;
+        }}
+        className={`w-full text-left rounded-2xl ${bg} border border-neutral-100 p-3 flex items-center gap-3 ${
+          clickable ? "hover:bg-neutral-50 active:scale-[0.99]" : ""
+        } transition`}
+      >
+        {item.profile ? (
+          <FriendAvatar profile={item.profile} small />
+        ) : (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+            <Bell size={15} />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-neutral-900">
+            <strong className="font-medium">{item.title}</strong>
+          </p>
+          {item.body && (
+            <p className="text-[12px] text-neutral-600 truncate">{item.body}</p>
+          )}
+          <p className="text-[11px] text-neutral-500">{whenSuffix ? whenSuffix.replace(/^ · /, "") : ""}</p>
+        </div>
       </button>
     );
   }

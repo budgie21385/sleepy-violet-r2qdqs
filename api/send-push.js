@@ -37,7 +37,7 @@ export default async function handler(req, res) {
   const actor = userData?.user;
   if (userErr || !actor) return res.status(401).json({ error: "bad token" });
 
-  const { targetUserId, title, body, url } = req.body || {};
+  const { targetUserId, title, body, url, kind, data } = req.body || {};
   if (!targetUserId || !title) {
     return res.status(400).json({ error: "targetUserId and title required" });
   }
@@ -64,6 +64,24 @@ export default async function handler(req, res) {
     }
   } catch {
     /* fail open */
+  }
+
+  // INBOX ROW (Sep 22 — the notifications table): every push writes its
+  // drawer twin HERE, at the funnel, so parity is automatic for every
+  // future push — including recipients with no live subscription (the row
+  // is the notification; the push is just the buzz). Fails open pre-SQL.
+  try {
+    await admin.from("notifications").insert({
+      user_id: targetUserId,
+      actor_id: actor.id,
+      kind: typeof kind === "string" && kind ? kind : "push",
+      title,
+      body: body || null,
+      url: url || null,
+      data: data && typeof data === "object" ? data : {},
+    });
+  } catch {
+    /* table not there yet — pushes must not break */
   }
 
   webpush.setVapidDetails("mailto:mark@sayi.do", pub, priv);

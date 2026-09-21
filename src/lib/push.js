@@ -93,7 +93,11 @@ export async function enablePush(userId) {
 // intermittent and left no trace. keepalive lets the request outlive the page,
 // the same guarantee sendBeacon gives. (Cap: 64KB of body across all keepalive
 // requests in flight — these are a few hundred bytes.)
-export async function sendPush(targetUserId, title, body, url = "/") {
+// opts (Sep 22, inbox table): { kind, data } ride to the endpoint, which
+// writes the notification row — kind decides how the drawer renders it,
+// data carries deep-link ids. Call sites without opts still get a generic
+// row (kind "push"), so parity holds even for lazy senders.
+export async function sendPush(targetUserId, title, body, url = "/", opts = {}) {
   try {
     if (!targetUserId) return;
     const { data: sess } = await supabase.auth.getSession();
@@ -106,7 +110,14 @@ export async function sendPush(targetUserId, title, body, url = "/") {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ targetUserId, title, body, url }),
+      body: JSON.stringify({
+        targetUserId,
+        title,
+        body,
+        url,
+        kind: opts.kind,
+        data: opts.data,
+      }),
     }).catch(() => {});
   } catch {}
 }

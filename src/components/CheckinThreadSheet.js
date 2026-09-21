@@ -1106,7 +1106,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       targets.add(lightbox.user_id); // photo owner always included
       for (const t of targets) {
         if (t && t !== userId) {
-          sendPush(t, "New comment on a photo", body);
+          sendPush(t, "New comment on a photo", body, `/?night=${thread.activityId}`, {
+            kind: "comment",
+            data: { activityId: thread.activityId },
+          });
         }
       }
     }
@@ -1181,7 +1184,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           landed === 1 ? "photo" : "photos"
         } at ${thread.venueName}`;
         for (const p of nightPeople) {
-          if (p.id !== userId) sendPush(p.id, "📸 New photos", body);
+          if (p.id !== userId)
+            sendPush(p.id, "📸 New photos", body, `/?night=${thread.activityId}`, {
+              kind: "photos",
+              data: { activityId: thread.activityId },
+            });
         }
       });
     }
@@ -1505,7 +1512,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       targets.add(thread.ownerId);
       for (const t of targets) {
         if (t && t !== userId) {
-          sendPush(t, "New comment", body);
+          sendPush(t, "New comment", body, `/?night=${thread.activityId}`, {
+            kind: "comment",
+            data: { activityId: thread.activityId },
+          });
         }
       }
     }

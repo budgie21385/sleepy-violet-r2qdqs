@@ -60,7 +60,19 @@ export default async function handler(req, res) {
 
   // Send to every subscription a user has; prune dead ones. Quietly a
   // no-op for users with no subscriptions (never enabled push).
-  async function push(userId, title, body) {
+  async function push(userId, title, body, kind = "push") {
+    // Inbox twin first (Sep 22): the row IS the notification — it lands
+    // even for users who never enabled push. Fails open pre-SQL.
+    try {
+      await admin.from("notifications").insert({
+        user_id: userId,
+        actor_id: null, // the clock did it
+        kind,
+        title,
+        body: body || null,
+        url: "/",
+      });
+    } catch {}
     const { data: subs } = await admin
       .from("push_subscriptions")
       .select("endpoint, p256dh, auth")
@@ -123,7 +135,8 @@ export default async function handler(req, res) {
           summary.reminders += await push(
             part.user_id,
             `You're going to ${vName} 🎉`,
-            `${timeTxt}, see you there`
+            `${timeTxt}, see you there`,
+            "plan_reminder"
           );
         }
       }
@@ -169,7 +182,8 @@ export default async function handler(req, res) {
             summary.didYouGo += await push(
               part.user_id,
               `Did you go to ${vName}?`,
-              "Tell us in Flanit, it lands in your Been list"
+              "Tell us in Flanit, it lands in your Been list",
+              "did_you_go"
             );
           }
         }
@@ -210,7 +224,8 @@ export default async function handler(req, res) {
               : `Collect photos from ${vName}?`,
             a.is_album
               ? "Last night's album, while it's still fresh"
-              : "Create the album while the night's still fresh"
+              : "Create the album while the night's still fresh",
+            "photo_nudge"
           );
         }
       }
@@ -239,7 +254,8 @@ export default async function handler(req, res) {
         summary.timeups += await push(
           s.host_user_id,
           "⏰ Time's up on your session",
-          `${submitted} sent picks, see the results`
+          `${submitted} sent picks, see the results`,
+          "session_timeup"
         );
       }
     }
@@ -277,7 +293,8 @@ export default async function handler(req, res) {
           summary.eventReminders += await push(
             uid,
             `${what} is tonight 🎉`,
-            `${timeTxt}${where}, see you there`
+            `${timeTxt}${where}, see you there`,
+            "event_reminder"
           );
         }
       }

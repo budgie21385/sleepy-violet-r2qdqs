@@ -408,7 +408,9 @@ export function MapVenueSheet({
     sendPush(
       friendId,
       "📍 A spot for you",
-      `${venue.name} — shared with you on Flanit`
+      `${venue.name}, shared with you on Flanit`,
+      `/?v=${venue.id}`,
+      { kind: "venue_share", data: { venueId: venue.id } }
     );
   }
 
