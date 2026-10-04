@@ -24,6 +24,29 @@ const collectPage = window.location.pathname.match(/^\/c\/([A-Za-z0-9_-]+)/);
 // here — source IS intent), /events = generic skin. Same component.
 const landingPage = window.location.pathname.match(/^\/(weddings|events)\/?$/);
 
+// MARKETING HOMEPAGE (Oct 4 — the new brand page, static at /home/).
+// Signed-OUT visitors hitting bare "/" get the homepage BEFORE React mounts
+// (no flash). Everything else passes through: any query string (?signin=1
+// is the homepage's own CTA, ?night/?v are deep links), any path (/s/, /c/,
+// /v/, /weddings...), and anyone with a Supabase session in localStorage —
+// including anon guests mid-flow, who belong in the app, not on marketing.
+const hasSession = (() => {
+  try {
+    return Object.keys(localStorage).some(
+      (k) => k.startsWith("sb-") && k.includes("auth-token")
+    );
+  } catch {
+    return false;
+  }
+})();
+if (
+  window.location.pathname === "/" &&
+  !window.location.search &&
+  !hasSession
+) {
+  window.location.replace("/home/");
+}
+
 // Keep the push service worker alive across visits (push-only SW — it never
 // intercepts fetches, so it can't serve stale bundles).
 if ("serviceWorker" in navigator) {
