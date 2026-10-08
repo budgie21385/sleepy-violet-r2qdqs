@@ -1024,6 +1024,17 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
         );
         const v = (vts || []).find((x) => x.id === s.decided_venue_id);
         if (v?.name) venueName = v.name;
+        // Pick Together sessions have NO shortlist rows, so the RPC comes
+        // back empty and the item read "your spot" (Oct 9 field find).
+        // Venue reads are open — resolve directly.
+        if (venueName === "your spot") {
+          const { data: dv } = await supabase
+            .from("venues")
+            .select("name")
+            .eq("id", s.decided_venue_id)
+            .maybeSingle();
+          if (dv?.name) venueName = dv.name;
+        }
         items.push({
           kind: "plan_reminder",
           id: `rem_${s.id}`,

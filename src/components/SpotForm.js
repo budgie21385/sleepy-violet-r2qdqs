@@ -71,11 +71,13 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
 
   async function pickResult(r) {
     if (r.kind === "db") {
+      // Guard null coords: Number(null) is 0, which is "finite" and would
+      // pin the spot at 0,0 in the Atlantic. NaN falls through to mapCenter.
       setPicked({
         name: r.venue.name,
         venueId: r.venue.id,
-        lat: Number(r.venue.latitude),
-        lng: Number(r.venue.longitude),
+        lat: r.venue.latitude == null ? NaN : Number(r.venue.latitude),
+        lng: r.venue.longitude == null ? NaN : Number(r.venue.longitude),
       });
       return;
     }
@@ -147,7 +149,12 @@ export function SpotForm({ userId, mapCenter, onClose, onCreated, showToast }) {
     } catch (e) {
       console.error("Spot save failed:", e);
       await deleteSpotPhotos(uploaded);
-      showToast?.("Couldn't save that spot");
+      // Surface the real reason — field-debuggable from a phone (Oct 9:
+      // saves failing in prod with no console in reach).
+      const why = e?.message || e?.error_description || "";
+      showToast?.(
+        why ? `Couldn't save: ${why.slice(0, 80)}` : "Couldn't save that spot"
+      );
       setSaving(false);
     }
   }
