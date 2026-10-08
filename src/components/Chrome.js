@@ -4,123 +4,45 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 // HeartHandshake/ListChecks = the mode icons everywhere (Aug 21, Mark:
 // "Why did you not update all the instances" — all-surfaces rule).
-import { UserPlus, MapPin, Upload, X, Plus, Heart, Bell, User, HeartHandshake, ListChecks, CalendarDays } from "lucide-react";
+import { MapPin, X, Plus, Heart, Bell, User, CalendarDays } from "lucide-react";
+import { WhenSheet } from "./WhenSheet";
 
+// THE ONE + (Oct 9 doctrine): the FAB's option menu RETIRED — the + now
+// lives on EVERY tab and opens the when-sheet, the single create door
+// asking the only question: "When?". Per-tab tilts and extra sections
+// live inside WhenSheet.
 export function FloatingActionButton({
   tab,
-  showToast,
-  onAddFriend,
-  onImportMap,
-  onCheckIn,
+  onNow,
+  onComingUp,
+  onPast,
   onRightNow,
   onShortlist,
   onAddSpot,
+  onImportMap,
+  onAddFriend,
 }) {
   const [open, setOpen] = useState(false);
-
-  // Don't render outside Profile + Map tabs.
-  if (tab !== "profile" && tab !== "map") return null;
-
-  const profileOptions = [
-    {
-      key: "check_in",
-      icon: <MapPin size={16} />,
-      label: "Check in",
-      action: () => {
-        setOpen(false);
-        onCheckIn();
-      },
-    },
-    {
-      key: "add_friend",
-      icon: <UserPlus size={16} />,
-      label: "Add friend",
-      action: () => {
-        setOpen(false);
-        onAddFriend();
-      },
-    },
-    // "Add a venue" left the FAB July 11, 2026 — venue search/add lives behind
-    // the magnifier in the map header now (search-first reframe).
-    {
-      key: "import_map",
-      icon: <Upload size={16} />,
-      label: "Import a map",
-      action: () => {
-        setOpen(false);
-        onImportMap();
-      },
-    },
-  ];
-
-  // Map FAB leads with the two session starters (Mark, July 24) — the map
-  // is where "where should we go?" actually gets asked.
-  const mapOptions = [
-    {
-      key: "right_now",
-      icon: <HeartHandshake size={16} />,
-      label: "Pick together",
-      action: () => {
-        setOpen(false);
-        onRightNow?.();
-      },
-    },
-    {
-      key: "shortlist",
-      icon: <ListChecks size={16} />,
-      label: "Send a shortlist",
-      action: () => {
-        setOpen(false);
-        onShortlist?.();
-      },
-    },
-    // Spots (Sep 6) — the friend knowledge layer's only add door.
-    {
-      key: "add_spot",
-      icon: <MapPin size={16} />,
-      label: "Add a spot",
-      action: () => {
-        setOpen(false);
-        onAddSpot?.();
-      },
-    },
-    ...profileOptions.filter((o) => o.key !== "add_friend"),
-  ];
-  const options = tab === "profile" ? profileOptions : mapOptions;
 
   return (
     <>
       {open && (
-        <button
-          type="button"
-          aria-label="Close add menu"
-          onClick={() => setOpen(false)}
-          className="fixed inset-0 z-[3050] bg-black/25"
+        <WhenSheet
+          tab={tab}
+          onClose={() => setOpen(false)}
+          onNow={onNow}
+          onComingUp={onComingUp}
+          onPast={onPast}
+          onRightNow={onRightNow}
+          onShortlist={onShortlist}
+          onAddSpot={onAddSpot}
+          onImportMap={onImportMap}
+          onAddFriend={onAddFriend}
         />
-      )}
-      {open && (
-        <div className="fixed bottom-[136px] right-4 z-[3060] flex flex-col items-end gap-2 lg:bottom-[86px]">
-          {options.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={opt.action}
-              className="flex items-center gap-2 bg-white border border-neutral-200 rounded-full pl-3 pr-4 py-2 text-sm font-medium shadow-sm active:scale-95 transition"
-            >
-              <span className="text-neutral-600">{opt.icon}</span>
-              <span>{opt.label}</span>
-              {opt.soon && (
-                <span className="text-[10px] bg-amber-50 text-amber-700 rounded-full px-2 py-0.5 font-medium ml-1">
-                  soon
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
       )}
       <button
         type="button"
-        aria-label={open ? "Close add menu" : "Open add menu"}
+        aria-label={open ? "Close" : "Add"}
         onClick={() => setOpen((v) => !v)}
         className={`fixed bottom-20 right-4 z-[3060] w-12 h-12 rounded-full flex items-center justify-center shadow-md active:scale-95 transition lg:bottom-[18px] ${
           open ? "bg-neutral-900 text-white" : "bg-[#455d3b] text-white"

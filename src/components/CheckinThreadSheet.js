@@ -4,7 +4,7 @@
 // commenter's own friends see nothing (see activity_comments_table.sql).
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Send, UserPlus, Plus, Settings, Home } from "lucide-react";
+import { X, Send, Plus, Settings, Home } from "lucide-react";
 
 const TAG_SEARCH_THRESHOLD = 8; // chips-only below this many friends
 const GRID_CAP = 9; // photos shown before "show more"
@@ -19,7 +19,7 @@ function whenLine(ts) {
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { MediaViewer } from "./MediaViewer";
-import { timeAgoShort, whenAgo, FRESH_MS } from "../lib/checkins";
+import { timeAgoShort, whenAgo, FRESH_MS, nightTense } from "../lib/checkins";
 import {
   searchPlaces,
   addGooglePlace,
@@ -415,11 +415,6 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // Street address of a personal-place night — RLS returns it only to the
   // guest list, so non-null means this viewer is allowed to see it.
   const [privateAddress, setPrivateAddress] = useState(null);
-  // Collect-link existence for the card-face signpost (Aug 30). null =
-  // loading (row hidden), false = none yet ("Set up"), truthy = minted
-  // ("Share"). Re-checked when the card view fronts, so minting or revoking
-  // in settings updates the row on the way back.
-  const [faceLink, setFaceLink] = useState(null);
   const iAmRootOwner = nightPerms?.ownerId === userId;
   const mayInvite = !nightPerms || iAmRootOwner || nightPerms.canInvite;
   const mayShareLink = mayInvite;
@@ -435,25 +430,6 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         .eq("revoked", false)
         .maybeSingle();
       if (!cancelled) setCollectLink(data || false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [view, uploadTargetId]);
-
-  // Card-face signpost state — checked when the card view fronts, so a mint
-  // or revoke in settings is reflected on the way back.
-  useEffect(() => {
-    if (view !== "card" || !uploadTargetId) return;
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from("checkin_collect_links")
-        .select("id")
-        .eq("activity_id", uploadTargetId)
-        .eq("revoked", false)
-        .maybeSingle();
-      if (!cancelled) setFaceLink(data || false);
     })();
     return () => {
       cancelled = true;
@@ -649,7 +625,7 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
       }
       const { data: root } = await supabase
         .from("activities")
-        .select("id, user_id, guests_can_invite, is_album")
+        .select("id, user_id, guests_can_invite, is_album, show_live, show_map")
         .eq("id", rootId)
         .maybeSingle();
       // PRIVATE ADDRESS (Aug 30) — the night at a personal place. RLS only
@@ -667,6 +643,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           canInvite: root.guests_can_invite !== false,
           // ALBUM lives on the NIGHT (Aug 21, Mark) — the root's flag.
           isAlbum: root.is_album === true,
+          showLive: root.show_live === true,
+          // Oct 9 doctrine: one Show-on-map switch (live map while on,
+          // memory pin after). Default-true column; false = pulled.
+          showMap: root.show_map !== false,
         });
       }
     })();
@@ -683,21 +663,73 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // only start from album mode anyway, so the flag already covers it.)
   const albumNight =
     (nightPerms?.isAlbum ?? false) || (photos && photos.length > 0);
-  const [albumBusy, setAlbumBusy] = useState(false);
-  async function createAlbum() {
-    if (albumBusy) return;
-    setAlbumBusy(true);
-    const { error } = await supabase.rpc("create_night_album", {
-      p_activity_id: thread.activityId,
-    });
-    setAlbumBusy(false);
-    if (error) {
-      console.error("Create album failed:", error);
-      showToast?.("Couldn't create the album");
+  // THE NIGHT'S TENSE (Oct 9 doctrine) — derived from the clock, never
+  // stored. Drives the card's one variable line, the kicked-on wording,
+  // and which settings rows render. Auto-ends at the 4am after the start.
+  const tense = nightTense(thread.timestamp);
+  // (createAlbum() retired Oct 9 — the album births silently from the
+  // first photo in addPhotos, or from minting the collect link.)
+
+  // THIS NIGHT settings (Oct 9 doctrine): When is editable in every tense
+  // (reschedule a plan, backdate a memory) and one Show-on-map switch
+  // covers the live map now and the memory pin later. Root-owner writes.
+  const [whenEdit, setWhenEdit] = useState(false);
+  const [whenDraft, setWhenDraft] = useState("");
+  const [whenBusy, setWhenBusy] = useState(false);
+  const [mapBusy, setMapBusy] = useState(false);
+  function toLocalInput(ts) {
+    const d = new Date(ts);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+      d.getDate()
+    )}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  async function saveWhen() {
+    if (!nightPerms || whenBusy || !iAmRootOwner || !whenDraft) return;
+    const next = new Date(whenDraft);
+    if (isNaN(next.getTime())) return;
+    setWhenBusy(true);
+    const { data: rows, error } = await supabase
+      .from("activities")
+      .update({ created_at: next.toISOString() })
+      .eq("id", nightPerms.rootId)
+      .select("id");
+    setWhenBusy(false);
+    if (error || !rows || rows.length === 0) {
+      console.error("When update failed:", error);
+      showToast?.("Couldn't change the date");
       return;
     }
-    setNightPerms((prev) => (prev ? { ...prev, isAlbum: true } : prev));
-    showToast?.("Album ready — add your photos");
+    setWhenEdit(false);
+    // The open card still shows the old time (thread.timestamp rides the
+    // opener's props) — it corrects everywhere on next load.
+    showToast?.("Date updated");
+  }
+  async function toggleShowMap() {
+    if (!nightPerms || mapBusy || !iAmRootOwner) return;
+    const next = !nightPerms.showMap;
+    setMapBusy(true);
+    // One user concept, two columns: show_map is the memory pin; show_live
+    // keeps meaning "broadcast while fresh" and follows the switch except
+    // on past nights (nothing live to broadcast).
+    const patch =
+      tense === "past" ? { show_map: next } : { show_map: next, show_live: next };
+    const { data: rows, error } = await supabase
+      .from("activities")
+      .update(patch)
+      .eq("id", nightPerms.rootId)
+      .select("id");
+    setMapBusy(false);
+    if (error || !rows || rows.length === 0) {
+      console.error("Show-on-map toggle failed:", error);
+      showToast?.("Couldn't change that");
+      return;
+    }
+    setNightPerms((prev) =>
+      prev
+        ? { ...prev, showMap: next, ...(tense !== "past" ? { showLive: next } : {}) }
+        : prev
+    );
   }
 
   async function togglePerm() {
@@ -1145,6 +1177,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // shouldn't make you watch). The store keeps tiles alive across close/reopen.
   function addPhotos(fileList) {
     if (!uploadTargetId) return;
+    // FIRST PHOTO BIRTHS THE ALBUM (Oct 9 doctrine) — silent, no toast, no
+    // modal: the photos arriving ARE the announcement. Fire-and-forget; the
+    // flag flip also unlocks the collect link in settings.
+    if (!albumNight) {
+      supabase
+        .rpc("create_night_album", { p_activity_id: thread.activityId })
+        .then(({ error }) => {
+          if (!error)
+            setNightPerms((prev) =>
+              prev ? { ...prev, isAlbum: true } : prev
+            );
+        });
+    }
     const files = Array.from(fileList || []).slice(0, MAX_PHOTOS_PER_BATCH);
     const promises = [];
     for (const file of files) {
@@ -1365,8 +1410,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // check-in where tagging was skipped in the moment. Same consent flow:
   // the friend gets the nudge; accepting creates THEIR twin for that night,
   // which the cluster merge folds back into this very card.
-  async function openTagPicker() {
-    setView((v) => (v === "add" ? "card" : "add"));
+  // Loader only (Oct 9: the separate "add" view retired — the combined
+  // people screen renders these rows under the night's list).
+  async function loadTagFriends() {
     if (tagFriends !== null) return;
     const { data: fr } = await supabase
       .from("friendships")
@@ -1647,13 +1693,19 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   about places, and that's where the places are. Any
                   participant, per the rule that adding a place isn't an
                   invitation. */}
+              {/* Oct 9 doctrine: the kicked-on link is the location
+                  TIMELINE, worded by tense — one row on every card. */}
               {(isOwner || uploadTargetId) && (
                 <button
                   type="button"
                   onClick={() => setView("place")}
                   className="mt-0.5 text-[11px] font-medium text-[#455d3b]"
                 >
-                  + we went somewhere else
+                  {tense === "now"
+                    ? "+ kicked on somewhere?"
+                    : tense === "coming_up"
+                    ? "+ add another stop"
+                    : "+ we went somewhere else"}
                 </button>
               )}
             </div>
@@ -1685,51 +1737,74 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   {nightPeople.length > AVATAR_CAP && (
                     <button
                       type="button"
-                      onClick={() => setView("people")}
+                      onClick={() => {
+                        loadTagFriends();
+                        setView("people");
+                      }}
                       className="ml-0.5 flex h-7 min-w-7 items-center justify-center rounded-full bg-[#edf2eb] px-1.5 text-[11px] font-medium text-[#455d3b]"
                     >
                       +{nightPeople.length - AVATAR_CAP}
                     </button>
                   )}
+                  {/* Oct 9 doctrine: "add more" pill retired — View all
+                      became "View / add", ONE people screen that both
+                      lists the night and adds friends to it. */}
                   <button
                     type="button"
-                    onClick={() => setView(view === "people" ? "card" : "people")}
-                    className="ml-1 text-[11px] font-medium text-neutral-400"
+                    onClick={() => {
+                      if (view === "people") {
+                        setView("card");
+                      } else {
+                        loadTagFriends();
+                        setView("people");
+                      }
+                    }}
+                    className="ml-1 text-[11px] font-medium text-[#455d3b]"
                   >
-                    View all
+                    View / add
                   </button>
-                  {(isOwner || uploadTargetId) && mayInvite && (
-                    <button
-                      type="button"
-                      onClick={openTagPicker}
-                      className="ml-auto mr-0.5 inline-flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1 text-xs font-medium text-[#455d3b] active:scale-95 transition"
-                    >
-                      <UserPlus size={13} /> add more
-                    </button>
-                  )}
                   {(isOwner || uploadTargetId) && (
                     <button
                       type="button"
                       aria-label="Check-in settings"
                       onClick={() => setView("settings")}
-                      className={`${
-                        (isOwner || uploadTargetId) && mayInvite
-                          ? "ml-1"
-                          : "ml-auto"
-                      } mr-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 active:scale-95 transition`}
+                      className="ml-auto mr-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 active:scale-95 transition"
                     >
                       <Settings size={13} />
                     </button>
                   )}
                 </div>
               )}
+              {/* THE ONE VARIABLE LINE (Oct 9 doctrine) — the only part of
+                  the card that changes with tense. */}
               <p className="text-[11px] text-neutral-500">
-                {whenLine(thread.timestamp)} · only{" "}
+                {tense === "now" ? (
+                  <>
+                    <span className="font-medium text-[#455d3b]">
+                      ● happening now
+                    </span>
+                    {nightPerms?.showMap !== false && nightPerms?.showLive
+                      ? " · on the live map"
+                      : ""}
+                  </>
+                ) : tense === "coming_up" ? (
+                  <>
+                    🗓 {whenLine(thread.timestamp)}
+                    {nightPerms?.showMap !== false && nightPerms?.showLive
+                      ? " · on the live map when it starts"
+                      : ""}
+                  </>
+                ) : (
+                  <>
+                    {whenLine(thread.timestamp)}
+                    {nightPerms?.showMap !== false ? " · on your map" : ""}
+                  </>
+                )}{" "}
+                · only{" "}
                 {thread.ownerName === "You"
                   ? "your"
                   : `${thread.ownerName}'s`}{" "}
                 friends see this
-
               </p>
               {/* COVER LINE (Aug 21, Mark): in album mode, the night's first
                   comment doubles as the album's cover copy — the words that
@@ -1742,81 +1817,8 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
           </div>
         </div>
 
-        {/* Add-people view (Mark's mock): friends as ROWS with Add buttons,
-            not a chip cloud. Collect link section lands here in Stage 2. */}
-        {view === "add" && (isOwner || uploadTargetId) && (
-          <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-            <button
-              type="button"
-              onClick={() => setView("card")}
-              className="mb-3 text-xs font-medium text-[#455d3b]"
-            >
-              ‹ Back
-            </button>
-            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-              Friends on Flanit
-            </p>
-            {tagFriends === null && (
-              <p className="text-xs text-neutral-400">Loading friends…</p>
-            )}
-            {tagFriends !== null && tagFriends.length === 0 && (
-              <p className="text-xs text-neutral-400">
-                No friends on Flanit yet.
-              </p>
-            )}
-            {tagFriends !== null && tagFriends.length > 0 && (
-              <>
-                {tagFriends.length > TAG_SEARCH_THRESHOLD && (
-                  <input
-                    value={tagQ}
-                    onChange={(e) => setTagQ(e.target.value)}
-                    placeholder="Search friends"
-                    className="mb-3 w-full rounded-full border border-neutral-200 px-4 py-2 text-base focus:outline-none focus:border-[#455d3b]"
-                  />
-                )}
-                <div className="space-y-2.5">
-                  {tagFriends
-                    .filter((f) => {
-                      const q = tagQ.trim().toLowerCase();
-                      return (
-                        !q ||
-                        (f.display_name || "").toLowerCase().includes(q) ||
-                        (f.username || "").toLowerCase().includes(q)
-                      );
-                    })
-                    .map((f) => {
-                      const on = taggedIds.has(f.id);
-                      const accepted = tagStatusById[f.id] === "accepted";
-                      return (
-                        <div key={f.id} className="flex items-center gap-3">
-                          <FriendAvatar profile={f} small />
-                          <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
-                            {f.display_name || "Someone"}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => toggleTag(f.id)}
-                            className={`shrink-0 rounded-full text-xs font-medium px-3 py-1.5 active:scale-95 transition ${
-                              on && accepted
-                                ? "bg-[#455d3b] text-white"
-                                : on
-                                ? "border border-[#455d3b] text-[#455d3b]"
-                                : "bg-[#455d3b] text-white"
-                            }`}
-                          >
-                            {on ? (accepted ? "Added ✓" : "Invited") : "Add"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                </div>
-                <p className="mt-1.5 text-[10px] text-neutral-400">
-                  They'll be asked before their friends see anything.
-                </p>
-              </>
-            )}
-          </div>
-        )}
+        {/* (Oct 9 doctrine: the separate add-people view retired — its rows
+            render inside the combined View / add people screen below.) */}
         {/* ADD A PLACE — same search as the add-a-night form (lib/venueSearch),
             so anywhere Google knows counts, not just venues already on Flanit. */}
         {view === "place" && (isOwner || uploadTargetId) && (
@@ -1947,25 +1949,97 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             >
               ‹ Back
             </button>
-            {mayShareLink && !albumNight ? (
-              <div>
+            {/* THIS NIGHT (Oct 9 doctrine): When shows the real date and is
+                editable in every tense; one Show-on-map switch covers the
+                live map now and the memory pin after. Root owner only. */}
+            {iAmRootOwner && nightPerms && (
+              <div className="mb-5">
                 <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                  Anyone else — collect photos
+                  This night
                 </p>
-                <p className="mb-3 text-xs text-neutral-500">
-                  Create the album first — the link and QR live here once it
-                  exists.
-                </p>
-                <button
-                  type="button"
-                  disabled={albumBusy}
-                  onClick={createAlbum}
-                  className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-50"
-                >
-                  {albumBusy ? "Creating…" : "Create album"}
-                </button>
+                <div className="rounded-2xl border border-neutral-100 overflow-hidden">
+                  {whenEdit ? (
+                    <div className="flex items-center gap-2 px-3 py-2.5">
+                      <input
+                        type="datetime-local"
+                        value={whenDraft}
+                        onChange={(e) => setWhenDraft(e.target.value)}
+                        className="flex-1 min-w-0 bg-transparent text-base focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        disabled={whenBusy}
+                        onClick={saveWhen}
+                        className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1.5 text-[11px] font-medium text-white active:scale-95 transition disabled:opacity-50"
+                      >
+                        {whenBusy ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWhenEdit(false)}
+                        className="shrink-0 text-[11px] font-medium text-neutral-400"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWhenDraft(toLocalInput(thread.timestamp));
+                        setWhenEdit(true);
+                      }}
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left active:bg-neutral-50"
+                    >
+                      <span className="flex-1 text-sm text-neutral-900">
+                        When
+                      </span>
+                      <span className="text-xs text-neutral-500">
+                        {new Date(thread.timestamp).toLocaleString("en-AU", {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}{" "}
+                        ›
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={mapBusy}
+                    onClick={toggleShowMap}
+                    className="flex w-full items-center gap-3 border-t border-neutral-100 px-3 py-2.5 text-left active:bg-neutral-50 disabled:opacity-50"
+                  >
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-neutral-900">
+                        Show on map
+                      </span>
+                      <span className="block text-[11px] text-neutral-500">
+                        {tense === "past"
+                          ? "your night stays on your and your friends' maps"
+                          : tense === "coming_up"
+                          ? "goes on the live map when it starts"
+                          : "friends see you're out, right now"}
+                      </span>
+                    </span>
+                    <span
+                      className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full px-0.5 transition ${
+                        nightPerms.showMap ? "bg-[#455d3b]" : "bg-neutral-200"
+                      }`}
+                    >
+                      <span
+                        className={`h-4 w-4 rounded-full bg-white transition ${
+                          nightPerms.showMap ? "translate-x-4" : ""
+                        }`}
+                      />
+                    </span>
+                  </button>
+                </div>
               </div>
-            ) : mayShareLink ? (
+            )}
+            {mayShareLink ? (
             <div>
               <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
                 Anyone else — collect photos
@@ -1981,7 +2055,22 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 <button
                   type="button"
                   disabled={collectBusy}
-                  onClick={() => collectAction("mint")}
+                  onClick={async () => {
+                    // No more "create the album first" gate (Oct 9): if
+                    // the night isn't an album yet, minting the link makes
+                    // it one in the same breath.
+                    if (!albumNight) {
+                      const { error } = await supabase.rpc(
+                        "create_night_album",
+                        { p_activity_id: thread.activityId }
+                      );
+                      if (!error)
+                        setNightPerms((prev) =>
+                          prev ? { ...prev, isAlbum: true } : prev
+                        );
+                    }
+                    collectAction("mint");
+                  }}
                   className="w-full rounded-full bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.99] transition disabled:opacity-50"
                 >
                   {collectBusy ? "Creating…" : "Create collect link"}
@@ -2159,30 +2248,27 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         {/* PLAIN check-in (Aug 21, design A "receipt"): no grid at all —
             the album offer is one quiet row under the people, above the
             conversation. */}
-        {view === "card" && !albumNight && uploadTargetId && (
-          <div className="px-4 pt-3">
-            <button
-              type="button"
-              disabled={albumBusy}
-              onClick={createAlbum}
-              className="w-full rounded-2xl border border-dashed border-[#a8b89a] bg-[#edf2eb]/60 flex items-center justify-center gap-2 py-3 text-[#455d3b] active:scale-[0.99] transition disabled:opacity-50"
-            >
-              <Camera size={16} />
-              <span className="text-xs font-medium">
-                {albumBusy
-                  ? "Creating…"
-                  : `Create album, collect photos from the ${
-                      // Daypart-aware (Aug 30, Mark: a lunch check-in
-                      // shouldn't offer "the night"). 5am–5pm = day.
-                      (() => {
-                        const h = new Date(thread.timestamp).getHours();
-                        return h >= 5 && h < 17 ? "day" : "night";
-                      })()
-                    }`}
-              </span>
-            </button>
-          </div>
-        )}
+        {/* ADD PHOTOS (Oct 9 doctrine, Mark: "Add photos on one line").
+            The text link IS the album ask — no box, no yes/no, no modal.
+            The first photo creates the album (see addPhotos); declining is
+            just never tapping. Shows only while the card has no photos;
+            once one lands, the grid below takes over with its add tile.
+            Hidden on Coming Up — nothing has happened yet. */}
+        {view === "card" &&
+          uploadTargetId &&
+          tense !== "coming_up" &&
+          photos.length === 0 &&
+          pending.length === 0 && (
+            <div className="px-5 pt-3">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#455d3b] active:scale-95 transition"
+              >
+                <Camera size={14} /> Add photos
+              </button>
+            </div>
+          )}
         {/* COLLECT-LINK SIGNPOST (Aug 30, Mark: "the collect link is hidden
             in the settings — should it be?"). Every album card carries the
             row; tapping it goes to SETTINGS, the one counter where the link
@@ -2190,33 +2276,16 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             on the face. Events arrive minted (auto-mint at creation), casual
             albums read "Set up" until someone chooses — the link stays a
             deliberate act outside events. */}
-        {view === "card" && albumNight && uploadTargetId && mayShareLink && faceLink !== null && (
-          <div className="px-4 pt-3">
-            <button
-              type="button"
-              onClick={() => setView("settings")}
-              className="w-full rounded-2xl border border-[#c5d4c2] bg-[#edf2eb]/60 flex items-center gap-2.5 px-3.5 py-2.5 text-left active:scale-[0.99] transition"
-            >
-              <span className="text-base shrink-0">🔗</span>
-              <span className="flex-1 min-w-0">
-                <span className="block text-xs font-medium text-[#2f4429]">
-                  {faceLink
-                    ? "Anyone can add photos with this link"
-                    : "Collect photos from anyone"}
-                </span>
-                <span className="block text-[10px] text-[#6b7c63]">
-                  No app needed
-                </span>
-              </span>
-              <span className="shrink-0 rounded-full bg-[#455d3b] px-3.5 py-1.5 text-xs font-medium text-white">
-                {faceLink ? "Share" : "Set up"}
-              </span>
-            </button>
-          </div>
-        )}
+        {/* (Oct 9 doctrine: the collect-link signpost row retired from the
+            card face — Mark's ratified card structure has no sage rows; the
+            link lives in settings, one tap behind the gear. Flag if missed
+            in the field.) */}
         {/* Photo GRID (July 23 redesign) — ALBUM nights only. 3-up, capped
             with a "+N more" tile; a small strip in expanded comments. */}
-        {view === "card" && albumNight && (photos.length > 0 || uploadTargetId) && (
+        {/* Grid renders on PHOTO PRESENCE (Oct 9) — the album/plain split
+            died with the Create-album tile; a night with photos is the
+            album, full stop. */}
+        {view === "card" && (photos.length > 0 || pending.length > 0) && (
           <div className="px-4 pt-3">
             <div className="grid grid-cols-3 gap-1.5">
               {(photosExpanded
@@ -2287,10 +2356,9 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   </span>
                 </div>
               ))}
-              {/* Camera = album mode only (Aug 21, Mark: a plain check-in
-                  is the record; the album is the explicit upgrade). Plain
-                  nights get the Create-album tile in its place. */}
-              {uploadTargetId && albumNight && (
+              {/* Camera tile for anyone on the night (Oct 9 — the album
+                  is no longer an explicit upgrade; photos ARE the album). */}
+              {uploadTargetId && (
                 <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -2596,6 +2664,79 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                 </>
               );
             })()}
+            {/* ADD FRIENDS (Oct 9: the combined View / add screen — the old
+                "add more" picker's rows, same consent flow, hidden when the
+                viewer can't invite). */}
+            {(isOwner || uploadTargetId) && mayInvite && (
+              <div className="mt-5 border-t border-neutral-100 pt-4">
+                <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                  Add friends
+                </p>
+                {tagFriends === null && (
+                  <p className="text-xs text-neutral-400">Loading friends…</p>
+                )}
+                {tagFriends !== null && tagFriends.length === 0 && (
+                  <p className="text-xs text-neutral-400">
+                    No friends on Flanit yet.
+                  </p>
+                )}
+                {tagFriends !== null && tagFriends.length > 0 && (
+                  <>
+                    {tagFriends.length > TAG_SEARCH_THRESHOLD && (
+                      <input
+                        value={tagQ}
+                        onChange={(e) => setTagQ(e.target.value)}
+                        placeholder="Search friends"
+                        className="mb-3 w-full rounded-full border border-neutral-200 px-4 py-2 text-base focus:outline-none focus:border-[#455d3b]"
+                      />
+                    )}
+                    <div className="space-y-2.5">
+                      {tagFriends
+                        .filter((f) => {
+                          const q = tagQ.trim().toLowerCase();
+                          return (
+                            !q ||
+                            (f.display_name || "").toLowerCase().includes(q) ||
+                            (f.username || "").toLowerCase().includes(q)
+                          );
+                        })
+                        .map((f) => {
+                          const on = taggedIds.has(f.id);
+                          const accepted = tagStatusById[f.id] === "accepted";
+                          return (
+                            <div key={f.id} className="flex items-center gap-3">
+                              <FriendAvatar profile={f} small />
+                              <span className="flex-1 min-w-0 truncate text-sm text-neutral-800">
+                                {f.display_name || "Someone"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => toggleTag(f.id)}
+                                className={`shrink-0 rounded-full text-xs font-medium px-3 py-1.5 active:scale-95 transition ${
+                                  on && accepted
+                                    ? "bg-[#455d3b] text-white"
+                                    : on
+                                    ? "border border-[#455d3b] text-[#455d3b]"
+                                    : "bg-[#455d3b] text-white"
+                                }`}
+                              >
+                                {on
+                                  ? accepted
+                                    ? "Added ✓"
+                                    : "Invited"
+                                  : "Add"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-neutral-400">
+                      They'll be asked before their friends see anything.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

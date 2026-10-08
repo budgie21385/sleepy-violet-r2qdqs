@@ -519,6 +519,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
           .not("venue_id", "is", null)
           // Upcoming nights are plans, not memories.
           .lte("created_at", new Date().toISOString())
+          // Oct 9 doctrine: "Show on map" off pulls the memory pin.
+          .eq("show_map", true)
           .order("created_at", { ascending: false })
           .limit(500),
         supabase

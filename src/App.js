@@ -61,7 +61,6 @@ import { realName } from "./lib/names";
 import { readDismissed } from "./lib/dismissed";
 import { CheckinForm } from "./components/CheckinForm";
 import { SessionPeople } from "./components/SessionPeople";
-import { AlbumPrompt } from "./components/AlbumPrompt";
 
 // Local yyyy-mm-dd — never toISOString().slice(0,10), that's the UTC date
 // and Melbourne runs 10h ahead (the "right now album on yesterday" bug).
@@ -417,8 +416,6 @@ export default function RestaurantSwipeMVP() {
   const [checkinForm, setCheckinForm] = useState(null);
   // "Create an album?" after a check-in saves (Aug 21) — holds the thread
   // object while the person decides; either answer opens the card.
-  const [albumPromptFor, setAlbumPromptFor] = useState(null);
-  const [albumPromptBusy, setAlbumPromptBusy] = useState(false);
   // Been list refresh signal — a night created from the overlay should be
   // there when Been next renders.
   const [beenRefresh, setBeenRefresh] = useState(0);
@@ -5025,16 +5022,14 @@ if (authLoading || guestLoading) {
         )}
       <FloatingActionButton
         tab={tab}
-        showToast={showToast}
         onAddFriend={() => setShowFindFriends(true)}
         onAddSpot={() => setShowSpotForm(true)}
         onImportMap={() => setShowImport(true)}
-        onCheckIn={() => {
-          // The unified form, on THIS page (Aug, Mark: "It should stay on
-          // the same page you are on") — no map jump, no search sheet. The
-          // form has its own place search.
-          setCheckinForm({ mode: "now" });
-        }}
+        // The when-sheet's three tenses — all land in the ONE form, on
+        // THIS page (Aug, Mark), tense pre-answered by the chosen door.
+        onNow={() => setCheckinForm({ mode: "now" })}
+        onComingUp={() => setCheckinForm({ mode: "date" })}
+        onPast={() => setCheckinForm({ mode: "date" })}
         onRightNow={() => {
           carryMapFilters();
           setMatchMode("concurrent");
@@ -5101,34 +5096,10 @@ if (authLoading || guestLoading) {
                   }).catch(() => {});
                 } catch {}
               })();
-            } else if (t.bornAlbum) setThreadCheckin(t);
-            else setAlbumPromptFor(t); // "Create an album?" first (Aug 21)
-          }}
-        />
-      )}
-      {albumPromptFor && (
-        <AlbumPrompt
-          venueName={albumPromptFor.venueName}
-          busy={albumPromptBusy}
-          onCreate={async () => {
-            setAlbumPromptBusy(true);
-            const { error } = await supabase.rpc("create_night_album", {
-              p_activity_id: albumPromptFor.activityId,
-            });
-            setAlbumPromptBusy(false);
-            if (error) {
-              console.error("Create album failed:", error);
-              showToast("Couldn't create the album");
-              return;
-            }
-            const t = albumPromptFor;
-            setAlbumPromptFor(null);
-            setThreadCheckin(t); // card opens in album mode
-          }}
-          onSkip={() => {
-            const t = albumPromptFor;
-            setAlbumPromptFor(null);
-            setThreadCheckin(t); // plain card; upgrade lives on the tile
+            } else setThreadCheckin(t);
+            // Oct 9 doctrine: the "Create an album?" modal RETIRED — the
+            // card's Add photos link is the album ask; first photo births
+            // it. The card IS the confirmation, every door lands on it.
           }}
         />
       )}

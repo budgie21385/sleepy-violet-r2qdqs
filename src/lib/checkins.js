@@ -11,6 +11,32 @@ export const FRESH_MS = 3 * 60 * 60 * 1000;
 // Same-venue re-check-in guard window.
 export const DUPE_MS = 4 * 60 * 60 * 1000;
 
+// ---- THE NIGHT IN TENSES (Oct 9 doctrine) ----------------------------------
+// One object, tense derived from the clock — never a stored status. A night
+// is "coming_up" before its timestamp, "now" from its timestamp until the
+// 4am that follows it (no End button: time is the only thing that ends a
+// night), and "past" after that. 4am belongs to the night BEFORE it: a 1am
+// check-in ends at 4am the same morning, a 9pm one at 4am the next.
+export function nightEndMs(ts) {
+  const start = new Date(ts);
+  const fourAm = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate(),
+    4,
+    0,
+    0
+  ).getTime();
+  return start.getTime() < fourAm ? fourAm : fourAm + 24 * 60 * 60 * 1000;
+}
+
+export function nightTense(ts) {
+  const now = Date.now();
+  const start = new Date(ts).getTime();
+  if (start > now) return "coming_up";
+  return now < nightEndMs(ts) ? "now" : "past";
+}
+
 export function timeAgoShort(ts) {
   const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
   if (mins < 15) return "now";

@@ -299,11 +299,10 @@ export function PlanScheduler({
                     // along; BeenScreen tags them on the created night.
                     const invitees = friends.map((p) => p.user_id);
                     onClose?.();
-                    // album: true — this door IS the album ask; the form's
-                    // post-save prompt must not ask again (born-album).
+                    // Oct 9 doctrine: born PLAIN — the card's Add photos
+                    // link is the album ask now; the first photo births it.
                     onScheduleNight(venue, dateStr, invitees, {
                       time: timeStr,
-                      album: true,
                     });
                   }}
                   className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
