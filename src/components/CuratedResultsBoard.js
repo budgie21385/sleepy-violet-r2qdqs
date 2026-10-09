@@ -9,8 +9,9 @@ import { Check } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { PlanScheduler } from "./PlanScheduler";
+import { nightEndMs } from "../lib/checkins";
 
-export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile, onNightBorn }) {
+export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile, onNightBorn, onCheckIn }) {
   const [results, setResults] = useState(null);
   const [venueRows, setVenueRows] = useState([]);
   const [names, setNames] = useState({});
@@ -351,6 +352,15 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           onHide={onHide}
           userId={userId}
           onOpenProfile={onOpenProfile}
+          // Plan stays OFF while the session is live (Decide is this
+          // context's when-door) and RETURNS once the decided night has
+          // ended (Mark, Oct 9: "the plan comes back after the date has
+          // passed" — revisiting an old session can start something new).
+          onCheckIn={
+            onCheckIn && decidedFor && Date.now() > nightEndMs(decidedFor)
+              ? onCheckIn
+              : undefined
+          }
         />
       )}
       {schedulingVenue && (

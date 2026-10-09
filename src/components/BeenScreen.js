@@ -38,7 +38,7 @@ export function CheckinHistoryRow({ c }) {
   );
 }
 
-export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, onAddNight, refreshSignal = 0 }) {
+export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, onAddNight, onCheckIn, refreshSignal = 0 }) {
   const [rows, setRows] = useState(null); // null = loading
   const [venueById, setVenueById] = useState(() => new Map());
   // NIGHTS vs PLACES (July 31, Mark: "more of a list of locations rather than
@@ -411,6 +411,9 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
           onHide={onHide}
           userId={userId}
           onOpenProfile={onOpenProfile}
+          // Plan on the Been card (Mark, Oct 9): "let's go back there" is
+          // the most natural move from your own history.
+          onCheckIn={onCheckIn}
           zIndex={3700}
         />
       )}

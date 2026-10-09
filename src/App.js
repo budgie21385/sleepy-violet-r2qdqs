@@ -70,7 +70,7 @@ function localDateStrApp(d = new Date()) {
   ).padStart(2, "0")}`;
 }
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
-import { Shuffle, RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, MapPin as MapPinIcon } from "lucide-react";
+import { RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { prefetchVenueDetails } from "./lib/venueDetails";
 import { sendPush } from "./lib/push";
@@ -303,7 +303,6 @@ export default function RestaurantSwipeMVP() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [picked, setPicked] = useState(null);
   const [currentUser, setCurrentUser] = useState("mark");
   const [markLikes, setMarkLikes] = useState([]);
   const [partnerLikes, setPartnerLikes] = useState([]);
@@ -1057,7 +1056,6 @@ useEffect(() => {
     setSessionMatches([]);
     setResultsAreVotes(false);
     setCurrentSessionId(null);
-    setPicked(null);
     setCardIndex(0);
     if (sid) setNotifSessionId(sid);
   }
@@ -2938,7 +2936,6 @@ loadAreas();
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
-    setPicked(null);
     setMapViewPool(null); // a fresh run re-pins from the map if started there
     setScreen("filters");
     setCurrentUser("mark");
@@ -2957,7 +2954,6 @@ loadAreas();
     setCardIndex(0);
     setMatches([]);
     setPassed([]);
-    setPicked(null);
     setMarkLikes([]);
     setPartnerLikes([]);
     setMarkPasses([]);
@@ -3045,7 +3041,6 @@ loadAreas();
       setPartnerPasses([]);
       setSessionMatches([]);
       setResultsAreVotes(false);
-      setPicked(null);
       setCardIndex(0);
 
       newSessionId = data.id;
@@ -3134,26 +3129,8 @@ loadAreas();
     }
   }
  
-  function pickForUs() {
-    // Both concurrent and curated read from sessionMatches (the
-    // reconciliation RPC populates it for both modes). Solo would fall
-    // through to the legacy matches array, but solo doesn't hit the
-    // matches screen in practice.
-    if (matchMode === "concurrent" || matchMode === "curated") {
-      if (!sessionMatches.length) return;
-      const venueById = new Map(venues.map((v) => [v.id, v]));
-      const pool = sessionMatches
-        .map((m) => venueById.get(m.venue_id))
-        .filter(Boolean);
-      if (!pool.length) return;
-      setPicked(pool[Math.floor(Math.random() * pool.length)]);
-      return;
-    }
-    if (!matches.length) return;
-    const randomMatch = matches[Math.floor(Math.random() * matches.length)];
-    setPicked(randomMatch);
-  }
- 
+  // pickForUs() removed Oct 9 (Mark: "remove Pick for us completely").
+
 if (authLoading || guestLoading) {
     return (
       <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
@@ -4531,7 +4508,6 @@ if (authLoading || guestLoading) {
               setPartnerPasses([]);
               setSessionMatches([]);
               setCurrentSessionId(null);
-              setPicked(null);
               setCardIndex(0);
             }}
           />
@@ -4637,11 +4613,11 @@ if (authLoading || guestLoading) {
                 setMarkPasses([]);
                 setSessionMatches([]);
                 setCurrentSessionId(null);
-                setPicked(null);
                 setCardIndex(0);
               }}
               showToast={showToast}
               onNightBorn={(t) => setThreadCheckin(t)}
+              onCheckIn={handleCheckIn}
             />
           </div>
         )}
@@ -4667,7 +4643,6 @@ if (authLoading || guestLoading) {
             setPartnerPasses([]);
             setSessionMatches([]);
             setCurrentSessionId(null);
-            setPicked(null);
             setCardIndex(0);
           }
 
@@ -4782,6 +4757,7 @@ if (authLoading || guestLoading) {
                   showConfetti={matchCount > 0}
                   showToast={showToast}
                   onNightBorn={(t) => setThreadCheckin(t)}
+                  onCheckIn={handleCheckIn}
                 />
               ) : (
                 <div className="flex-1 overflow-y-auto p-6 text-center text-neutral-500 text-sm">
@@ -4789,48 +4765,19 @@ if (authLoading || guestLoading) {
                 </div>
               )}
 
+              {/* "Pick for us" REMOVED (Mark, Oct 9) — the random selector
+                  and its venue card are gone; Done is the one exit. */}
               <div className="fixed bottom-24 left-0 right-0 z-[2050] px-4 pb-2">
-                <div className="max-w-sm mx-auto flex items-center gap-2">
-                  {/* Pick for us — random match selector. Opens the venue
-                      in MapVenueSheet so the user can decide on the spot.
-                      Tap again to re-roll. Disabled when no matches. */}
-                  <button
-                    type="button"
-                    onClick={pickForUs}
-                    disabled={matchCount === 0}
-                    className="flex-1 rounded-2xl bg-white border border-neutral-200 py-3 font-medium text-neutral-800 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="inline-flex items-center justify-center gap-2">
-                      <Shuffle size={16} /> Pick for us
-                    </span>
-                  </button>
+                <div className="max-w-sm mx-auto">
                   <button
                     type="button"
                     onClick={handleDoneSession}
-                    className="flex-1 rounded-2xl bg-[#111111] py-3 font-medium text-white shadow-lg"
+                    className="w-full rounded-2xl bg-[#111111] py-3 font-medium text-white shadow-lg"
                   >
                     Done
                   </button>
                 </div>
               </div>
-
-              {/* Picked venue lands in MapVenueSheet — same in-app card the
-                  rest of the app uses, so the user sees full details and
-                  the Open in Maps action right there. */}
-              {picked && (
-                <MapVenueSheet
-                  venue={picked}
-                  onClose={() => setPicked(null)}
-                  savedIds={savedVenueIds}
-                  onSave={saveVenue}
-                  onUnsave={unsaveVenue}
-                  onHide={hideVenue}
-                  onCheckIn={handleCheckIn}
-                  onOpenThread={setThreadCheckin}
-                  onOpenProfile={(uid) => setLookupUserId(uid)}
-                  userId={session?.user?.id}
-                />
-              )}
             </div>
           );
         })()}
@@ -4895,6 +4842,8 @@ if (authLoading || guestLoading) {
           onAddNight={() => setCheckinForm({ mode: "date" })}
           beenRefresh={beenRefresh}
           onNightBorn={(t) => setThreadCheckin(t)}
+          onCheckIn={handleCheckIn}
+          onOpenThread={setThreadCheckin}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -4923,6 +4872,12 @@ if (authLoading || guestLoading) {
           onOpenProfile={openProfile}
           onCreateEvent={() => setCheckinForm({ event: true })}
           refreshSignal={beenRefresh}
+          // Oct 9 field find (Mark): the Events tab's night card had no
+          // venue door at all — the one surface that never got the wire.
+          onOpenVenue={(v) => {
+            setCardVenueZ(3700); // above the open night card
+            setCardVenue(v);
+          }}
         />
       )}
       {showImport && (
@@ -4977,6 +4932,7 @@ if (authLoading || guestLoading) {
           onOpenProfile={(uid) => setLookupUserId(uid)}
           initialSessionId={notifSessionId}
           onNightBorn={(t) => setThreadCheckin(t)}
+          onCheckIn={handleCheckIn}
         />
       )}
       {cardVenue && (
@@ -5522,6 +5478,8 @@ function ProfileTab({
   onAddNight,
   beenRefresh,
   onNightBorn,
+  onCheckIn,
+  onOpenThread,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
@@ -5763,6 +5721,9 @@ function ProfileTab({
           onHide={onHide}
           onUnhide={onUnhide}
           userId={session?.user?.id}
+          onCheckIn={onCheckIn}
+          onOpenThread={onOpenThread}
+          onOpenProfile={onOpenProfile}
         />
       )}
       {showFriends && (
@@ -5786,6 +5747,7 @@ function ProfileTab({
           showToast={showToast}
           onOpenProfile={onOpenProfile}
           onNightBorn={onNightBorn}
+          onCheckIn={onCheckIn}
         />
       )}
       {showBeen && (
@@ -5797,6 +5759,7 @@ function ProfileTab({
           onHide={onHide}
           onBack={() => setShowBeen(false)}
           onAddNight={onAddNight}
+          onCheckIn={onCheckIn}
           refreshSignal={beenRefresh}
           showToast={showToast}
           onOpenProfile={(uid) => {
@@ -6125,6 +6088,9 @@ function MyListScreen({
   onSave,
   onUnsave,
   onHide,
+  onCheckIn,
+  onOpenThread,
+  onOpenProfile,
   onUnhide,
   userId,
 }) {
@@ -6292,6 +6258,11 @@ function MyListScreen({
           onUnsave={onUnsave}
           onHide={onHide}
           userId={userId}
+          // ONE CARD EVERYWHERE (Mark, Oct 9): My List gets the full set —
+          // Plan, strip-tap, profiles — same as the map's card.
+          onCheckIn={onCheckIn}
+          onOpenThread={onOpenThread}
+          onOpenProfile={onOpenProfile}
         />
       )}
     </div>
@@ -6350,7 +6321,7 @@ function MyListScreen({
 // (`import_google_maps_prototype.js`) covers Mark's own bootstrap.
 // ImportGoogleMapsScreen moved to ./components/ImportGoogleMapsScreen.js.
 
-function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId, onNightBorn }) {
+function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId, onNightBorn, onCheckIn }) {
   const [sessions, setSessions] = useState(null); // null = loading
   const [selectedSession, setSelectedSession] = useState(null);
   // True when the detail was opened via a deep-link (a tapped notification /
@@ -6952,6 +6923,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               onDone={() => (deepLinked ? onBack() : setSelectedSession(null))}
               showToast={showToast}
               onNightBorn={onNightBorn}
+              onCheckIn={onCheckIn}
             />
           ) : (
             <SessionResultsView
@@ -6970,6 +6942,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               showConfetti={false}
               showToast={showToast}
               onNightBorn={onNightBorn}
+              onCheckIn={onCheckIn}
               // Voted / Still-to-vote split only while the game can still
               // grow — a finished session's strip shows who actually came.
               expectedTotal={

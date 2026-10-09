@@ -11,7 +11,9 @@
 // don't collide.
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle, CalendarDays, Moon } from "lucide-react";
+import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle, CalendarDays, Moon, Maximize2 } from "lucide-react";
+import { MapContainer, TileLayer, Marker } from "react-leaflet";
+import L from "leaflet";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
@@ -34,6 +36,17 @@ import { markBeen, unmarkBeen, countVisits } from "../lib/been";
 
 const HINT_KEY = "flanit_mapcard_swipe_hint"; // localStorage seen-flag
 
+// Olive dot pin for the card's mini/full map — matches the map tab's look
+// without dragging the cluster machinery in here.
+function miniPinIcon() {
+  return L.divIcon({
+    className: "",
+    html: '<div style="width:18px;height:18px;border-radius:50%;background:#455d3b;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35)"></div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+}
+
 export function MapVenueSheet({
   venue: venueLight,
   onClose,
@@ -52,6 +65,9 @@ export function MapVenueSheet({
   // Raise above the check-in card (z-3600) when opened FROM one, so closing
   // this returns you to the check-in rather than losing it.
   zIndex = 3100,
+  // Oct 9 (Mark): every card carries a mini map EXCEPT when opened from
+  // the Map tab itself (the map is already behind it).
+  hideMap = false,
 }) {
   // Hydrate the heavy tail (photos/reviews/editorial) on card open — the
   // bootstrap ships light columns only. All body code below uses `venue`
@@ -108,6 +124,8 @@ export function MapVenueSheet({
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
   // The three-tense chooser behind the Plan pill (Oct 9).
   const [planOpen, setPlanOpen] = useState(false);
+  // Full-screen map over the card (Oct 9).
+  const [mapFull, setMapFull] = useState(false);
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
   // (The post-check-in "what's on" + tagging UI lives in CheckinSheet now —
@@ -592,6 +610,42 @@ export function MapVenueSheet({
         <VenueVibes venue={venue} />
         <VenueAmenities venue={venue} />
         <VenueReview venue={venue} />
+        {/* MINI MAP (Oct 9, Mark) — Leaflet + the same free Carto tiles as
+            the Map tab, so this costs nothing per load. Non-interactive;
+            tapping it opens the full-screen version. Hidden when the card
+            was opened FROM the map (hideMap) or coords are missing. */}
+        {!hideMap &&
+          Number.isFinite(Number(venue.latitude)) &&
+          Number.isFinite(Number(venue.longitude)) && (
+            <button
+              type="button"
+              aria-label="Open the map"
+              onClick={() => setMapFull(true)}
+              className="relative mb-3 block h-32 w-full overflow-hidden rounded-2xl border border-neutral-100 active:scale-[0.99] transition"
+            >
+              <MapContainer
+                center={[Number(venue.latitude), Number(venue.longitude)]}
+                zoom={15}
+                className="h-full w-full pointer-events-none"
+                zoomControl={false}
+                dragging={false}
+                scrollWheelZoom={false}
+                doubleClickZoom={false}
+                touchZoom={false}
+                keyboard={false}
+                attributionControl={false}
+              >
+                <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=cb1_2i1k_1_fe5697f3857f77adc7cfbe45" />
+                <Marker
+                  position={[Number(venue.latitude), Number(venue.longitude)]}
+                  icon={miniPinIcon()}
+                />
+              </MapContainer>
+              <span className="absolute bottom-2 right-2 z-[400] flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-neutral-600 shadow">
+                <Maximize2 size={13} />
+              </span>
+            </button>
+          )}
         <OpenMapsButton url={getMapsUrl(venue)} />
       </div>
 
@@ -776,6 +830,53 @@ export function MapVenueSheet({
               >
                 Share elsewhere
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* FULL-SCREEN MAP (Oct 9) — the mini map expanded; interactive,
+          one pin, Open in Maps underneath. */}
+      {mapFull && (
+        <div className="fixed inset-0 z-[3800] bg-white">
+          <MapContainer
+            center={[Number(venue.latitude), Number(venue.longitude)]}
+            zoom={16}
+            className="h-full w-full"
+            zoomControl={true}
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=cb1_2i1k_1_fe5697f3857f77adc7cfbe45"
+            />
+            <Marker
+              position={[Number(venue.latitude), Number(venue.longitude)]}
+              icon={miniPinIcon()}
+            />
+          </MapContainer>
+          <button
+            type="button"
+            aria-label="Close map"
+            onClick={() => setMapFull(false)}
+            className="absolute top-4 right-4 z-[1000] flex h-10 w-10 items-center justify-center rounded-full bg-white text-neutral-700 shadow-md active:scale-95 transition"
+          >
+            <X size={18} />
+          </button>
+          <div className="absolute bottom-6 left-0 right-0 z-[1000] px-5">
+            <div className="mx-auto max-w-sm rounded-2xl bg-white p-3 shadow-lg">
+              <p className="truncate text-sm font-semibold text-neutral-900">
+                {venue.name}
+              </p>
+              <p className="truncate text-xs text-neutral-500">
+                {venue.address}
+              </p>
+              <a
+                href={getMapsUrl(venue)}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 block rounded-full border border-[#455d3b] py-2 text-center text-xs font-medium text-[#455d3b]"
+              >
+                Open in Maps
+              </a>
             </div>
           </div>
         </div>

@@ -14,7 +14,7 @@ import { ArrowLeft, Camera, CalendarDays } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { CheckinThreadSheet } from "./CheckinThreadSheet";
 
-export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreateEvent, refreshSignal = 0 }) {
+export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreateEvent, onOpenVenue, refreshSignal = 0 }) {
   const [rows, setRows] = useState(null); // null = loading
   const [pastRows, setPastRows] = useState([]);
   const [venueById, setVenueById] = useState(() => new Map());
@@ -237,6 +237,9 @@ export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreat
             if (uid === userId) setThread(null);
             onOpenProfile?.(uid);
           }}
+          // Oct 9 (Mark's field find): the venue name on an upcoming
+          // event's card is now a door like everywhere else.
+          onOpenVenue={onOpenVenue}
         />
       )}
     </div>

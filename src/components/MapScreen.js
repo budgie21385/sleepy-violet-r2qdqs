@@ -1930,6 +1930,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         <MapVenueSheet
           venue={selectedVenue}
           onClose={() => setSelectedVenue(null)}
+          // The map is literally behind this card — no mini map needed.
+          hideMap
           savedIds={savedIds}
           onSave={onSave}
           onUnsave={onUnsave}

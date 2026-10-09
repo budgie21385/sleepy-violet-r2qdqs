@@ -8,6 +8,7 @@ import { Check, Shuffle, CalendarDays } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { PlanScheduler } from "./PlanScheduler";
+import { nightEndMs } from "../lib/checkins";
 
 export function ConfettiBurst() {
   const canvasRef = useRef(null);
@@ -92,6 +93,7 @@ export function SessionResultsView({
   // Oct 9 — the scheduler's Done births the night itself; this hands the
   // born thread up to App, which opens the universal card.
   onNightBorn,
+  onCheckIn,
   expectedTotal = 0, // party size incl. host — strip shows who's missing
   voteSplit = false, // running session: strip groups Voted / Still to vote
 }) {
@@ -496,6 +498,14 @@ export function SessionResultsView({
           onUnsave={onUnsave}
           onHide={onHide}
           userId={userId}
+          onOpenProfile={onOpenProfile}
+          // Plan returns once the decided night has ended (Mark, Oct 9) —
+          // off while the session is live, Decide owns the when until then.
+          onCheckIn={
+            onCheckIn && decidedFor && Date.now() > nightEndMs(decidedFor)
+              ? onCheckIn
+              : undefined
+          }
         />
       )}
       {/* THE SCHEDULER — shared with the curated board (PlanScheduler.js).
