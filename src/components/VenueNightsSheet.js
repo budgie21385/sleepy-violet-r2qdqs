@@ -113,53 +113,82 @@ export function VenueNightsSheet({ group, userId, onClose, onOpenNight }) {
           <p className="text-xs text-neutral-500 mt-0.5">{summary}</p>
         </div>
         <div className="flex-1 overflow-y-auto px-5 pb-6">
-          {group.nights.map((night) => {
-            const label =
-              night.entries.find((e) => e.label)?.label || null;
-            const isAlbum = night.entries.some((e) => e.is_album);
-            const photos = night.entries.reduce(
-              (sum, e) => sum + (photoCounts[e.id] || 0),
-              0
+          {/* SECTIONED (Oct 9, Mark: "the list might be a bit clearer for
+              those ones that doesn't involve you being there") — your
+              nights first, friends' nights under their own header. Headers
+              only render when both kinds exist. */}
+          {(() => {
+            const renderNight = (night) => {
+              const label =
+                night.entries.find((e) => e.label)?.label || null;
+              const isAlbum = night.entries.some((e) => e.is_album);
+              const photos = night.entries.reduce(
+                (sum, e) => sum + (photoCounts[e.id] || 0),
+                0
+              );
+              const names = namesLine(night.entries, userId);
+              const face =
+                night.entries.find((e) => e.user_id === userId) ||
+                night.entries[0];
+              const sub = [
+                label ? names : null,
+                nightDate(night.entries[0].created_at),
+                photos > 0
+                  ? `${photos} ${photos === 1 ? "photo" : "photos"}`
+                  : null,
+                isAlbum ? "album" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return (
+                <button
+                  key={night.key}
+                  type="button"
+                  onClick={() => onOpenNight(night)}
+                  className="w-full flex items-center gap-3 py-3 border-t border-neutral-100 text-left active:bg-neutral-50 transition"
+                >
+                  <Avatar
+                    profile={face.profile}
+                    isSelf={face.user_id === userId}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-neutral-900 truncate">
+                      {label || names}
+                    </p>
+                    <p className="text-xs text-neutral-500 mt-0.5 truncate">
+                      {sub}
+                    </p>
+                  </div>
+                  <span className="text-neutral-300 text-lg leading-none">
+                    ›
+                  </span>
+                </button>
+              );
+            };
+            const mine = group.nights.filter((n) =>
+              n.entries.some((e) => e.user_id === userId)
             );
-            const names = namesLine(night.entries, userId);
-            const face =
-              night.entries.find((e) => e.user_id === userId) ||
-              night.entries[0];
-            const sub = [
-              label ? names : null,
-              nightDate(night.entries[0].created_at),
-              photos > 0
-                ? `${photos} ${photos === 1 ? "photo" : "photos"}`
-                : null,
-              isAlbum ? "album" : null,
-            ]
-              .filter(Boolean)
-              .join(" · ");
+            const theirs = group.nights.filter(
+              (n) => !n.entries.some((e) => e.user_id === userId)
+            );
+            const both = mine.length > 0 && theirs.length > 0;
             return (
-              <button
-                key={night.key}
-                type="button"
-                onClick={() => onOpenNight(night)}
-                className="w-full flex items-center gap-3 py-3 border-t border-neutral-100 text-left active:bg-neutral-50 transition"
-              >
-                <Avatar
-                  profile={face.profile}
-                  isSelf={face.user_id === userId}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-neutral-900 truncate">
-                    {label || names}
+              <>
+                {both && (
+                  <p className="pt-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                    Your nights
                   </p>
-                  <p className="text-xs text-neutral-500 mt-0.5 truncate">
-                    {sub}
+                )}
+                {mine.map(renderNight)}
+                {both && (
+                  <p className="pt-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                    Friends' nights
                   </p>
-                </div>
-                <span className="text-neutral-300 text-lg leading-none">
-                  ›
-                </span>
-              </button>
+                )}
+                {theirs.map(renderNight)}
+              </>
             );
-          })}
+          })()}
           {group.marks.map((mark) => (
             <div
               key={`mark_${mark.user_id}`}
