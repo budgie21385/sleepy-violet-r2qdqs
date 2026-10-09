@@ -10,7 +10,7 @@ import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { PlanScheduler } from "./PlanScheduler";
 
-export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile, onScheduleNight }) {
+export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onDone, showToast, canDecide = true, savedIds, onSave, onUnsave, onHide, onOpenProfile, onNightBorn }) {
   const [results, setResults] = useState(null);
   const [venueRows, setVenueRows] = useState([]);
   const [names, setNames] = useState({});
@@ -360,15 +360,11 @@ export function CuratedResultsBoard({ sessionId, venues, hostUserId, userId, onD
           venue={schedulingVenue}
           participants={participantsList}
           showToast={showToast}
-          onScheduleNight={
-            onScheduleNight
-              ? (v, dateStr, invitees, opts) => {
-                  setSchedulingVenue(null);
-                  setDetailVenue(null);
-                  onScheduleNight(v, dateStr, invitees, opts);
-                }
-              : undefined
-          }
+          onNightBorn={(t) => {
+            setSchedulingVenue(null);
+            setDetailVenue(null);
+            onNightBorn?.(t);
+          }}
           onDecided={(vid, iso) => {
             setDecidedVenueId(vid);
             setDecidedFor(iso);

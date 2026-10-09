@@ -28,11 +28,10 @@ export function PlanScheduler({
   venue, // full venue object — the pick
   participants = [], // session_participants rows ({user_id, display_name})
   showToast,
-  onScheduleNight, // (venue, dateStr|"", inviteeIds) → Been add form prefilled
+  onNightBorn, // (thread) → parent opens the universal night card
   onDecided, // (venueId, decidedForIso) → parent updates its decided state
   onClose,
 }) {
-  const [step, setStep] = useState(1);
   const [when, setWhen] = useState("now"); // "now" | "date"
   const [dateTime, setDateTime] = useState("");
   const [told, setTold] = useState(() => new Set());
@@ -66,7 +65,7 @@ export function PlanScheduler({
 
   function pushBody() {
     return when === "now" || !dateTime
-      ? "The plan is locked — see you there"
+      ? "The plan is locked. See you there"
       : `Locked in for ${whenText()}`;
   }
 
@@ -83,7 +82,7 @@ export function PlanScheduler({
       await navigator.clipboard.writeText(planUrl());
       showToast?.("Link copied");
     } catch {
-      showToast?.("Couldn't copy — long-press the link");
+      showToast?.("Couldn't copy. Long-press the link");
     }
   }
 
@@ -97,7 +96,7 @@ export function PlanScheduler({
     setDeciding(false);
     if (error) {
       console.error("set_curated_decision failed:", error);
-      showToast?.("Couldn't save — try again");
+      showToast?.("Couldn't save. Try again");
       return;
     }
     // Persist the WHEN (Aug 1) — without this the plan's time lived only in
@@ -122,7 +121,47 @@ export function PlanScheduler({
         sendPush(p.user_id, `${venueName} it is 🎉`, pushBody());
       }
     }
-    setStep(2);
+    // DONE BIRTHS THE NIGHT (Oct 9 doctrine) — no "Locked in" screen, no
+    // album box, no second form. The night object is created here with the
+    // scheduler's answers; the universal card opens as the confirmation.
+    // Session friends ride along as pending tags (NO extra push — the
+    // decide push above already announced it; the ask waits in their
+    // drawer). Anons stay session-side: no account, no card.
+    const { data: act, error: nightErr } = await supabase
+      .from("activities")
+      .insert({
+        user_id: userId,
+        kind: "checkin",
+        venue_id: venue.id,
+        created_at: decidedForIso,
+      })
+      .select("id, created_at, label")
+      .single();
+    if (nightErr || !act) {
+      // The decision stood — only the card birth failed. Say so honestly.
+      console.error("Night birth failed:", nightErr);
+      showToast?.("Locked in. Couldn't open the night card");
+      onClose?.();
+      return;
+    }
+    for (const p of friends) {
+      if (!p.user_id) continue;
+      const { error: tagErr } = await supabase
+        .from("activity_tags")
+        .insert({ activity_id: act.id, tagged_user_id: p.user_id });
+      if (tagErr && tagErr.code !== "23505")
+        console.error("Plan invite failed:", tagErr);
+    }
+    onClose?.();
+    onNightBorn?.({
+      activityId: act.id,
+      ownerId: userId,
+      ownerName: "You",
+      venueName: venue.name,
+      label: act.label || null,
+      venueObj: venue,
+      timestamp: act.created_at,
+    });
   }
 
   if (!venue) return null;
@@ -135,8 +174,7 @@ export function PlanScheduler({
         className="absolute inset-0 bg-black/40"
       />
       <div className="relative w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 pb-28 sm:pb-5 shadow-xl max-h-[85vh] overflow-y-auto">
-        {step === 1 ? (
-          <>
+        <>
             <h2 className="text-xl font-semibold tracking-tight">
               {venueName} it is 🎉
             </h2>
@@ -260,66 +298,9 @@ export function PlanScheduler({
               {deciding ? "Locking…" : "Done"}
             </button>
           </>
-        ) : (
-          <>
-            <h2 className="text-xl font-semibold tracking-tight">Locked in ✓</h2>
-            {/* Host-only surface (Mark, Aug 20) — "You locked in" owns the
-                act; no "tonight" assumption for right-now plans anymore. */}
-            <p className="mt-1 text-sm text-neutral-600">
-              You locked in {venueName}. Everyone's been told the when and
-              where.
-            </p>
-            {onScheduleNight && (
-              <div className="mt-4 rounded-2xl border border-neutral-200 p-4">
-                {/* ALBUM language (Aug 21, Mark — events are their own
-                    deliberate feature; this prompt is the casual layer). */}
-                <p className="text-sm font-semibold">Create an album?</p>
-                <p className="mt-1 text-xs text-neutral-500">
-                  Want to collect photos from the night? We'll set up the
-                  album and invite every Flanit member in the session.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const dateStr =
-                      when === "date" && dateTime ? dateTime.slice(0, 10) : "";
-                    // The plan's TIME rides along too (Aug, Mark: a 7pm plan
-                    // makes a 7pm card, so it can go live at the right hour
-                    // if they choose to). "" = right-now plan → today.
-                    // Right-now plans carry the DECIDE MOMENT as the time
-                    // (Mark, Aug 21: the album defaulted to 7pm while the
-                    // plan said 9:41am) — the card should match the plan.
-                    const pad = (n) => String(n).padStart(2, "0");
-                    const nowT = new Date();
-                    const timeStr =
-                      when === "date" && dateTime
-                        ? dateTime.slice(11, 16)
-                        : `${pad(nowT.getHours())}:${pad(nowT.getMinutes())}`;
-                    // AUTO-INVITE (Aug, Mark) — the session's people ride
-                    // along; BeenScreen tags them on the created night.
-                    const invitees = friends.map((p) => p.user_id);
-                    onClose?.();
-                    // Oct 9 doctrine: born PLAIN — the card's Add photos
-                    // link is the album ask now; the first photo births it.
-                    onScheduleNight(venue, dateStr, invitees, {
-                      time: timeStr,
-                    });
-                  }}
-                  className="mt-3 w-full rounded-2xl bg-[#455d3b] py-2.5 text-sm font-medium text-white active:scale-[0.98] transition"
-                >
-                  Set it up
-                </button>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-3 w-full text-center text-sm text-neutral-500"
-            >
-              Not now
-            </button>
-          </>
-        )}
+        {/* (The "Locked in ✓" screen + "Create an album?" box retired
+            Oct 9 — Done births the night and the card IS the confirmation;
+            Add photos on the card is the album ask.) */}
       </div>
     </div>,
     document.body

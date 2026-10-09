@@ -89,10 +89,9 @@ export function SessionResultsView({
   onOpenProfile,
   showConfetti = false,
   showToast,
-  // Aug 1 — "We're going here" opens the SCHEDULER instead of deciding
-  // instantly; after locking, "Set up the album" hands (venue, dateStr|"")
-  // up to App, which opens the Been add form prefilled. "" = going right now.
-  onScheduleNight,
+  // Oct 9 — the scheduler's Done births the night itself; this hands the
+  // born thread up to App, which opens the universal card.
+  onNightBorn,
   expectedTotal = 0, // party size incl. host — strip shows who's missing
   voteSplit = false, // running session: strip groups Voted / Still to vote
 }) {
@@ -509,15 +508,11 @@ export function SessionResultsView({
           venue={schedulingVenue}
           participants={participants}
           showToast={showToast}
-          onScheduleNight={
-            onScheduleNight
-              ? (v, dateStr, invitees, opts) => {
-                  setSchedulingVenue(null);
-                  setDetailVenue(null);
-                  onScheduleNight(v, dateStr, invitees, opts);
-                }
-              : undefined
-          }
+          onNightBorn={(t) => {
+            setSchedulingVenue(null);
+            setDetailVenue(null);
+            onNightBorn?.(t);
+          }}
           onDecided={(vid, iso) => {
             setDecidedVenueId(vid);
             setDecidedFor(iso); // banner appears without a refetch

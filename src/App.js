@@ -4641,7 +4641,7 @@ if (authLoading || guestLoading) {
                 setCardIndex(0);
               }}
               showToast={showToast}
-              onScheduleNight={scheduleNight}
+              onNightBorn={(t) => setThreadCheckin(t)}
             />
           </div>
         )}
@@ -4781,6 +4781,7 @@ if (authLoading || guestLoading) {
                   onOpenProfile={(uid) => setLookupUserId(uid)}
                   showConfetti={matchCount > 0}
                   showToast={showToast}
+                  onNightBorn={(t) => setThreadCheckin(t)}
                 />
               ) : (
                 <div className="flex-1 overflow-y-auto p-6 text-center text-neutral-500 text-sm">
@@ -4893,7 +4894,7 @@ if (authLoading || guestLoading) {
           onFindFriends={() => setShowFindFriends(true)}
           onAddNight={() => setCheckinForm({ mode: "date" })}
           beenRefresh={beenRefresh}
-          onScheduleNight={scheduleNight}
+          onNightBorn={(t) => setThreadCheckin(t)}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -4975,7 +4976,7 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           initialSessionId={notifSessionId}
-          onScheduleNight={scheduleNight}
+          onNightBorn={(t) => setThreadCheckin(t)}
         />
       )}
       {cardVenue && (
@@ -5520,7 +5521,7 @@ function ProfileTab({
   onFindFriends,
   onAddNight,
   beenRefresh,
-  onScheduleNight,
+  onNightBorn,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
@@ -5784,7 +5785,7 @@ function ProfileTab({
           onBack={() => setShowSessions(false)}
           showToast={showToast}
           onOpenProfile={onOpenProfile}
-          onScheduleNight={onScheduleNight}
+          onNightBorn={onNightBorn}
         />
       )}
       {showBeen && (
@@ -6349,7 +6350,7 @@ function MyListScreen({
 // (`import_google_maps_prototype.js`) covers Mark's own bootstrap.
 // ImportGoogleMapsScreen moved to ./components/ImportGoogleMapsScreen.js.
 
-function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId, onScheduleNight }) {
+function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, onBack, showToast, onOpenProfile, initialSessionId, onNightBorn }) {
   const [sessions, setSessions] = useState(null); // null = loading
   const [selectedSession, setSelectedSession] = useState(null);
   // True when the detail was opened via a deep-link (a tapped notification /
@@ -6950,7 +6951,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               onHide={onHide}
               onDone={() => (deepLinked ? onBack() : setSelectedSession(null))}
               showToast={showToast}
-              onScheduleNight={onScheduleNight}
+              onNightBorn={onNightBorn}
             />
           ) : (
             <SessionResultsView
@@ -6968,7 +6969,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               onOpenProfile={onOpenProfile}
               showConfetti={false}
               showToast={showToast}
-              onScheduleNight={onScheduleNight}
+              onNightBorn={onNightBorn}
               // Voted / Still-to-vote split only while the game can still
               // grow — a finished session's strip shows who actually came.
               expectedTotal={
