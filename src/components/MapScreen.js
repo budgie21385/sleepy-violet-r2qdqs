@@ -855,11 +855,10 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     });
   }
   function handlePastTap(group) {
-    if (group.nights.length === 1 && group.marks.length === 0) {
-      openNight(group.nights[0], group.venue);
-    } else {
-      setNightsSheet(group);
-    }
+    // ALWAYS the list first (Mark, Oct 9: "this should happen on all
+    // occasions, whether you have been there once or more") — one
+    // consistent beat: pin → the venue's nights → a night's card.
+    setNightsSheet(group);
   }
 
   // Group visible check-ins by venue — the per-viewer "Mark and John are at X"
@@ -1918,6 +1917,12 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
             const venue = nightsSheet.venue;
             setNightsSheet(null);
             openNight(night, venue);
+          }}
+          // Venue name → the venue card (Mark, Oct 9: "the venue should
+          // also be clickable in the list to display the card").
+          onOpenVenue={(venue) => {
+            setNightsSheet(null);
+            setSelectedVenue(venue);
           }}
         />
       )}

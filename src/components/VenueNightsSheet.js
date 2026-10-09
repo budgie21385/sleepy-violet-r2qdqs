@@ -55,7 +55,7 @@ function Avatar({ profile, isSelf }) {
   );
 }
 
-export function VenueNightsSheet({ group, userId, onClose, onOpenNight }) {
+export function VenueNightsSheet({ group, userId, onClose, onOpenNight, onOpenVenue }) {
   // Photo counts arrive after the sheet opens — a count of zero simply
   // renders no photos segment, so there's nothing to wait for.
   const [photoCounts, setPhotoCounts] = useState({});
@@ -107,9 +107,24 @@ export function VenueNightsSheet({ group, userId, onClose, onOpenNight }) {
       <div className="absolute left-0 right-0 bottom-0 max-h-[75%] flex flex-col bg-white rounded-t-3xl shadow-2xl">
         <div className="px-5 pt-3 pb-2">
           <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-200" />
-          <h2 className="text-base font-semibold leading-tight">
-            {group.venue.name}
-          </h2>
+          {/* Venue name opens the venue card (Mark, Oct 9) — the list is
+              about the nights, but the place itself is one tap away. */}
+          {onOpenVenue ? (
+            <button
+              type="button"
+              onClick={() => onOpenVenue(group.venue)}
+              className="flex items-center gap-1 text-left"
+            >
+              <h2 className="text-base font-semibold leading-tight underline decoration-[#455d3b]/40 underline-offset-2">
+                {group.venue.name}
+              </h2>
+              <span className="text-neutral-300 text-sm leading-none">›</span>
+            </button>
+          ) : (
+            <h2 className="text-base font-semibold leading-tight">
+              {group.venue.name}
+            </h2>
+          )}
           <p className="text-xs text-neutral-500 mt-0.5">{summary}</p>
         </div>
         <div className="flex-1 overflow-y-auto px-5 pb-6">

@@ -11,7 +11,7 @@
 // don't collide.
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle } from "lucide-react";
+import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle, CalendarDays, Moon } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
@@ -106,9 +106,10 @@ export function MapVenueSheet({
   }
 
   const [mapMenuOpen, setMapMenuOpen] = useState(false);
+  // The three-tense chooser behind the Plan pill (Oct 9).
+  const [planOpen, setPlanOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
-  const [checkingIn, setCheckingIn] = useState(false);
   // (The post-check-in "what's on" + tagging UI lives in CheckinSheet now —
   // App opens it over this card on a fresh check-in. Mark: embedding it here
   // felt too glued to the venue card.)
@@ -140,7 +141,6 @@ export function MapVenueSheet({
   // must not carry the "Checked in ✓" pill across).
   useEffect(() => {
     setCheckedIn(null);
-    setCheckingIn(false);
     // Pre-flip the pill if you're ALREADY checked in here (recent window) —
     // otherwise a fresh card-open shows "Check in" at a venue you're standing
     // in, which lies. Second tap still opens your thread as usual.
@@ -615,15 +615,15 @@ export function MapVenueSheet({
           >
             <MoreVertical size={20} />
           </button>
-          {/* Check in = "I'm here NOW" (presence, notifies friends) — the one
-              labeled action on the card. Reviews are a future, quieter kind. */}
+          {/* PLAN (Oct 9, Mark: "make it a calendar icon with the word
+              plan... give all 3 options on the pop up from the bottom").
+              The one labeled action: opens the three-tense chooser; each
+              row lands in the one form with this venue carried. Already
+              checked in → the pill stays the door back into your thread. */}
           {onCheckIn && (
             <button
               type="button"
-              disabled={checkingIn}
-              onClick={async () => {
-                // Second tap after checking in → open your own thread to
-                // watch comments arrive.
+              onClick={() => {
                 if (checkedIn) {
                   onOpenThread?.({
                     activityId: checkedIn.id,
@@ -638,10 +638,7 @@ export function MapVenueSheet({
                   });
                   return;
                 }
-                setCheckingIn(true);
-                const activity = await onCheckIn(venue);
-                setCheckingIn(false);
-                if (activity) setCheckedIn(activity);
+                setPlanOpen(true);
               }}
               className={`flex-1 mx-1 flex items-center justify-center gap-1.5 rounded-full py-2.5 text-sm font-medium active:scale-95 transition ${
                 checkedIn
@@ -649,8 +646,8 @@ export function MapVenueSheet({
                   : "bg-[#455d3b] text-white"
               }`}
             >
-              {checkedIn ? <MessageCircle size={15} /> : <MapPin size={15} />}
-              {checkedIn ? "Checked in ✓" : checkingIn ? "Checking in…" : "Check in"}
+              {checkedIn ? <MessageCircle size={15} /> : <CalendarDays size={15} />}
+              {checkedIn ? "Checked in ✓" : "Plan"}
             </button>
           )}
           <button
@@ -780,6 +777,68 @@ export function MapVenueSheet({
                 Share elsewhere
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* THE PLAN CHOOSER (Oct 9) — the venue card's when-sheet: Where is
+          already answered, these three rows answer When. All land in the
+          one form via onCheckIn's mode arg. */}
+      {planOpen && (
+        <div className="fixed inset-0 z-[3700]">
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setPlanOpen(false)}
+            className="absolute inset-0 bg-black/30"
+          />
+          <div
+            className="absolute left-0 right-0 bottom-0 mx-auto max-w-md rounded-t-3xl bg-white px-5 pt-3 shadow-2xl"
+            style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-200" />
+            <h2 className="mb-3 text-base font-semibold">When?</h2>
+            {[
+              {
+                key: "now",
+                icon: <MapPin size={16} />,
+                label: "I'm here now",
+                sub: "Check in. Friends can see it and join you",
+              },
+              {
+                key: "future",
+                icon: <CalendarDays size={16} />,
+                label: "Coming up",
+                sub: "Make the plan, invite people after",
+              },
+              {
+                key: "past",
+                icon: <Moon size={16} />,
+                label: "Already happened",
+                sub: "Add the night, photos and all",
+              },
+            ].map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => {
+                  setPlanOpen(false);
+                  onCheckIn(venue, null, opt.key);
+                }}
+                className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-neutral-100 bg-white px-4 py-3 text-left active:scale-[0.99] transition"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f5f1ea] text-neutral-500">
+                  {opt.icon}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-neutral-900">
+                    {opt.label}
+                  </span>
+                  <span className="block text-[11px] text-neutral-500">
+                    {opt.sub}
+                  </span>
+                </span>
+              </button>
+            ))}
           </div>
         </div>
       )}

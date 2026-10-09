@@ -2365,7 +2365,7 @@ useEffect(() => {
     setLookupUserId(uid);
   }
 
-  async function handleCheckIn(venue, joinedFrom = null) {
+  async function handleCheckIn(venue, joinedFrom = null, mode = "now") {
     const uid = session?.user?.id;
     if (!uid) {
       showToast("Sign in to check in");
@@ -2376,8 +2376,20 @@ useEffect(() => {
     // routes to the unified form — venue prefilled, Right now selected,
     // live toggle off. Nothing is created until they confirm; the instant
     // check-in + CheckinSheet path is retired for this door.
+    // Oct 9: the venue card's Plan chooser passes mode "future"/"past" —
+    // same form, venue carried, When pre-answered (tomorrow / yesterday).
     if (!joinedFrom) {
-      scheduleNight(venue, "", [], { mode: "now" });
+      if (mode === "future" || mode === "past") {
+        const d = new Date();
+        d.setDate(d.getDate() + (mode === "future" ? 1 : -1));
+        const pad = (n) => String(n).padStart(2, "0");
+        const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+          d.getDate()
+        )}`;
+        scheduleNight(venue, dateStr, [], {});
+      } else {
+        scheduleNight(venue, "", [], { mode: "now" });
+      }
       return null;
     }
     // JOINS keep the instant path — "I'm here too" answers a friend's
