@@ -705,9 +705,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     // opener's props) — it corrects everywhere on next load.
     showToast?.("Date updated");
   }
+  // What the one switch MEANS per tense (Oct 9 field fix: the form writes
+  // show_live, so a night created with live OFF was showing the settings
+  // switch ON — it was reading show_map's default): live tenses read the
+  // broadcast flag, past reads the memory pin.
+  const showMapOn =
+    tense === "past"
+      ? nightPerms?.showMap !== false
+      : nightPerms?.showLive === true;
   async function toggleShowMap() {
     if (!nightPerms || mapBusy || !iAmRootOwner) return;
-    const next = !nightPerms.showMap;
+    const next = !showMapOn;
     setMapBusy(true);
     // One user concept, two columns: show_map is the memory pin; show_live
     // keeps meaning "broadcast while fresh" and follows the switch except
@@ -1783,21 +1791,26 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     <span className="font-medium text-[#455d3b]">
                       ● happening now
                     </span>
-                    {nightPerms?.showMap !== false && nightPerms?.showLive
+                    {/* Explicit either way (Mark, Oct 9 field pass: the
+                        silent-when-off version read as a bug). Live
+                        broadcast = show_live, the form's toggle. */}
+                    {nightPerms?.showLive
                       ? " · on the live map"
-                      : ""}
+                      : " · not on the live map"}
                   </>
                 ) : tense === "coming_up" ? (
                   <>
                     🗓 {whenLine(thread.timestamp)}
-                    {nightPerms?.showMap !== false && nightPerms?.showLive
+                    {nightPerms?.showLive
                       ? " · on the live map when it starts"
-                      : ""}
+                      : " · not on the live map"}
                   </>
                 ) : (
                   <>
                     {whenLine(thread.timestamp)}
-                    {nightPerms?.showMap !== false ? " · on your map" : ""}
+                    {nightPerms?.showMap !== false
+                      ? " · on your map"
+                      : " · not on your map"}
                   </>
                 )}{" "}
                 · only{" "}
@@ -2026,12 +2039,12 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                     </span>
                     <span
                       className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full px-0.5 transition ${
-                        nightPerms.showMap ? "bg-[#455d3b]" : "bg-neutral-200"
+                        showMapOn ? "bg-[#455d3b]" : "bg-neutral-200"
                       }`}
                     >
                       <span
                         className={`h-4 w-4 rounded-full bg-white transition ${
-                          nightPerms.showMap ? "translate-x-4" : ""
+                          showMapOn ? "translate-x-4" : ""
                         }`}
                       />
                     </span>
@@ -2254,9 +2267,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
             just never tapping. Shows only while the card has no photos;
             once one lands, the grid below takes over with its add tile.
             Hidden on Coming Up — nothing has happened yet. */}
+        {/* On EVERY tense incl. Coming Up (Mark, Oct 9 field pass — the
+            universal card means universal; pre-day photos are the plan's
+            moodboard, and the collect link pre-day was always the point). */}
         {view === "card" &&
           uploadTargetId &&
-          tense !== "coming_up" &&
           photos.length === 0 &&
           pending.length === 0 && (
             <div className="px-5 pt-3">

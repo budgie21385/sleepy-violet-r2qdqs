@@ -746,7 +746,9 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
             <div className="flex items-center gap-3">
               <span className="flex-1 text-sm font-medium text-neutral-800">
-                Show on live map
+                {addMode === "now"
+                  ? "Show on live map"
+                  : "Show on live map when it starts"}
               </span>
               <button
                 type="button"
@@ -766,7 +768,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
             </div>
             <p className="mt-1 text-[11px] text-neutral-500">
               {!addShowLive
-                ? "Off — friends won't see you're here"
+                ? "Off. Friends won't see you're here"
                 : addMode === "now"
                 ? `Friends see you're at ${addVenues[0]?.name || "the spot"} now`
                 : `Friends see you at ${addVenues[0]?.name || "the spot"} from ${
