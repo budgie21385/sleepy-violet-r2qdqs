@@ -112,7 +112,12 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
   // wasn't built; it returns with the guest package (anon invite + RSVP +
   // public ?when= page + cover), all at once or not at all. The card's
   // settings toggle still controls guests_can_invite on any night.
-  const [collectPhotos, setCollectPhotos] = useState(true);
+  // Oct 10 (Mark): the toggle now lives on EVERY tense's form, not just
+  // events. Events keep default ON (the organiser came for it); casual
+  // nights default OFF (the album stays opt-in).
+  const [collectPhotos, setCollectPhotos] = useState(
+    () => prefill?.event === true
+  );
   // PERSONAL ADDRESS (Aug 30, Mark: "What if it's a personal address?") —
   // suburb goes on the personal venue row (world sees "Mark's house party ·
   // Fitzroy" and nothing more); the street address goes to
@@ -126,7 +131,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
   // BORN-ALBUM (Aug 21): the scheduler door creates the album directly —
   // its own popup already asked, so the post-save prompt must not double-ask.
   // Events fold in: the Collect photos toggle IS the album answer.
-  const bornAlbum = prefill?.album === true || (isEvent && collectPhotos);
+  const bornAlbum = prefill?.album === true || collectPhotos;
 
   useEffect(() => {
     const q = addQ.trim();
@@ -269,7 +274,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
     // "Share" from birth instead of asking the owner to find a Create
     // button. Casual albums stay deliberate. Failure is silent: settings
     // can still mint.
-    if (isEvent && collectPhotos && act?.id) {
+    if (collectPhotos && act?.id) {
       const { data: existingLink } = await supabase
         .from("checkin_collect_links")
         .select("id")
@@ -782,8 +787,40 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
           </div>
         ) : (
           <p className="mb-3 px-1 text-[11px] text-neutral-500">
-            Goes in your history — never on the live map.
+            Goes in your history, never on the live map.
           </p>
+        )}
+        {/* COLLECT PHOTOS on every tense (Oct 10, Mark) — flips the night
+            on as an album with the link/QR auto-minted. The sublabel names
+            who it's for and where it lives. */}
+        {!isEvent && (
+          <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
+            <div className="flex items-center gap-3">
+              <span className="flex-1 text-sm font-medium text-neutral-800">
+                Collect photos
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={collectPhotos}
+                onClick={() => setCollectPhotos((v) => !v)}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                  collectPhotos ? "bg-[#455d3b]" : "bg-neutral-300"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                    collectPhotos ? "left-[22px]" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-neutral-500">
+              {collectPhotos
+                ? "A link and QR for people not on Flanit. You'll find them in the card's settings"
+                : "Lets people who aren't on Flanit add their photos"}
+            </p>
+          </div>
         )}
         <button
           type="button"
