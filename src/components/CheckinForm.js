@@ -349,6 +349,10 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       timestamp: act.created_at,
       bornAlbum, // App skips the album prompt when the door already asked
       isEvent, // App opens the card as the share moment
+      // Oct 10 (Mark): the Collect photos toggle is the intent signal —
+      // ON means they came for the link, so the card opens straight onto
+      // settings where the auto-minted link + QR are waiting.
+      openSettings: isEvent && collectPhotos,
     });
   }
 

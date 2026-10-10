@@ -169,7 +169,10 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   const [taggedIds, setTaggedIds] = useState(() => new Set());
   const [tagStatusById, setTagStatusById] = useState({}); // uid → pending|accepted
   // Card views (July 23 redesign): card | comments (expanded) | people.
-  const [view, setView] = useState("card");
+  // Oct 10 (Mark): an event born with Collect photos ON opens straight
+  // onto settings — the link/QR is what the organiser came for; Back
+  // reveals the card and teaches where the link lives.
+  const [view, setView] = useState(thread.openSettings ? "settings" : "card");
   const [photosExpanded, setPhotosExpanded] = useState(false);
   const [nightPeople, setNightPeople] = useState([]); // profiles in the night
   const [friendState, setFriendState] = useState({}); // uid → friend|pending|none
