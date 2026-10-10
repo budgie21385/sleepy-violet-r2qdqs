@@ -56,6 +56,27 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
       : localDateStr(new Date(Date.now() - 24 * 60 * 60 * 1000))
   );
   const [addTime, setAddTime] = useState(() => prefill?.time || "");
+  // THE WHEN-PILL (Oct 10, Mark — the form was scrolling): the door
+  // pre-answered "when?", so the form shows ONE pill with the answer and
+  // a "change" affordance that opens the old controls. Events keep their
+  // date inputs always visible (date is the event's whole point).
+  const [whenEdit, setWhenEdit] = useState(false);
+  function whenPillLabel() {
+    if (addMode === "now") return "Right now";
+    if (!addDate) return "Pick a date";
+    const d = new Date(`${addDate}T${addTime || "19:00"}`);
+    const day = d.toLocaleDateString("en-AU", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+    if (addDate < localDateStr()) return day; // past: no clock time shown
+    const t = d.toLocaleTimeString("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${day} · ${t}`;
+  }
   const [addShowLive, setAddShowLive] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
   // WHO? (Aug 21, Mark: "should we ask users to add their friends at this
@@ -240,7 +261,7 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         .single();
       if (error) {
         console.error("Check-in failed:", error);
-        showToast?.("Couldn't save — try again");
+        showToast?.("Couldn't save. Try again");
         setAddSaving(false);
         return;
       }
@@ -334,8 +355,8 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
             uid,
             future ? "You're on the plan 🎉" : "You've been checked in",
             future
-              ? `${label || first.name} · ${dateTxt} — accept to join the night`
-              : `${label || first.name} — accept to add it to your Been list`
+              ? `${label || first.name} · ${dateTxt}. Accept to join the night`
+              : `${label || first.name}. Accept to add it to your Been list`
           );
         } else if (tagErr.code !== "23505") {
           console.error("Auto-invite failed:", tagErr);
@@ -390,11 +411,14 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
             ✕
           </button>
         </div>
-        <p className="text-[11px] text-neutral-500 mb-3">
-          {isEvent
-            ? "The album's ready before the night. Anyone can add photos with your link, even without Flanit."
-            : "It lands in your Been list. Add photos and videos after, and if friends checked in that night, their moments show up too."}
-        </p>
+        {/* Intro blurb: events only (Oct 10 — the casual form's two-line
+            explainer was costing the Done button its place on screen). */}
+        {isEvent && (
+          <p className="text-[11px] text-neutral-500 mb-3">
+            The album's ready before the night. Anyone can add photos with
+            your link, even without Flanit.
+          </p>
+        )}
         {/* What / Where / When (Mark, Aug 20) — three questions, no more
             words. Also settles audit #4: flat labels beat mode-aware ones. */}
         <label className="block text-[11px] font-medium text-neutral-500 mb-1 px-1">
@@ -667,33 +691,51 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         <label className="mt-3 block text-[11px] font-medium text-neutral-500 mb-1 px-1">
           When?
         </label>
-        {!isEvent && (
-        <div className="mb-2 flex bg-neutral-100 rounded-full p-0.5 text-sm font-medium">
-          <button
-            type="button"
-            onClick={() => setAddMode("now")}
-            className={`flex-1 rounded-full py-2.5 transition ${
-              addMode === "now"
-                ? "bg-white text-[#455d3b] shadow-sm"
-                : "text-neutral-500"
-            }`}
-          >
-            Right now
-          </button>
-          <button
-            type="button"
-            onClick={() => setAddMode("date")}
-            className={`flex-1 rounded-full py-2.5 transition ${
-              addMode === "date"
-                ? "bg-white text-[#455d3b] shadow-sm"
-                : "text-neutral-500"
-            }`}
-          >
-            Choose date
-          </button>
-        </div>
+        {/* THE WHEN-PILL (Oct 10): one row showing the door's answer;
+            "change" opens the full controls. Doctrine's tense-morph —
+            picking a different date quietly becomes the other tense's
+            form. The "upcoming night" hint line retired with it. */}
+        {!isEvent && !whenEdit && (
+          <div className="mb-2 flex gap-2">
+            <span className="flex-1 flex items-center justify-center rounded-full border border-[#455d3b] bg-[#edf2eb] px-4 py-2.5 text-sm font-medium text-[#455d3b]">
+              {whenPillLabel()}
+            </span>
+            <button
+              type="button"
+              onClick={() => setWhenEdit(true)}
+              className="shrink-0 rounded-full border border-neutral-200 px-4 py-2.5 text-sm text-neutral-500 active:scale-95 transition"
+            >
+              change
+            </button>
+          </div>
         )}
-        {addMode === "date" && (
+        {!isEvent && whenEdit && (
+          <div className="mb-2 flex bg-neutral-100 rounded-full p-0.5 text-sm font-medium">
+            <button
+              type="button"
+              onClick={() => setAddMode("now")}
+              className={`flex-1 rounded-full py-2.5 transition ${
+                addMode === "now"
+                  ? "bg-white text-[#455d3b] shadow-sm"
+                  : "text-neutral-500"
+              }`}
+            >
+              Right now
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddMode("date")}
+              className={`flex-1 rounded-full py-2.5 transition ${
+                addMode === "date"
+                  ? "bg-white text-[#455d3b] shadow-sm"
+                  : "text-neutral-500"
+              }`}
+            >
+              Choose date
+            </button>
+          </div>
+        )}
+        {(isEvent || whenEdit) && addMode === "date" && (
           <div className="mb-2 flex gap-2">
             <input
               type="date"
@@ -711,12 +753,6 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
               />
             )}
           </div>
-        )}
-        {!isEvent && addMode === "date" && addDate > todayStr && (
-          <p className="mb-2 px-1 text-[11px] text-[#455d3b]">
-            Upcoming night — the card's ready now, so you can share the photo
-            link before the day.
-          </p>
         )}
         {isEvent ? (
           <>
@@ -751,75 +787,77 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
               </div>
             </div>
           </>
-        ) : addMode === "now" || (addMode === "date" && addDate >= todayStr) ? (
-          <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
-            <div className="flex items-center gap-3">
-              <span className="flex-1 text-sm font-medium text-neutral-800">
-                {addMode === "now"
-                  ? "Show on live map"
-                  : "Show on live map when it starts"}
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={addShowLive}
-                onClick={() => setAddShowLive((v) => !v)}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-                  addShowLive ? "bg-[#455d3b]" : "bg-neutral-300"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-                    addShowLive ? "left-[22px]" : "left-0.5"
-                  }`}
-                />
-              </button>
-            </div>
-            <p className="mt-1 text-[11px] text-neutral-500">
-              {!addShowLive
-                ? "Off. Friends won't see you're here"
-                : addMode === "now"
-                ? `Friends see you're at ${addVenues[0]?.name || "the spot"} now`
-                : `Friends see you at ${addVenues[0]?.name || "the spot"} from ${
-                    addTime || "19:00"
-                  } on the day`}
-            </p>
-          </div>
         ) : (
-          <p className="mb-3 px-1 text-[11px] text-neutral-500">
-            Goes in your history, never on the live map.
-          </p>
-        )}
-        {/* COLLECT PHOTOS on every tense (Oct 10, Mark) — flips the night
-            on as an album with the link/QR auto-minted. The sublabel names
-            who it's for and where it lives. */}
-        {!isEvent && (
-          <div className="mb-3 rounded-2xl border border-neutral-200 px-3.5 py-2.5">
-            <div className="flex items-center gap-3">
-              <span className="flex-1 text-sm font-medium text-neutral-800">
-                Collect photos
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={collectPhotos}
-                onClick={() => setCollectPhotos((v) => !v)}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition ${
-                  collectPhotos ? "bg-[#455d3b]" : "bg-neutral-300"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-                    collectPhotos ? "left-[22px]" : "left-0.5"
+          /* ONE TOGGLE BOX (Oct 10, Mark — the form was scrolling): live
+             row only on live tenses, collect row on all three, sublabels
+             render ONLY when a toggle is on. */
+          <div className="mb-3 rounded-2xl border border-neutral-200 overflow-hidden">
+            {(addMode === "now" ||
+              (addMode === "date" && addDate >= todayStr)) && (
+              <div className="px-3.5 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="flex-1 text-sm font-medium text-neutral-800">
+                    {addMode === "now"
+                      ? "Show on live map"
+                      : "Show on live map when it starts"}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={addShowLive}
+                    onClick={() => setAddShowLive((v) => !v)}
+                    className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                      addShowLive ? "bg-[#455d3b]" : "bg-neutral-300"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                        addShowLive ? "left-[22px]" : "left-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+                {addShowLive && (
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    {addMode === "now"
+                      ? `Friends see you're at ${
+                          addVenues[0]?.name || "the spot"
+                        } now`
+                      : `Friends see you at ${
+                          addVenues[0]?.name || "the spot"
+                        } from ${addTime || "19:00"} on the day`}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="border-t border-neutral-100 px-3.5 py-2.5 first:border-t-0">
+              <div className="flex items-center gap-3">
+                <span className="flex-1 text-sm font-medium text-neutral-800">
+                  Collect photos
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={collectPhotos}
+                  onClick={() => setCollectPhotos((v) => !v)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                    collectPhotos ? "bg-[#455d3b]" : "bg-neutral-300"
                   }`}
-                />
-              </button>
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                      collectPhotos ? "left-[22px]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+              {collectPhotos && (
+                <p className="mt-1 text-[11px] text-neutral-500">
+                  A link and QR for people not on Flanit. You'll find them
+                  in the card's settings
+                </p>
+              )}
             </div>
-            <p className="mt-1 text-[11px] text-neutral-500">
-              {collectPhotos
-                ? "A link and QR for people not on Flanit. You'll find them in the card's settings"
-                : "Lets people who aren't on Flanit add their photos"}
-            </p>
           </div>
         )}
         <button
