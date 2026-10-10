@@ -228,18 +228,8 @@ export function BeenScreen({ userId, savedIds, onSave, onUnsave, onHide, onBack,
             <p className="text-sm text-neutral-500">Your check-ins</p>
             <h1 className="text-2xl font-semibold tracking-tight">Been</h1>
           </div>
-          {/* Opens the ONE check-in form (App-level overlay). "Create a
-              check-in", not "past" — the form does right-now and upcoming
-              too (Mark, Aug 20). This was the second add button; the
-              refactor rewired only the first — tapping this one threw on
-              the deleted setAddOpen. */}
-          <button
-            type="button"
-            onClick={() => onAddNight?.()}
-            className="ml-auto rounded-full bg-[#455d3b] text-white text-xs font-medium px-3.5 py-2 active:scale-95 transition"
-          >
-            + Create a check-in
-          </button>
+          {/* "+ Create a check-in" REMOVED (Mark, Oct 10): creation lives
+              at the + (when-sheet) and the venue card's Plan chooser only. */}
         </div>
 
         {/* PLACES VIEW PULLED (July 31, Mark: the Been-list restructure is a

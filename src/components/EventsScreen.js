@@ -189,13 +189,9 @@ export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreat
             <p className="text-sm text-neutral-500">Your future plans</p>
             <h1 className="text-2xl font-semibold tracking-tight">Events</h1>
           </div>
-          <button
-            type="button"
-            onClick={onCreateEvent}
-            className="ml-auto rounded-full bg-[#455d3b] text-white text-xs font-medium px-3.5 py-2 active:scale-95 transition"
-          >
-            + Create event
-          </button>
+          {/* "+ Create event" REMOVED (Mark, Oct 10): creation lives at
+              the + (when-sheet) and the venue card's Plan chooser only.
+              The weddings-funnel intent still auto-opens the event form. */}
         </div>
 
         {rows === null && (
