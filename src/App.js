@@ -4996,9 +4996,22 @@ if (authLoading || guestLoading) {
         onImportMap={() => setShowImport(true)}
         // The when-sheet's three tenses — all land in the ONE form, on
         // THIS page (Aug, Mark), tense pre-answered by the chosen door.
+        // EXPLICIT dates (Oct 10 field fix: bare {mode:"date"} defaults to
+        // YESTERDAY — the old Been backdate door — so "Coming up" opened a
+        // past-dated form): tomorrow for the plan, yesterday for the memory.
         onNow={() => setCheckinForm({ mode: "now" })}
-        onComingUp={() => setCheckinForm({ mode: "date" })}
-        onPast={() => setCheckinForm({ mode: "date" })}
+        onComingUp={() =>
+          setCheckinForm({
+            mode: "date",
+            date: localDateStrApp(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+          })
+        }
+        onPast={() =>
+          setCheckinForm({
+            mode: "date",
+            date: localDateStrApp(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+          })
+        }
         onRightNow={() => {
           carryMapFilters();
           setMatchMode("concurrent");
