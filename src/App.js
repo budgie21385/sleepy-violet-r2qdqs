@@ -50,6 +50,7 @@ import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
 import { EventsScreen } from "./components/EventsScreen";
 import { FriendAvatar } from "./components/FriendAvatar";
+import { TopFriends } from "./components/TopFriends";
 import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
 import { CheckinSheet } from "./components/CheckinSheet";
 import { BeenScreen, CheckinHistoryRow } from "./components/BeenScreen";
@@ -1464,7 +1465,7 @@ useEffect(() => {
     let cancelled = false;
     supabase
       .from("profiles")
-      .select("id, display_name, username, tier, avatar_url")
+      .select("id, display_name, username, tier, avatar_url, top_friends")
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
@@ -5888,6 +5889,16 @@ function ProfileTab({
             {tierLabel}
           </span>
         </div>
+
+        {/* TOP FRIENDS (Oct 11, profile doctrine) — public shelf, up to 4,
+            #1 wears the gold ring; tap to reorder/swap, See-all opens the
+            full friends list. */}
+        <TopFriends
+          userId={session?.user?.id}
+          profile={profile}
+          setProfile={setProfile}
+          onSeeAll={() => setShowFriends(true)}
+        />
 
         <button
           type="button"
