@@ -1628,9 +1628,23 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   {labelValue}
                 </button>
               ) : null}
-              {/* "add a title" eyebrow REMOVED (Mark, Aug 21) — the form's
-                  "What?" field asks at creation; the card doesn't nag. An
-                  existing title still renders and stays owner-editable. */}
+              {/* "add a title" RESTORED as a quiet link (Oct 10, Mark: "if
+                  you don't initially add a title there is no way to do
+                  that again later") — owner-only, neutral, one line. The
+                  Aug 21 removal assumed the form always asked; it does,
+                  but skipping it left no second chance. */}
+              {!labelValue && isOwner && !labelEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLabelDraft("");
+                    setLabelEdit(true);
+                  }}
+                  className="block text-[11px] font-medium text-neutral-400"
+                >
+                  + add a title
+                </button>
+              )}
               {/* Title editor lives in the TITLE's slot (Mark: not under the
                   names/venue). */}
               {labelEdit && isOwner && (
