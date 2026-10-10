@@ -5879,9 +5879,14 @@ function ProfileTab({
           {profile?.display_name && (
             <p className="text-sm text-neutral-500">{profile.display_name}</p>
           )}
-          <span className="inline-block mt-2 text-xs text-[#455d3b] bg-[#455d3b]/10 rounded-full px-3 py-1">
-            {tierLabel}
-          </span>
+          {/* Tier badge only when it SAYS something (Oct 11, Mark:
+              "member" is the default — wearing it is noise). Influencer
+              tiers keep their flair. */}
+          {tierLabel !== "Member" && (
+            <span className="inline-block mt-2 text-xs text-[#455d3b] bg-[#455d3b]/10 rounded-full px-3 py-1">
+              {tierLabel}
+            </span>
+          )}
         </div>
 
         {/* TOP FRIENDS (Oct 11, profile doctrine) — public shelf, up to 4,
