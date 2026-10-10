@@ -29,7 +29,7 @@ export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreat
       // My own upcoming nights.
       const { data: mine } = await supabase
         .from("activities")
-        .select("id, user_id, venue_id, label, created_at, is_album, is_event")
+        .select("id, user_id, venue_id, label, created_at, is_album, is_event, joined_from")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .gt("created_at", nowIso)
@@ -47,21 +47,29 @@ export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreat
       if (tagIds.length > 0) {
         const { data: acts } = await supabase
           .from("activities")
-          .select("id, user_id, venue_id, label, created_at, is_album, is_event")
+          .select("id, user_id, venue_id, label, created_at, is_album, is_event, joined_from")
           .in("id", tagIds)
           .gt("created_at", nowIso);
         invited = acts || [];
       }
       const seen = new Set();
-      const upcoming = [...(mine || []), ...invited]
+      let upcoming = [...(mine || []), ...invited]
         .filter((a) => (seen.has(a.id) ? false : seen.add(a.id)))
         .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // ONE NIGHT, ONE ROW (Oct 10, Mark: a multi-venue plan showed each
+      // stop as its own event). Legs carry joined_from → their root; when
+      // the root is in the list, the leg collapses into it. A shard that
+      // joins SOMEONE ELSE's night keeps its row (its root isn't here).
+      const upIds = new Set(upcoming.map((a) => a.id));
+      upcoming = upcoming.filter(
+        (a) => !a.joined_from || !upIds.has(a.joined_from)
+      );
 
       // PAST EVENTS (Mark, Aug 29: "Let's also add a section for past
       // events") — is_event only, own or accepted-invite, newest first.
       const { data: pastMine } = await supabase
         .from("activities")
-        .select("id, user_id, venue_id, label, created_at, is_album, is_event")
+        .select("id, user_id, venue_id, label, created_at, is_album, is_event, joined_from")
         .eq("user_id", userId)
         .eq("kind", "checkin")
         .eq("is_event", true)
@@ -72,16 +80,19 @@ export function EventsScreen({ userId, onBack, showToast, onOpenProfile, onCreat
       if (tagIds.length > 0) {
         const { data: acts } = await supabase
           .from("activities")
-          .select("id, user_id, venue_id, label, created_at, is_album, is_event")
+          .select("id, user_id, venue_id, label, created_at, is_album, is_event, joined_from")
           .in("id", tagIds)
           .eq("is_event", true)
           .lte("created_at", nowIso);
         pastInvited = acts || [];
       }
       const seenPast = new Set();
-      const past = [...(pastMine || []), ...pastInvited]
+      let past = [...(pastMine || []), ...pastInvited]
         .filter((a) => (seenPast.has(a.id) ? false : seenPast.add(a.id)))
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const pastIds = new Set(past.map((a) => a.id));
+      past = past
+        .filter((a) => !a.joined_from || !pastIds.has(a.joined_from))
         .slice(0, 20);
 
       // Venues for the rows (open reads — unresolvable ones fall back).

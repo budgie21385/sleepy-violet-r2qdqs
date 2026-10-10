@@ -856,12 +856,13 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
                   />
                 </button>
               </div>
-              {collectPhotos && (
-                <p className="mt-1 text-[11px] text-neutral-500">
-                  A link and QR for people not on Flanit. You'll find them
-                  in the card's settings
-                </p>
-              )}
+              {/* The "not on Flanit" line stays in BOTH states (Oct 10,
+                  Mark — it vanished when sublabels went on-only). */}
+              <p className="mt-1 text-[11px] text-neutral-500">
+                {collectPhotos
+                  ? "A link and QR for people not on Flanit. You'll find them in the card's settings"
+                  : "For people who aren't on Flanit"}
+              </p>
             </div>
           </div>
         )}
