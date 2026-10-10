@@ -5923,7 +5923,10 @@ function ProfileTab({
           import, sign out. The Been / Friends / Sessions / Import cards
           died from the face; friends live via the shelf's see-all. */}
       {showSettings && (
-        <div className="fixed inset-0 z-[2400] overflow-y-auto bg-[#fdf6f0] px-6 pt-6 pb-28">
+        /* z-1500: ABOVE the tab's own content, BELOW every screen this
+           overlay launches (SessionsScreen z-2000, Import z-3500) — they
+           must paint over it (Oct 11 field find: sessions opened under). */
+        <div className="fixed inset-0 z-[1500] overflow-y-auto bg-[#fdf6f0] px-6 pt-6 pb-28">
           <div className="mx-auto w-full max-w-sm">
             <button
               type="button"
