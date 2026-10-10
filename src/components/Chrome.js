@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 // HeartHandshake/ListChecks = the mode icons everywhere (Aug 21, Mark:
 // "Why did you not update all the instances" — all-surfaces rule).
-import { MapPin, X, Plus, Heart, Bell, User, CalendarDays } from "lucide-react";
+import { MapPin, X, Plus, Heart, Bell, User } from "lucide-react";
 import { WhenSheet } from "./WhenSheet";
 
 // THE ONE + (Oct 9 doctrine): the FAB's option menu RETIRED — the + now
@@ -114,7 +114,7 @@ export function BottomTabBar({ tab, setTab, unreadCount = 0, profileDot = false 
       {railItem("matches", "With friends", <Heart size={20} fill={tab === "matches" ? "#455d3b" : "none"} />)}
       {railItem("map", "Map", <MapPin size={20} fill={tab === "map" ? "#455d3b" : "none"} />)}
       {railItem("activity", "Activity", <Bell size={20} fill={tab === "activity" ? "#455d3b" : "none"} />)}
-      {railItem("events", "Events", <CalendarDays size={20} />)}
+      {/* Events rail item retired Oct 11 — the profile timeline owns it. */}
       {railItem("profile", "Profile", <User size={20} />, "mt-auto")}
     </div>
     <div className="lg:hidden fixed bottom-0 left-0 right-0 z-[3000] bg-white border-t border-neutral-100 shadow-lg">
@@ -162,19 +162,8 @@ export function BottomTabBar({ tab, setTab, unreadCount = 0, profileDot = false 
           </span>
           <span className="text-xs font-medium">Activity</span>
         </button>
-        {/* EVENTS — fifth tab (Aug 29, Mark confirmed; iOS convention caps
-            at five, and Profile collapses to an avatar when Feed arrives,
-            per the June nav plan). */}
-        <button
-          type="button"
-          onClick={() => setTab("events")}
-          className={`flex-1 flex flex-col items-center gap-1 py-3 transition ${
-            tab === "events" ? "text-[#455d3b]" : "text-neutral-400"
-          }`}
-        >
-          <CalendarDays size={20} />
-          <span className="text-xs font-medium">Events</span>
-        </button>
+        {/* Events tab retired Oct 11 (profile doctrine) — the timeline on
+            Profile owns upcoming + past; slot reserved for Feed. */}
         <button
           type="button"
           onClick={() => setTab("profile")}

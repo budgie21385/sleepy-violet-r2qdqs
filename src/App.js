@@ -48,9 +48,9 @@ import {
 } from "./lib/friendships";
 import { AddHostFriendCard } from "./components/AddHostFriendCard";
 import { ActivityDrawer } from "./components/ActivityDrawer";
-import { EventsScreen } from "./components/EventsScreen";
 import { FriendAvatar } from "./components/FriendAvatar";
 import { TopFriends } from "./components/TopFriends";
+import { NightsTimeline } from "./components/NightsTimeline";
 import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
 import { CheckinSheet } from "./components/CheckinSheet";
 import { BeenScreen, CheckinHistoryRow } from "./components/BeenScreen";
@@ -71,7 +71,7 @@ function localDateStrApp(d = new Date()) {
   ).padStart(2, "0")}`;
 }
 import { ALL, MATCH_OPTIONS, RADIUS_OPTIONS } from "./lib/constants";
-import { RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, MapPin as MapPinIcon } from "lucide-react";
+import { RotateCcw, Heart, X, Search, Locate, LogOut, Users, Check, ArrowLeft, Trash2, MoreVertical, Clock, Download, Upload, UserPlus, UserMinus, Camera, HeartHandshake, ListChecks, Settings as SettingsIcon, MapPin as MapPinIcon } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { prefetchVenueDetails } from "./lib/venueDetails";
 import { sendPush } from "./lib/push";
@@ -309,11 +309,14 @@ export default function RestaurantSwipeMVP() {
   const [partnerLikes, setPartnerLikes] = useState([]);
   const [markPasses, setMarkPasses] = useState([]);
   const [partnerPasses, setPartnerPasses] = useState([]);
-  const [tab, setTab] = useState(
-    () =>
+  const [tab, setTab] = useState(() => {
+    const saved =
       (typeof window !== "undefined" && localStorage.getItem("flanit_tab")) ||
-      "matches"
-  );
+      "matches";
+    // Events tab retired Oct 11 — a persisted "events" would strand the
+    // user on a blank screen; their nights live on Profile now.
+    return saved === "events" ? "profile" : saved;
+  });
   // Persist the active tab so a page refresh stays on the current tab.
   useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("flanit_tab", tab);
@@ -464,7 +467,9 @@ export default function RestaurantSwipeMVP() {
     try {
       if (localStorage.getItem("flanit_create_event_intent")) {
         localStorage.removeItem("flanit_create_event_intent");
-        setTab("events");
+        // Events tab retired (Oct 11) — the funnel lands on Profile, where
+        // the born event will appear in Next.
+        setTab("profile");
         setCheckinForm({ event: true });
       }
     } catch {}
@@ -4845,6 +4850,7 @@ if (authLoading || guestLoading) {
           onNightBorn={(t) => setThreadCheckin(t)}
           onCheckIn={handleCheckIn}
           onOpenThread={setThreadCheckin}
+          onOpenSession={(sid) => setNotifSessionId(sid)}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -4864,23 +4870,9 @@ if (authLoading || guestLoading) {
           showToast={showToast}
         />
       )}
-      {/* EVENTS — fifth tab (Aug 29–30). Upcoming nights + past events;
-          "+ Create event" opens the unified form's event variant. */}
-      {tab === "events" && session?.user?.id && (
-        <EventsScreen
-          userId={session.user.id}
-          showToast={showToast}
-          onOpenProfile={openProfile}
-          onCreateEvent={() => setCheckinForm({ event: true })}
-          refreshSignal={beenRefresh}
-          // Oct 9 field find (Mark): the Events tab's night card had no
-          // venue door at all — the one surface that never got the wire.
-          onOpenVenue={(v) => {
-            setCardVenueZ(3700); // above the open night card
-            setCardVenue(v);
-          }}
-        />
-      )}
+      {/* EVENTS TAB RETIRED (Oct 11, profile doctrine) — its upcoming and
+          past lists live in the profile's Now/Next/Been timeline now; the
+          freed fifth slot goes to the June nav plan when Feed arrives. */}
       {showImport && (
         <ImportGoogleMapsScreen
           userId={session?.user?.id}
@@ -5494,8 +5486,10 @@ function ProfileTab({
   onNightBorn,
   onCheckIn,
   onOpenThread,
+  onOpenSession,
 }) {
   const [showMyList, setShowMyList] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [sessionsCount, setSessionsCount] = useState(null);
   // Been — your own check-in history (the memory ledger).
@@ -5503,7 +5497,6 @@ function ProfileTab({
 
   // (The scheduler → Been navigation handoff died in Aug's overlay refactor:
   // CheckinForm now overlays whatever page you're on — no tab switch.)
-  const [beenCount, setBeenCount] = useState(null);
   // Friend graph counts for the entry card subtitle. Two queries kept simple
   // (count, head:true). Task #8 will lift requestCount to App level so the
   // bell badge shares the same source.
@@ -5532,27 +5525,8 @@ function ProfileTab({
     };
   }, [session?.user?.id]);
 
-  // Been count for the card subtitle.
-  useEffect(() => {
-    const uid = session?.user?.id;
-    if (!uid) {
-      setBeenCount(null);
-      return;
-    }
-    let cancelled = false;
-    supabase
-      .from("activities")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", uid)
-      .eq("kind", "checkin")
-      .then(({ count, error }) => {
-        if (cancelled || error) return;
-        setBeenCount(count ?? 0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.user?.id]);
+  // (Been count effect removed Oct 11 — the Been card died; the timeline
+  // IS the list.)
 
   // Friend + request counts. Accepted friendships (either party) drive the
   // "N friends" subtitle; incoming pending requests (I'm addressee) drive the
@@ -5788,9 +5762,21 @@ function ProfileTab({
         />
       )}
       <div className="w-full max-w-sm">
-        <div className="mb-5">
-          <p className="text-sm text-neutral-500">Account</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
+        <div className="mb-5 flex items-start justify-between">
+          <div>
+            <p className="text-sm text-neutral-500">Account</p>
+            <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
+          </div>
+          {/* THE COG (Oct 11, profile doctrine): identity on the face,
+              maintenance behind the gear. */}
+          <button
+            type="button"
+            aria-label="Settings"
+            onClick={() => setShowSettings(true)}
+            className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-white border border-neutral-100 text-neutral-600 shadow-sm active:scale-95 transition"
+          >
+            <SettingsIcon size={18} />
+          </button>
         </div>
 
         {(!profile?.username || !profile?.avatar_url) && (
@@ -5898,6 +5884,8 @@ function ProfileTab({
           profile={profile}
           setProfile={setProfile}
           onSeeAll={() => setShowFriends(true)}
+          friendCount={friendCount}
+          requestCount={requestCount}
         />
 
         <button
@@ -5917,150 +5905,138 @@ function ProfileTab({
           <span className="text-neutral-400 text-lg leading-none">›</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setShowBeen(true)}
-          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
-            <MapPinIcon size={18} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium">Been</p>
-            <p className="text-xs text-neutral-500">
-              {beenCount === null
-                ? "Loading..."
-                : beenCount === 0
-                ? "No check-ins yet"
-                : `${beenCount} check-in${beenCount === 1 ? "" : "s"}`}
-            </p>
-          </div>
-          <span className="text-neutral-400 text-lg leading-none">›</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setShowSessions(true)}
-          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
-            <Users size={18} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium">Your sessions</p>
-            <p className="text-xs text-neutral-500">
-              {sessionsCount === null
-                ? "Loading..."
-                : sessionsCount === 0
-                ? "Nothing yet"
-                : `${sessionsCount} session${sessionsCount === 1 ? "" : "s"}`}
-            </p>
-          </div>
-          <span className="text-neutral-400 text-lg leading-none">›</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setShowFriends(true)}
-          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
-            <Heart size={18} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium">Friends</p>
-            <p className="text-xs text-neutral-500 flex items-center gap-2">
-              {friendCount === null
-                ? "Loading..."
-                : friendCount === 0
-                ? "Nobody yet"
-                : `${friendCount} friend${friendCount === 1 ? "" : "s"}`}
-              {requestCount > 0 && (
-                <span className="inline-flex items-center justify-center rounded-full bg-red-600 text-white text-[10px] font-medium px-2 py-0.5">
-                  {requestCount} request{requestCount === 1 ? "" : "s"}
-                </span>
-              )}
-            </p>
-          </div>
-          <span className="text-neutral-400 text-lg leading-none">›</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setShowImport(true)}
-          className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
-            <Download size={18} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium">Import from Google Maps</p>
-            <p className="text-xs text-neutral-500">
-              Bring your saved places onto your map
-            </p>
-          </div>
-          <span className="text-neutral-400 text-lg leading-none">›</span>
-        </button>
-
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 space-y-4">
-          <label className="block">
-            <span className="block text-xs font-medium text-neutral-700 mb-1.5">
-              Your name
-            </span>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={60}
-              className="w-full rounded-2xl bg-neutral-50 px-4 py-3 text-base outline-none border border-neutral-100"
-            />
-          </label>
-
-          <label className="block">
-            <span className="block text-xs font-medium text-neutral-700 mb-1.5">
-              Username
-            </span>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 text-base">
-                @
-              </span>
-              <input
-                ref={usernameInputRef}
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                maxLength={20}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck="false"
-                className="w-full rounded-2xl bg-neutral-50 pl-8 pr-4 py-3 text-base outline-none border border-neutral-100"
-              />
-            </div>
-            <UsernameHint status={usernameStatus} />
-          </label>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={!canSave}
-          className="w-full rounded-2xl bg-[#455d3b] py-4 mt-4 font-medium text-white disabled:bg-neutral-300"
-        >
-          {saving ? "Saving..." : saved ? "Saved" : "Save"}
-        </button>
-        {saveError && (
-          <p className="text-sm text-red-600 mt-2 text-center">{saveError}</p>
-        )}
-
-        <div className="h-px bg-neutral-200 my-6" />
-
-        <button
-          onClick={signOut}
-          className="w-full rounded-2xl bg-white border border-neutral-200 py-4 font-medium text-red-700 flex items-center justify-center gap-2"
-        >
-          <LogOut size={18} />
-          Sign out
-        </button>
+        {/* THE TIMELINE (Oct 11, profile doctrine): Now / Next / Been —
+            the person's nights in three tenses. Replaces the Been card
+            and the retired Events tab's lists; active sessions ride Next
+            as dashed deciding rows. */}
+        <NightsTimeline
+          userId={session?.user?.id}
+          onOpenThread={onOpenThread}
+          onOpenSession={onOpenSession}
+          onSeeAllBeen={() => setShowBeen(true)}
+          refreshSignal={beenRefresh}
+        />
       </div>
+
+      {/* SETTINGS (Oct 11): maintenance behind the cog — edit name and
+          username, sessions list (kept whole, Mark's ruling), Google Maps
+          import, sign out. The Been / Friends / Sessions / Import cards
+          died from the face; friends live via the shelf's see-all. */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[2400] overflow-y-auto bg-[#fdf6f0] px-6 pt-6 pb-28">
+          <div className="mx-auto w-full max-w-sm">
+            <button
+              type="button"
+              onClick={() => setShowSettings(false)}
+              className="mb-4 flex items-center gap-1.5 text-sm font-medium text-[#455d3b]"
+            >
+              <ArrowLeft size={16} /> Profile
+            </button>
+            <h1 className="mb-5 text-2xl font-semibold tracking-tight">
+              Settings
+            </h1>
+
+            <button
+              type="button"
+              onClick={() => setShowSessions(true)}
+              className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+                <Users size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium">Your sessions</p>
+                <p className="text-xs text-neutral-500">
+                  {sessionsCount === null
+                    ? "Loading..."
+                    : sessionsCount === 0
+                    ? "Nothing yet"
+                    : `${sessionsCount} session${sessionsCount === 1 ? "" : "s"}`}
+                </p>
+              </div>
+              <span className="text-neutral-400 text-lg leading-none">›</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowImport(true)}
+              className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+                <Download size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium">Import from Google Maps</p>
+                <p className="text-xs text-neutral-500">
+                  Bring your saved places onto your map
+                </p>
+              </div>
+              <span className="text-neutral-400 text-lg leading-none">›</span>
+            </button>
+
+            <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100 space-y-4">
+              <label className="block">
+                <span className="block text-xs font-medium text-neutral-700 mb-1.5">
+                  Your name
+                </span>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  maxLength={60}
+                  className="w-full rounded-2xl bg-neutral-50 px-4 py-3 text-base outline-none border border-neutral-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="block text-xs font-medium text-neutral-700 mb-1.5">
+                  Username
+                </span>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 text-base">
+                    @
+                  </span>
+                  <input
+                    ref={usernameInputRef}
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                    maxLength={20}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    className="w-full rounded-2xl bg-neutral-50 pl-8 pr-4 py-3 text-base outline-none border border-neutral-100"
+                  />
+                </div>
+                <UsernameHint status={usernameStatus} />
+              </label>
+            </div>
+
+            <button
+              onClick={handleSave}
+              disabled={!canSave}
+              className="w-full rounded-2xl bg-[#455d3b] py-4 mt-4 font-medium text-white disabled:bg-neutral-300"
+            >
+              {saving ? "Saving..." : saved ? "Saved" : "Save"}
+            </button>
+            {saveError && (
+              <p className="text-sm text-red-600 mt-2 text-center">
+                {saveError}
+              </p>
+            )}
+
+            <div className="h-px bg-neutral-200 my-6" />
+
+            <button
+              onClick={signOut}
+              className="w-full rounded-2xl bg-white border border-neutral-200 py-4 font-medium text-red-700 flex items-center justify-center gap-2"
+            >
+              <LogOut size={18} />
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

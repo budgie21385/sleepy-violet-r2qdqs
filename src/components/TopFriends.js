@@ -13,7 +13,14 @@ import { FriendAvatar } from "./FriendAvatar";
 
 const CAP = 4;
 
-export function TopFriends({ userId, profile, setProfile, onSeeAll }) {
+export function TopFriends({
+  userId,
+  profile,
+  setProfile,
+  onSeeAll,
+  friendCount = null,
+  requestCount = 0,
+}) {
   const topIds = profile?.top_friends || [];
   const [editing, setEditing] = useState(false);
   // Profiles for the shelf + the editor's add list. null = loading.
@@ -97,9 +104,14 @@ export function TopFriends({ userId, profile, setProfile, onSeeAll }) {
           <button
             type="button"
             onClick={onSeeAll}
-            className="text-[11px] font-medium text-[#455d3b]"
+            className="flex items-center gap-1.5 text-[11px] font-medium text-[#455d3b]"
           >
-            See all friends ›
+            See all{friendCount ? ` ${friendCount}` : ""} friends ›
+            {requestCount > 0 && (
+              <span className="inline-flex min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-semibold text-white">
+                {requestCount}
+              </span>
+            )}
           </button>
         </div>
         <div className="flex items-center gap-2.5">
