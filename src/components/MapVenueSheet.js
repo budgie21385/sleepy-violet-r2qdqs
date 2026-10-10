@@ -903,7 +903,7 @@ export function MapVenueSheet({
                 key: "now",
                 icon: <MapPin size={16} />,
                 label: "I'm here now",
-                sub: "Check in. Friends can see it and join you",
+                sub: "Friends can see it and join you",
               },
               {
                 key: "future",
@@ -915,7 +915,7 @@ export function MapVenueSheet({
                 key: "past",
                 icon: <Moon size={16} />,
                 label: "Already happened",
-                sub: "Add the night, photos and all",
+                sub: "Add it, photos and all",
               },
             ].map((opt) => (
               <button

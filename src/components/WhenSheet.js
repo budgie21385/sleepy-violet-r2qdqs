@@ -143,7 +143,7 @@ export function WhenSheet({
                 "now",
                 <MapPin size={16} />,
                 "Happening now",
-                "Check in. Friends can see it and join you",
+                "Friends can see it and join you",
                 pick(onNow),
                 tilt === "now"
               )}
@@ -159,7 +159,7 @@ export function WhenSheet({
                 "past",
                 <Moon size={16} />,
                 "Already happened",
-                "Add a night from the camera roll",
+                "Add it from the camera roll",
                 pick(onPast),
                 tilt === "past"
               )}

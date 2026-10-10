@@ -395,12 +395,17 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
         style={{ width: "calc(100% - 1.5rem)", maxHeight: "calc(100% - 130px)" }}
       >
         <div className="flex items-start justify-between mb-1">
+          {/* TITLES ARE THE QUESTION IN TENSE (Mark, Oct 10) — "check in"
+              retired from user-facing copy; the title morphs with the
+              when-pill like everything else. */}
           <p className="text-sm font-semibold">
             {isEvent
               ? "Create an event"
               : addMode === "now"
-              ? "Check in"
-              : "Create a check-in"}
+              ? "What's happening"
+              : addDate >= todayStr
+              ? "What's the plan"
+              : "What happened"}
           </p>
           <button
             type="button"
@@ -875,15 +880,17 @@ export function CheckinForm({ userId, prefill, onClose, onCreated, showToast }) 
               in the past by the time you read the button — comparing
               timestamps made the label flicker on the boundary). Today or
               future = "Done"; only genuinely past days = "Add to Been". */}
+          {/* CTAs answer the title's question (Mark, Oct 10): I'm here /
+              Make the plan / Add the night. */}
           {addSaving
             ? "Adding…"
             : isEvent
             ? "Create event"
             : addMode === "now"
-            ? "Check in"
+            ? "I'm here"
             : addDate >= todayStr
-            ? "Done"
-            : "Add to Been"}
+            ? "Make the plan"
+            : "Add it"}
         </button>
       </div>
     </div>,
