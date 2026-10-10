@@ -5868,8 +5868,16 @@ function ProfileTab({
           {avatarUploading && (
             <p className="text-xs text-neutral-400 mt-1">Uploading…</p>
           )}
-          {email && (
-            <p className="text-sm text-neutral-500 mt-2">{email}</p>
+          {/* Identity, not account plumbing (Oct 11, Mark: "shows my email
+              and not my username") — @handle + name; the email lives with
+              the rest of the maintenance behind the cog. */}
+          {profile?.username && (
+            <p className="mt-2 text-base font-semibold text-[#1a3025]">
+              @{profile.username}
+            </p>
+          )}
+          {profile?.display_name && (
+            <p className="text-sm text-neutral-500">{profile.display_name}</p>
           )}
           <span className="inline-block mt-2 text-xs text-[#455d3b] bg-[#455d3b]/10 rounded-full px-3 py-1">
             {tierLabel}
@@ -6025,6 +6033,12 @@ function ProfileTab({
             {saveError && (
               <p className="text-sm text-red-600 mt-2 text-center">
                 {saveError}
+              </p>
+            )}
+
+            {email && (
+              <p className="mt-3 text-center text-xs text-neutral-400">
+                Signed in as {email}
               </p>
             )}
 
