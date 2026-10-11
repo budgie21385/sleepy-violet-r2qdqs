@@ -51,6 +51,7 @@ import { ActivityDrawer } from "./components/ActivityDrawer";
 import { FriendAvatar } from "./components/FriendAvatar";
 import { TopFriends } from "./components/TopFriends";
 import { NightsTimeline } from "./components/NightsTimeline";
+import { ListsScreen } from "./components/ListsScreen";
 import { CheckinThreadSheet } from "./components/CheckinThreadSheet";
 import { CheckinSheet } from "./components/CheckinSheet";
 import { BeenScreen, CheckinHistoryRow } from "./components/BeenScreen";
@@ -5489,6 +5490,7 @@ function ProfileTab({
   onOpenSession,
 }) {
   const [showMyList, setShowMyList] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [sessionsCount, setSessionsCount] = useState(null);
@@ -5698,12 +5700,28 @@ function ProfileTab({
 
   return (
     <div className="flex items-start justify-center p-4 pb-52">
+      {/* LISTS v1 (Oct 12, Mark's mock): the index of system lists wearing
+          the custom-lists clothes; MyListScreen survives only as the
+          hidden-venues manager behind the cog. */}
       {showMyList && (
+        <ListsScreen
+          userId={session?.user?.id}
+          venues={venues}
+          savedIds={savedIds}
+          onUnsave={onUnsave}
+          onBack={() => setShowMyList(false)}
+          onCheckIn={onCheckIn}
+          onOpenThread={onOpenThread}
+          onOpenProfile={onOpenProfile}
+          showToast={showToast}
+        />
+      )}
+      {showHidden && (
         <MyListScreen
           venues={venues}
           savedIds={savedIds}
           hiddenIds={hiddenIds}
-          onBack={() => setShowMyList(false)}
+          onBack={() => setShowHidden(false)}
           onSave={onSave}
           onUnsave={onUnsave}
           onHide={onHide}
@@ -5712,6 +5730,7 @@ function ProfileTab({
           onCheckIn={onCheckIn}
           onOpenThread={onOpenThread}
           onOpenProfile={onOpenProfile}
+          initialView="hidden"
         />
       )}
       {showFriends && (
@@ -5910,9 +5929,9 @@ function ProfileTab({
             <Heart size={18} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-medium">My List</p>
+            <p className="font-medium">My Lists</p>
             <p className="text-xs text-neutral-500">
-              {savedIds?.size || 0} saved · {hiddenIds?.size || 0} hidden
+              {savedIds?.size || 0} saved
             </p>
           </div>
           <span className="text-neutral-400 text-lg leading-none">›</span>
@@ -5976,7 +5995,7 @@ function ProfileTab({
             <button
               type="button"
               onClick={() => setShowImport(true)}
-              className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
+              className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-3 hover:bg-neutral-50 active:scale-[0.99] transition"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
                 <Download size={18} />
@@ -5985,6 +6004,23 @@ function ProfileTab({
                 <p className="font-medium">Import from Google Maps</p>
                 <p className="text-xs text-neutral-500">
                   Bring your saved places onto your map
+                </p>
+              </div>
+              <span className="text-neutral-400 text-lg leading-none">›</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowHidden(true)}
+              className="w-full rounded-3xl bg-white p-4 shadow-sm border border-neutral-100 flex items-center gap-3 text-left mb-4 hover:bg-neutral-50 active:scale-[0.99] transition"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#455d3b]/10 text-[#455d3b]">
+                <Trash2 size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium">Hidden venues</p>
+                <p className="text-xs text-neutral-500">
+                  {hiddenIds?.size || 0} hidden from your map
                 </p>
               </div>
               <span className="text-neutral-400 text-lg leading-none">›</span>
@@ -6114,9 +6150,10 @@ function MyListScreen({
   onOpenThread,
   onOpenProfile,
   onUnhide,
+  initialView,
   userId,
 }) {
-  const [view, setView] = useState("saved");
+  const [view, setView] = useState(initialView || "saved");
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [typeFilter, setTypeFilter] = useState(null);
 
