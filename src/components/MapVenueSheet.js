@@ -170,7 +170,11 @@ export function MapVenueSheet({
     const t = setTimeout(() => setSavedSnack(false), 4000);
     return () => clearTimeout(t);
   }, [savedSnack]);
-  const bookmarkFilled = saved || listCount > 0;
+  // TDZ note: `saved` is declared BELOW (near the other derived consts) —
+  // reading it here white-screened every card (Oct 12 field find, the
+  // repo's classic). savedIds is a prop, safe to read now.
+  const bookmarkFilled =
+    !!(savedIds && savedIds.has(venue.id)) || listCount > 0;
   function bookmarkTap() {
     if (holdRef.current.fired) {
       holdRef.current.fired = false;

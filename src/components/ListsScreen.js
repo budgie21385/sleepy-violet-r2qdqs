@@ -64,6 +64,10 @@ export function ListsScreen({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
+  // STICKER (Oct 12, Mark: "a sticker with a border as the list display
+  // item") — the emoji IS the sticker: white tile, olive border, a tilt.
+  const [stickering, setStickering] = useState(false);
+  const [stickerDraft, setStickerDraft] = useState("");
   const [deleteArm, setDeleteArm] = useState(false);
   const [listsTick, setListsTick] = useState(0);
   // My been venue ids (marks + own check-ins with counts).
@@ -277,6 +281,20 @@ export function ListsScreen({
       setListsTick((n) => n + 1);
     } else showToast?.("Couldn't rename");
   }
+  async function saveSticker() {
+    // Grab the first grapheme-ish chunk — enough for any emoji.
+    const e = stickerDraft.trim().slice(0, 4);
+    if (!e || !activeCustom) return;
+    const { error } = await supabase
+      .from("venue_lists")
+      .update({ emoji: e })
+      .eq("id", activeCustom.id);
+    if (!error) {
+      setStickering(false);
+      setStickerDraft("");
+      setListsTick((n) => n + 1);
+    } else showToast?.("Couldn't change the sticker");
+  }
   async function togglePublic() {
     if (!activeCustom) return;
     const { error } = await supabase
@@ -456,7 +474,12 @@ export function ListsScreen({
                 onClick={() => setList(l.id)}
                 className="mb-2.5 flex w-full items-center gap-3 rounded-2xl bg-white p-3.5 text-left shadow-sm border border-neutral-100 active:scale-[0.99] transition"
               >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#edf2eb] text-base">
+                {/* The STICKER: white tile, olive border, a tilt — the
+                    list's face wherever it appears. */}
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[#455d3b] bg-white text-lg shadow-sm"
+                  style={{ transform: "rotate(-4deg)" }}
+                >
                   {l.emoji || "📍"}
                 </span>
                 <span className="flex-1 min-w-0">
@@ -580,10 +603,18 @@ export function ListsScreen({
                   </button>
                 </div>
               ) : (
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  {activeCustom.emoji} {activeCustom.name}{" "}
-                  <span className="text-sm font-normal text-neutral-400">
-                    · {(customItems.get(activeCustom.id) || []).length}
+                <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
+                  <span
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#455d3b] bg-white text-xl shadow-sm"
+                    style={{ transform: "rotate(-4deg)" }}
+                  >
+                    {activeCustom.emoji || "📍"}
+                  </span>
+                  <span>
+                    {activeCustom.name}{" "}
+                    <span className="text-sm font-normal text-neutral-400">
+                      · {(customItems.get(activeCustom.id) || []).length}
+                    </span>
                   </span>
                 </h1>
               )}
@@ -613,6 +644,17 @@ export function ListsScreen({
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    setStickerDraft(activeCustom.emoji || "");
+                    setStickering(true);
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-neutral-800 active:bg-neutral-50"
+                >
+                  Change sticker
+                </button>
+                <button
+                  type="button"
                   onClick={togglePublic}
                   className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-neutral-800 active:bg-neutral-50"
                 >
@@ -626,6 +668,39 @@ export function ListsScreen({
                   className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-red-600 active:bg-neutral-50"
                 >
                   {deleteArm ? "Really delete this list?" : "Delete list"}
+                </button>
+              </div>
+            )}
+            {stickering && (
+              <div className="mb-3 flex items-center gap-2.5 rounded-2xl border border-[#cfdcc9] bg-white p-3">
+                <span
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#455d3b] bg-white text-xl shadow-sm"
+                  style={{ transform: "rotate(-4deg)" }}
+                >
+                  {stickerDraft.trim().slice(0, 4) || "📍"}
+                </span>
+                <input
+                  value={stickerDraft}
+                  onChange={(e) => setStickerDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && saveSticker()}
+                  placeholder="Pick an emoji"
+                  autoFocus
+                  className="min-w-0 flex-1 bg-transparent text-base focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={!stickerDraft.trim()}
+                  onClick={saveSticker}
+                  className="shrink-0 rounded-full bg-[#455d3b] px-3.5 py-1.5 text-xs font-medium text-white active:scale-95 transition disabled:opacity-40"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStickering(false)}
+                  className="shrink-0 text-xs font-medium text-neutral-400"
+                >
+                  Cancel
                 </button>
               </div>
             )}
