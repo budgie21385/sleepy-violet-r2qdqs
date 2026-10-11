@@ -4860,8 +4860,11 @@ if (authLoading || guestLoading) {
           userId={session?.user?.id}
           onOpenProfile={openProfile}
           onOpenSession={(sid) => setNotifSessionId(sid)}
-          onOpenVenue={(v) => {
-            setCardVenueZ(3100); // base layer — a strip-tap thread stacks above
+          onOpenVenue={(v, opts) => {
+            // aboveThread: tapped from an OPEN night card (z-3600) — the
+            // venue card must paint over it. Base 3100 otherwise, so a
+            // strip-tap thread can stack above the card instead.
+            setCardVenueZ(opts?.aboveThread ? 3700 : 3100);
             setCardVenue(v);
           }}
           onCheckIn={handleCheckIn}

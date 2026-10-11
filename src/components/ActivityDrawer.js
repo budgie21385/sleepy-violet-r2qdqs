@@ -2515,8 +2515,10 @@ export function ActivityDrawer({ userId, onClose, onOpenProfile, onOpenSession, 
             onOpenProfile?.(uid);
           }}
           onOpenVenue={(v) => {
-            // Thread stays open underneath; the venue card stacks above it.
-            onOpenVenue?.(v);
+            // Thread stays open underneath; the venue card must stack
+            // ABOVE it (Oct 12, Mark: it was opening at the base z and
+            // hiding behind the night card). The hint rides to App.
+            onOpenVenue?.(v, { aboveThread: true });
           }}
           onCheckIn={onCheckIn}
         />
