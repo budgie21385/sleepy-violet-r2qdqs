@@ -12,6 +12,7 @@ import { ArrowLeft, Plus, Bookmark } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { MapVenueSheet } from "./MapVenueSheet";
+import { SPOT_CATEGORIES } from "./SpotSheet";
 
 function Thumb({ v }) {
   const raw = v.primary_image || null;
@@ -44,6 +45,7 @@ export function ListsScreen({
   onCheckIn,
   onOpenThread,
   onOpenProfile,
+  onOpenSpot,
   showToast,
 }) {
   const [list, setList] = useState(null); // null | "saved"|"been"|"not_been"|custom id (number)
@@ -51,6 +53,9 @@ export function ListsScreen({
   // CUSTOM LISTS (Oct 12 — stage 1 solo): owned + member lists, their
   // items, create/rename/privacy/delete. Adding venues happens through
   // the bookmark grammar on any venue card (hold = straight to a list).
+  // MY SPOTS (Oct 12, Mark: "you did happen to miss the Spots list") —
+  // own spots + ones saved from friends; rows open the SpotSheet.
+  const [mySpots, setMySpots] = useState(null);
   const [customs, setCustoms] = useState(null); // [{id,name,emoji,is_public,owner_id,shared}]
   const [customItems, setCustomItems] = useState(new Map()); // listId -> [venueId]
   const [extraVenues, setExtraVenues] = useState(new Map()); // venues not in the pool
@@ -148,6 +153,36 @@ export function ListsScreen({
             ])
           )
         );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Own + saved spots for the Spots system list.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: own }, { data: saves }] = await Promise.all([
+        supabase
+          .from("spots")
+          .select("*")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+        supabase.from("spot_saves").select("spot_id").eq("user_id", userId),
+      ]);
+      let savedSpots = [];
+      const saveIds = (saves || []).map((s) => s.spot_id);
+      if (saveIds.length > 0) {
+        const { data: sp } = await supabase
+          .from("spots")
+          .select("*")
+          .in("id", saveIds);
+        savedSpots = (sp || []).filter((s) => s.user_id !== userId);
+      }
+      if (!cancelled) setMySpots([...(own || []), ...savedSpots]);
     })();
     return () => {
       cancelled = true;
@@ -390,6 +425,28 @@ export function ListsScreen({
                 </span>
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setList("spots")}
+              className="mb-2.5 flex w-full items-center gap-3 rounded-2xl bg-white p-3.5 text-left shadow-sm border border-neutral-100 active:scale-[0.99] transition"
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#edf2eb] text-base">
+                📌
+              </span>
+              <span className="flex-1">
+                <span className="block text-sm font-semibold text-neutral-900">
+                  Spots
+                </span>
+                <span className="block text-[11px] text-neutral-500">
+                  {mySpots === null
+                    ? "Loading…"
+                    : `${mySpots.length} spot${
+                        mySpots.length === 1 ? "" : "s"
+                      } · friends only`}
+                </span>
+              </span>
+              <span className="text-lg leading-none text-neutral-300">›</span>
+            </button>
             {/* CUSTOM LISTS (Oct 12 — live). Shared ones carry the badge;
                 add venues from any venue card's bookmark (hold = pick). */}
             {(customs || []).map((l) => (
@@ -453,6 +510,50 @@ export function ListsScreen({
                   Create a list
                 </span>
               </button>
+            )}
+          </>
+        )}
+
+        {list === "spots" && (
+          <>
+            <h1 className="mb-4 text-2xl font-semibold tracking-tight">
+              📌 Spots{" "}
+              <span className="text-sm font-normal text-neutral-400">
+                · {(mySpots || []).length}
+              </span>
+            </h1>
+            {(mySpots || []).map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onOpenSpot?.(s)}
+                className="mb-2 flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-sm border border-neutral-100 active:scale-[0.99] transition"
+              >
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#edf2eb] text-lg">
+                  {SPOT_CATEGORIES[s.category]?.emoji || "📍"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-neutral-900">
+                    {s.title || s.place_name}
+                  </span>
+                  <span className="block truncate text-[11px] text-neutral-500">
+                    {[
+                      s.user_id !== userId ? "saved from a friend" : null,
+                      s.directions || s.details,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "Your spot"}
+                  </span>
+                </span>
+                <span className="text-lg leading-none text-neutral-300">
+                  ›
+                </span>
+              </button>
+            ))}
+            {(mySpots || []).length === 0 && mySpots !== null && (
+              <p className="py-8 text-center text-sm text-neutral-400">
+                No spots yet. The + on the map knows what to do
+              </p>
             )}
           </>
         )}

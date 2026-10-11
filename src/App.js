@@ -4852,6 +4852,7 @@ if (authLoading || guestLoading) {
           onCheckIn={handleCheckIn}
           onOpenThread={setThreadCheckin}
           onOpenSession={(sid) => setNotifSessionId(sid)}
+          onOpenSpot={(s) => setSpotSheet(s)}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -5491,6 +5492,7 @@ function ProfileTab({
   onCheckIn,
   onOpenThread,
   onOpenSession,
+  onOpenSpot,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
@@ -5716,6 +5718,7 @@ function ProfileTab({
           onCheckIn={onCheckIn}
           onOpenThread={onOpenThread}
           onOpenProfile={onOpenProfile}
+          onOpenSpot={onOpenSpot}
           showToast={showToast}
         />
       )}
