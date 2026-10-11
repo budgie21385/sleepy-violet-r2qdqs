@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 import { X, MoreVertical, Send, Bookmark, ChevronRight, ChevronLeft, MapPin, MessageCircle, CalendarDays, Moon, Maximize2 } from "lucide-react";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import L from "leaflet";
+import { ListPicker } from "./ListPicker";
 import { supabase } from "../supabaseClient";
 import { FriendAvatar } from "./FriendAvatar";
 import { timeAgoShort, FRESH_MS, DUPE_MS } from "../lib/checkins";
@@ -126,6 +127,72 @@ export function MapVenueSheet({
   const [planOpen, setPlanOpen] = useState(false);
   // Full-screen map over the card (Oct 9).
   const [mapFull, setMapFull] = useState(false);
+  // THE BOOKMARK GRAMMAR (Oct 12, Mark's rulings): tap-empty = instant
+  // save + snackbar with "Add to a list"; HOLD = the picker from any
+  // state (Instagram muscle memory); tap-filled = the manage sheet
+  // (Saved is the top toggle — unticking it IS the unsave). The icon
+  // fills when the venue is in ANYTHING (Saved or any writable list).
+  const [listPicker, setListPicker] = useState(false);
+  const [listCount, setListCount] = useState(0); // memberships in MY lists
+  const [savedSnack, setSavedSnack] = useState(false);
+  const holdRef = useRef({ timer: null, fired: false });
+  useEffect(() => {
+    setListCount(0);
+    setSavedSnack(false);
+    if (!userId || !venue?.id) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: owned }, { data: mem }] = await Promise.all([
+        supabase.from("venue_lists").select("id").eq("owner_id", userId),
+        supabase
+          .from("venue_list_members")
+          .select("list_id")
+          .eq("user_id", userId),
+      ]);
+      const myIds = [
+        ...(owned || []).map((l) => l.id),
+        ...(mem || []).map((m) => m.list_id),
+      ];
+      if (myIds.length === 0 || cancelled) return;
+      const { data: items } = await supabase
+        .from("venue_list_items")
+        .select("list_id")
+        .eq("venue_id", venue.id)
+        .in("list_id", myIds);
+      if (!cancelled) setListCount((items || []).length);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, venue?.id]);
+  useEffect(() => {
+    if (!savedSnack) return;
+    const t = setTimeout(() => setSavedSnack(false), 4000);
+    return () => clearTimeout(t);
+  }, [savedSnack]);
+  const bookmarkFilled = saved || listCount > 0;
+  function bookmarkTap() {
+    if (holdRef.current.fired) {
+      holdRef.current.fired = false;
+      return; // the hold already opened the picker
+    }
+    if (!bookmarkFilled) {
+      onSave(venue.id);
+      setSavedSnack(true);
+    } else {
+      setListPicker(true); // manage, incl. unsave
+    }
+  }
+  function bookmarkHoldStart() {
+    holdRef.current.fired = false;
+    holdRef.current.timer = setTimeout(() => {
+      holdRef.current.fired = true;
+      setListPicker(true);
+    }, 450);
+  }
+  function bookmarkHoldEnd() {
+    clearTimeout(holdRef.current.timer);
+  }
   const [copied, setCopied] = useState(false);
   const [checkedIn, setCheckedIn] = useState(null); // own activity row after check-in
   // (The post-check-in "what's on" + tagging UI lives in CheckinSheet now —
@@ -660,6 +727,23 @@ export function MapVenueSheet({
       )}
 
       <div className="p-4 pt-3 border-t border-neutral-100 bg-white rounded-b-3xl">
+        {/* Post-save snackbar (Oct 12): the list door for a few seconds,
+            then gone — ignoring it costs nothing. */}
+        {savedSnack && (
+          <div className="mb-2.5 flex items-center gap-2 rounded-full bg-neutral-900 px-4 py-2">
+            <span className="flex-1 text-xs text-white">Saved ✓</span>
+            <button
+              type="button"
+              onClick={() => {
+                setSavedSnack(false);
+                setListPicker(true);
+              }}
+              className="text-xs font-semibold text-[#9db48f]"
+            >
+              Add to a list ›
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-around relative">
           <button
             type="button"
@@ -719,14 +803,20 @@ export function MapVenueSheet({
           </button>
           <button
             type="button"
-            onClick={() => (saved ? onUnsave(venue.id) : onSave(venue.id))}
-            aria-label={saved ? "Remove from list" : "Add to list"}
+            onClick={bookmarkTap}
+            onTouchStart={bookmarkHoldStart}
+            onTouchEnd={bookmarkHoldEnd}
+            onTouchMove={bookmarkHoldEnd}
+            onMouseDown={bookmarkHoldStart}
+            onMouseUp={bookmarkHoldEnd}
+            onMouseLeave={bookmarkHoldEnd}
+            aria-label={bookmarkFilled ? "Manage saves and lists" : "Save"}
             className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-neutral-100 active:scale-95 transition"
           >
             <Bookmark
               size={20}
-              fill={saved ? "#455d3b" : "none"}
-              className={saved ? "text-[#455d3b]" : "text-neutral-600"}
+              fill={bookmarkFilled ? "#455d3b" : "none"}
+              className={bookmarkFilled ? "text-[#455d3b]" : "text-neutral-600"}
             />
           </button>
           {mapMenuOpen && (
@@ -833,6 +923,17 @@ export function MapVenueSheet({
             </div>
           </div>
         </div>
+      )}
+      {listPicker && (
+        <ListPicker
+          userId={userId}
+          venue={venue}
+          saved={saved}
+          onSave={onSave}
+          onUnsave={onUnsave}
+          onClose={() => setListPicker(false)}
+          onMembershipChange={(n) => setListCount(n)}
+        />
       )}
       {/* FULL-SCREEN MAP (Oct 9) — the mini map expanded; interactive,
           one pin, Open in Maps underneath. */}

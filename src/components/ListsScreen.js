@@ -46,8 +46,21 @@ export function ListsScreen({
   onOpenProfile,
   showToast,
 }) {
-  const [list, setList] = useState(null); // null = index | "saved"|"been"|"not_been"
+  const [list, setList] = useState(null); // null | "saved"|"been"|"not_been"|custom id (number)
   const [selectedVenue, setSelectedVenue] = useState(null);
+  // CUSTOM LISTS (Oct 12 — stage 1 solo): owned + member lists, their
+  // items, create/rename/privacy/delete. Adding venues happens through
+  // the bookmark grammar on any venue card (hold = straight to a list).
+  const [customs, setCustoms] = useState(null); // [{id,name,emoji,is_public,owner_id,shared}]
+  const [customItems, setCustomItems] = useState(new Map()); // listId -> [venueId]
+  const [extraVenues, setExtraVenues] = useState(new Map()); // venues not in the pool
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [deleteArm, setDeleteArm] = useState(false);
+  const [listsTick, setListsTick] = useState(0);
   // My been venue ids (marks + own check-ins with counts).
   const [beenData, setBeenData] = useState(null); // {counts: Map, ids: Set}
   // Friends who've been, per venue (avatars on rows).
@@ -140,6 +153,125 @@ export function ListsScreen({
       cancelled = true;
     };
   }, [userId]);
+
+  // Custom lists + their items (one items query across all writable
+  // lists — counts AND detail rows from the same data).
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: ls }, { data: mem }] = await Promise.all([
+        supabase
+          .from("venue_lists")
+          .select("id, name, emoji, is_public, owner_id")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("venue_list_members")
+          .select("list_id")
+          .eq("user_id", userId),
+      ]);
+      if (cancelled) return;
+      const memberIds = new Set((mem || []).map((m) => m.list_id));
+      const mine = (ls || [])
+        .filter((l) => l.owner_id === userId || memberIds.has(l.id))
+        .map((l) => ({ ...l, shared: l.owner_id !== userId }));
+      setCustoms(mine);
+      const ids = mine.map((l) => l.id);
+      if (ids.length === 0) {
+        setCustomItems(new Map());
+        return;
+      }
+      const { data: items } = await supabase
+        .from("venue_list_items")
+        .select("list_id, venue_id")
+        .in("list_id", ids);
+      if (cancelled) return;
+      const byList = new Map();
+      for (const i of items || []) {
+        if (!byList.has(i.list_id)) byList.set(i.list_id, []);
+        byList.get(i.list_id).push(i.venue_id);
+      }
+      setCustomItems(byList);
+      // Venues missing from the bootstrap pool (e.g. a friend's add).
+      const poolIds = new Set((venues || []).map((v) => v.id));
+      const missing = Array.from(
+        new Set((items || []).map((i) => i.venue_id))
+      ).filter((id) => !poolIds.has(id));
+      if (missing.length > 0) {
+        const { data: vens } = await supabase
+          .from("venues")
+          .select("*")
+          .in("id", missing);
+        if (!cancelled)
+          setExtraVenues(new Map((vens || []).map((v) => [v.id, v])));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, venues, listsTick]);
+
+  async function createList() {
+    const name = newName.trim();
+    if (!name) return;
+    const { error } = await supabase
+      .from("venue_lists")
+      .insert({ owner_id: userId, name });
+    if (error) {
+      console.error("List create failed:", error);
+      showToast?.("Couldn't create the list");
+      return;
+    }
+    setNewName("");
+    setCreating(false);
+    setListsTick((n) => n + 1);
+  }
+
+  const activeCustom =
+    typeof list === "number" ? (customs || []).find((l) => l.id === list) : null;
+
+  async function renameList() {
+    const name = renameDraft.trim();
+    if (!name || !activeCustom) return;
+    const { error } = await supabase
+      .from("venue_lists")
+      .update({ name })
+      .eq("id", activeCustom.id);
+    if (!error) {
+      setRenaming(false);
+      setListsTick((n) => n + 1);
+    } else showToast?.("Couldn't rename");
+  }
+  async function togglePublic() {
+    if (!activeCustom) return;
+    const { error } = await supabase
+      .from("venue_lists")
+      .update({ is_public: !activeCustom.is_public })
+      .eq("id", activeCustom.id);
+    if (!error) setListsTick((n) => n + 1);
+  }
+  async function deleteList() {
+    if (!activeCustom) return;
+    const { error } = await supabase
+      .from("venue_lists")
+      .delete()
+      .eq("id", activeCustom.id);
+    if (!error) {
+      setMenuOpen(false);
+      setDeleteArm(false);
+      setList(null);
+      setListsTick((n) => n + 1);
+    } else showToast?.("Couldn't delete");
+  }
+  async function removeItem(venueId) {
+    if (!activeCustom) return;
+    await supabase
+      .from("venue_list_items")
+      .delete()
+      .eq("list_id", activeCustom.id)
+      .eq("venue_id", venueId);
+    setListsTick((n) => n + 1);
+  }
 
   const vById = useMemo(
     () => new Map((venues || []).map((v) => [v.id, v])),
@@ -258,20 +390,167 @@ export function ListsScreen({
                 </span>
               </button>
             ))}
-            {/* Custom + collaborative lists are the NEXT stage — this row
-                is the feature promise (discoverability doctrine), not a
-                door yet. */}
-            <div className="mt-1 flex w-full items-center gap-3 rounded-2xl border border-dashed border-[#cfdcc9] p-3.5 opacity-70">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full text-[#455d3b]">
-                <Plus size={16} />
-              </span>
-              <span className="flex-1 text-sm font-medium text-[#455d3b]">
-                Create a list
-              </span>
-              <span className="rounded-full bg-[#edf2eb] px-2 py-0.5 text-[10px] font-medium text-[#455d3b]">
-                soon
-              </span>
+            {/* CUSTOM LISTS (Oct 12 — live). Shared ones carry the badge;
+                add venues from any venue card's bookmark (hold = pick). */}
+            {(customs || []).map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setList(l.id)}
+                className="mb-2.5 flex w-full items-center gap-3 rounded-2xl bg-white p-3.5 text-left shadow-sm border border-neutral-100 active:scale-[0.99] transition"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#edf2eb] text-base">
+                  {l.emoji || "📍"}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate text-sm font-semibold text-neutral-900">
+                    {l.name}
+                  </span>
+                  <span className="block text-[11px] text-neutral-500">
+                    {(customItems.get(l.id) || []).length} place
+                    {(customItems.get(l.id) || []).length === 1 ? "" : "s"}
+                    {l.shared ? " · shared" : l.is_public ? " · friends can see" : " · private"}
+                  </span>
+                </span>
+                <span className="text-lg leading-none text-neutral-300">
+                  ›
+                </span>
+              </button>
+            ))}
+            {creating ? (
+              <div className="mt-1 flex w-full items-center gap-3 rounded-2xl border border-[#cfdcc9] bg-white p-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full text-[#455d3b]">
+                  <Plus size={16} />
+                </span>
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createList()}
+                  placeholder="List name"
+                  maxLength={60}
+                  autoFocus
+                  className="min-w-0 flex-1 bg-transparent text-base focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={!newName.trim()}
+                  onClick={createList}
+                  className="shrink-0 rounded-full bg-[#455d3b] px-3.5 py-1.5 text-xs font-medium text-white active:scale-95 transition disabled:opacity-40"
+                >
+                  Create
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="mt-1 flex w-full items-center gap-3 rounded-2xl border border-dashed border-[#cfdcc9] p-3.5 text-left active:bg-[#edf2eb]/40 transition"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full text-[#455d3b]">
+                  <Plus size={16} />
+                </span>
+                <span className="flex-1 text-sm font-medium text-[#455d3b]">
+                  Create a list
+                </span>
+              </button>
+            )}
+          </>
+        )}
+
+        {activeCustom && (
+          <>
+            <div className="mb-4 flex items-start justify-between">
+              {renaming ? (
+                <div className="flex flex-1 items-center gap-2">
+                  <input
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && renameList()}
+                    maxLength={60}
+                    autoFocus
+                    className="min-w-0 flex-1 rounded-full border border-neutral-200 bg-white px-4 py-2 text-base focus:outline-none focus:border-[#455d3b]"
+                  />
+                  <button
+                    type="button"
+                    onClick={renameList}
+                    className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1.5 text-xs font-medium text-white"
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {activeCustom.emoji} {activeCustom.name}{" "}
+                  <span className="text-sm font-normal text-neutral-400">
+                    · {(customItems.get(activeCustom.id) || []).length}
+                  </span>
+                </h1>
+              )}
+              {activeCustom.owner_id === userId && !renaming && (
+                <button
+                  type="button"
+                  aria-label="List options"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className="mt-1 flex h-9 w-9 items-center justify-center rounded-full bg-white border border-neutral-100 text-neutral-500 shadow-sm"
+                >
+                  ⋯
+                </button>
+              )}
             </div>
+            {menuOpen && (
+              <div className="mb-3 overflow-hidden rounded-2xl border border-neutral-100 bg-white shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenameDraft(activeCustom.name);
+                    setRenaming(true);
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full px-4 py-3 text-left text-sm text-neutral-800 active:bg-neutral-50"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={togglePublic}
+                  className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-neutral-800 active:bg-neutral-50"
+                >
+                  {activeCustom.is_public
+                    ? "Make private"
+                    : "Let friends see this list"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => (deleteArm ? deleteList() : setDeleteArm(true))}
+                  className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-red-600 active:bg-neutral-50"
+                >
+                  {deleteArm ? "Really delete this list?" : "Delete list"}
+                </button>
+              </div>
+            )}
+            {(customItems.get(activeCustom.id) || []).map((vid) => {
+              const v = vById.get(vid) || extraVenues.get(vid);
+              if (!v) return null;
+              return (
+                <div key={vid} className="relative">
+                  {row(v)}
+                  <button
+                    type="button"
+                    aria-label="Remove from this list"
+                    onClick={() => removeItem(vid)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full text-neutral-300"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+            {(customItems.get(activeCustom.id) || []).length === 0 && (
+              <p className="py-8 text-center text-sm text-neutral-400">
+                Nothing here yet. Hold the bookmark on any venue card to
+                save places straight into this list
+              </p>
+            )}
           </>
         )}
 
