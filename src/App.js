@@ -324,7 +324,14 @@ export default function RestaurantSwipeMVP() {
   }, [tab]);
   const [screen, setScreen] = useState("session_setup");
   const [matchMode, setMatchMode] = useState("solo");
-  const [matchSource, setMatchSource] = useState("all");
+  const [matchSource, setMatchSource] = useState("all"); // "all" | "list"
+  // THE POOL PICKER (Oct 12, Mark: "click my list toggle and see the other
+  // lists"): the session's source is either everything or A LIST — Saved,
+  // Been, Haven't Been, or any custom — picked from a sheet; the segment
+  // wears the pick. Replaces the old binary All/My-List toggle.
+  const [sourceList, setSourceList] = useState(null); // {key?, id?, name, emoji, ids:Set}
+  const [sourcePicker, setSourcePicker] = useState(false);
+  const [sourceCustoms, setSourceCustoms] = useState(null); // customs for the sheet
   const [eventDate, setEventDate] = useState(null);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [selectedCuisines, setSelectedCuisines] = useState([]);
@@ -376,12 +383,90 @@ export default function RestaurantSwipeMVP() {
   // the app about itself; the when-sheet's We-can't-decide wears it and
   // both session starters seed the pool from it.
   const [listContext, setListContext] = useState(null); // {name, emoji, ids:[]}
-  function startSessionFromList(ids, mode) {
-    setMapViewPool({ ids: new Set(ids), count: ids.length });
+  function startSessionFromList(ids, mode, meta = null) {
+    // The list arrives as the PRE-SELECTED source (Oct 12) — visible in
+    // the pool segment, not a hidden constraint.
+    setSourceList({
+      name: meta?.name || "This list",
+      emoji: meta?.emoji || "📍",
+      ids: new Set(ids),
+    });
+    setMatchSource("list");
     setMatchMode(mode);
     setEventDate(null);
     setScreen("filters");
     setTab("matches");
+  }
+  function systemSourceOptions() {
+    const been = new Set([
+      ...beenState.marked,
+      ...beenState.visits.keys(),
+    ]);
+    const saved = savedVenueIds || new Set();
+    const notBeen = new Set([...saved].filter((id) => !been.has(id)));
+    return [
+      { key: "saved", name: "Saved", emoji: "🔖", ids: saved },
+      { key: "been", name: "Been", emoji: "✔️", ids: been },
+      { key: "not_been", name: "Haven't Been", emoji: "⏳", ids: notBeen },
+    ];
+  }
+  function pickSource(o) {
+    setSourceList({
+      key: o.key,
+      id: o.id,
+      name: o.name,
+      emoji: o.emoji || "📍",
+      ids: o.ids,
+    });
+    setMatchSource("list");
+    setSourcePicker(false);
+  }
+  async function loadSourceCustoms() {
+    if (sourceCustoms !== null) return;
+    const uid = session?.user?.id;
+    if (!uid) {
+      setSourceCustoms([]);
+      return;
+    }
+    const [{ data: ls }, { data: mem }] = await Promise.all([
+      supabase
+        .from("venue_lists")
+        .select("id, name, emoji, owner_id")
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("venue_list_members")
+        .select("list_id")
+        .eq("user_id", uid),
+    ]);
+    const memberIds = new Set((mem || []).map((m) => m.list_id));
+    const mine = (ls || []).filter(
+      (l) => l.owner_id === uid || memberIds.has(l.id)
+    );
+    if (mine.length === 0) {
+      setSourceCustoms([]);
+      return;
+    }
+    const { data: items } = await supabase
+      .from("venue_list_items")
+      .select("list_id, venue_id")
+      .in(
+        "list_id",
+        mine.map((l) => l.id)
+      );
+    const byList = new Map();
+    for (const i of items || []) {
+      if (!byList.has(i.list_id)) byList.set(i.list_id, new Set());
+      byList.get(i.list_id).add(i.venue_id);
+    }
+    setSourceCustoms(
+      mine.map((l) => ({
+        id: l.id,
+        name: l.name,
+        emoji: l.emoji || "📍",
+        shared: l.owner_id !== uid,
+        ids: byList.get(l.id) || new Set(),
+      }))
+    );
   }
   function carryMapFilters() {
     const f = mapFiltersRef.current;
@@ -2792,21 +2877,23 @@ loadAreas();
  
   const swipeQueue = useMemo(() => {
     let q;
-    if (matchSource === "my_list") {
-      q = filteredVenues.filter((v) => savedVenueIds.has(v.id));
+    if (matchSource === "list" && sourceList) {
+      q = filteredVenues.filter((v) => sourceList.ids.has(v.id));
     } else if (matchMode === "solo") {
       q = filteredVenues.filter((v) => !savedVenueIds.has(v.id));
     } else {
       q = filteredVenues;
     }
     // From-the-map viewport constraint: only what was on screen (Sep 6).
-    if (mapViewPool) q = q.filter((v) => mapViewPool.ids.has(v.id));
+    // Applies to the ALL source only — a picked list IS the pool.
+    if (mapViewPool && matchSource !== "list")
+      q = q.filter((v) => mapViewPool.ids.has(v.id));
     // Groups of 3+ swipe the SAME deck in the SAME order (orderGroupDeck is
     // deterministic — guests apply the identical sort to the identical pool).
     // No cap: every filtered venue is available (Mark, July 31 evening).
     if (matchMode === "concurrent" && expectedOthers >= 2) q = orderGroupDeck(q);
     return q;
-  }, [filteredVenues, matchSource, matchMode, savedVenueIds, expectedOthers, mapViewPool]);
+  }, [filteredVenues, matchSource, sourceList, matchMode, savedVenueIds, expectedOthers, mapViewPool]);
 
   const guestQueueRaw = useMemo(() => {
     if (!isGuest || !guestSessionData) return [];
@@ -3039,7 +3126,7 @@ loadAreas();
         .insert({
           host_user_id: session.user.id,
           mode: matchMode,
-          source_type: matchSource === "my_list" ? "list" : "filters",
+          source_type: matchSource === "list" ? "list" : "filters",
           filters: sessionFilters,
           list_id: null,
           target_matches: matchMode === "curated" ? null : matchLimit || null,
@@ -4204,17 +4291,91 @@ if (authLoading || guestLoading) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMatchSource("my_list")}
+                  onClick={() => {
+                    // Door, not a state: always opens the pool picker.
+                    loadSourceCustoms();
+                    setSourcePicker(true);
+                  }}
                   className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
-                    matchSource === "my_list"
+                    matchSource === "list"
                       ? "bg-white text-[#455d3b] shadow-sm"
                       : "text-neutral-500"
                   }`}
                 >
-                  My List
+                  {matchSource === "list" && sourceList
+                    ? `${sourceList.emoji} ${sourceList.name} · ${sourceList.ids.size} ▾`
+                    : "From a list ▾"}
                 </button>
               </div>
             </div>
+            {sourcePicker && (
+              <div className="fixed inset-0 z-[3300]">
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => setSourcePicker(false)}
+                  className="absolute inset-0 bg-black/30"
+                />
+                <div
+                  className="absolute left-0 right-0 bottom-0 mx-auto max-w-md rounded-t-3xl bg-white px-5 pt-3 shadow-2xl"
+                  style={{ paddingBottom: "max(18px, env(safe-area-inset-bottom))" }}
+                >
+                  <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-200" />
+                  <h2 className="mb-2 text-base font-semibold">
+                    Pick from which list?
+                  </h2>
+                  {systemSourceOptions().map((o) => (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => pickSource(o)}
+                      className="flex w-full items-center gap-3 border-t border-neutral-50 px-1 py-2.5 text-left first:border-t-0"
+                    >
+                      <span className="w-7 text-center text-base">
+                        {o.emoji}
+                      </span>
+                      <span className="flex-1 text-sm text-neutral-900">
+                        {o.name}
+                      </span>
+                      <span className="text-xs text-neutral-400">
+                        {o.ids.size}
+                      </span>
+                    </button>
+                  ))}
+                  {sourceCustoms === null && (
+                    <p className="py-2 text-xs text-neutral-400">
+                      Loading your lists…
+                    </p>
+                  )}
+                  {(sourceCustoms || []).map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      onClick={() => pickSource(l)}
+                      className="flex w-full items-center gap-3 border-t border-neutral-50 px-1 py-2.5 text-left"
+                    >
+                      <span
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border-2 border-[#455d3b] bg-white text-sm"
+                        style={{ transform: "rotate(-4deg)" }}
+                      >
+                        {l.emoji || "📍"}
+                      </span>
+                      <span className="flex-1 min-w-0 truncate text-sm text-neutral-900">
+                        {l.name}
+                        {l.shared && (
+                          <span className="ml-1 text-[10px] text-neutral-400">
+                            shared
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-xs text-neutral-400">
+                        {l.ids.size}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="space-y-5">
               {/* WHO'S COMING — first input, above Suburbs (July 31, Mark).
                   Prominent because it now DRIVES the rules: the match must be
@@ -5045,7 +5206,7 @@ if (authLoading || guestLoading) {
           // Inside a list, the list IS the pool (Oct 12); otherwise the
           // map viewport carry as before.
           if (listContext?.ids?.length) {
-            startSessionFromList(listContext.ids, "concurrent");
+            startSessionFromList(listContext.ids, "concurrent", listContext);
             return;
           }
           carryMapFilters();
@@ -5056,7 +5217,7 @@ if (authLoading || guestLoading) {
         }}
         onShortlist={() => {
           if (listContext?.ids?.length) {
-            startSessionFromList(listContext.ids, "curated");
+            startSessionFromList(listContext.ids, "curated", listContext);
             return;
           }
           carryMapFilters();
