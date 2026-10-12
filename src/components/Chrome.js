@@ -13,6 +13,7 @@ import { WhenSheet } from "./WhenSheet";
 // live inside WhenSheet.
 export function FloatingActionButton({
   tab,
+  listContext = null,
   onNow,
   onComingUp,
   onPast,
@@ -29,6 +30,7 @@ export function FloatingActionButton({
       {open && (
         <WhenSheet
           tab={tab}
+          listContext={listContext}
           onClose={() => setOpen(false)}
           onNow={onNow}
           onComingUp={onComingUp}

@@ -28,6 +28,7 @@ const TILT_BY_TAB = {
 
 export function WhenSheet({
   tab,
+  listContext = null, // open venue list — We-can't-decide wears it
   onClose,
   onNow,
   onComingUp,
@@ -116,7 +117,9 @@ export function WhenSheet({
               "pick_together",
               <HeartHandshake size={16} />,
               "Pick together",
-              "Everyone swipes, first match wins",
+              listContext
+                ? `Everyone swipes ${listContext.name}, first match wins`
+                : "Everyone swipes, first match wins",
               pick(onRightNow),
               true
             )}
@@ -124,7 +127,9 @@ export function WhenSheet({
               "shortlist",
               <ListChecks size={16} />,
               "Send a shortlist",
-              "You pick a few, they vote",
+              listContext
+                ? `Send ${listContext.name} out, they vote`
+                : "You pick a few, they vote",
               pick(onShortlist),
               false
             )}
@@ -167,9 +172,12 @@ export function WhenSheet({
                 "undecided",
                 <Shuffle size={16} />,
                 "We can't decide",
-                "Make an unplanned plan. The app helps pick",
+                listContext
+                  ? `Pick from ${listContext.emoji} ${listContext.name} · ${listContext.ids.length} places`
+                  : "Make an unplanned plan. The app helps pick",
                 () => setDeciding(true),
-                tilt === "undecided"
+                // An open list makes this THE contextual option.
+                listContext ? true : tilt === "undecided"
               )}
             </div>
 

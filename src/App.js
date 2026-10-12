@@ -361,15 +361,21 @@ export default function RestaurantSwipeMVP() {
   // LIST → MAP + SESSIONS (Oct 12, Mark's side quest): any list can be
   // viewed as a map lens, and can seed a session's pool the same way the
   // map viewport does (mapViewPool → sessionFilters).
-  const [listMapFilter, setListMapFilter] = useState(null); // {name, emoji, ids:Set}
+  const [listMapFilter, setListMapFilter] = useState(null); // {id, name, emoji, ids:Set}
   function viewListOnMap(meta, ids) {
     setListMapFilter({
+      id: meta.id,
       name: meta.name,
       emoji: meta.emoji || "📍",
       ids: new Set(ids),
     });
     setTab("map");
   }
+  // LIST CONTEXT for the + (Oct 12, Mark: "on the list, click the plus and
+  // it goes to the filters with that list inputted") — the open list tells
+  // the app about itself; the when-sheet's We-can't-decide wears it and
+  // both session starters seed the pool from it.
+  const [listContext, setListContext] = useState(null); // {name, emoji, ids:[]}
   function startSessionFromList(ids, mode) {
     setMapViewPool({ ids: new Set(ids), count: ids.length });
     setMatchMode(mode);
@@ -4827,6 +4833,7 @@ if (authLoading || guestLoading) {
           onOpenThread={setThreadCheckin}
           listFilter={listMapFilter}
           onClearListFilter={() => setListMapFilter(null)}
+          onSetListFilter={(f) => setListMapFilter(f)}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           userId={session?.user?.id}
           searchOpen={mapSearchOpen}
@@ -4875,7 +4882,7 @@ if (authLoading || guestLoading) {
           onOpenSession={(sid) => setNotifSessionId(sid)}
           onOpenSpot={(s) => setSpotSheet(s)}
           onViewListOnMap={viewListOnMap}
-          onStartListSession={startSessionFromList}
+          onListContext={setListContext}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -5033,7 +5040,14 @@ if (authLoading || guestLoading) {
             date: localDateStrApp(new Date(Date.now() - 24 * 60 * 60 * 1000)),
           })
         }
+        listContext={listContext}
         onRightNow={() => {
+          // Inside a list, the list IS the pool (Oct 12); otherwise the
+          // map viewport carry as before.
+          if (listContext?.ids?.length) {
+            startSessionFromList(listContext.ids, "concurrent");
+            return;
+          }
           carryMapFilters();
           setMatchMode("concurrent");
           setEventDate(null);
@@ -5041,6 +5055,10 @@ if (authLoading || guestLoading) {
           setTab("matches");
         }}
         onShortlist={() => {
+          if (listContext?.ids?.length) {
+            startSessionFromList(listContext.ids, "curated");
+            return;
+          }
           carryMapFilters();
           setMatchMode("curated");
           setEventDate(null);
@@ -5517,7 +5535,7 @@ function ProfileTab({
   onOpenSession,
   onOpenSpot,
   onViewListOnMap,
-  onStartListSession,
+  onListContext,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
@@ -5745,7 +5763,7 @@ function ProfileTab({
           onOpenProfile={onOpenProfile}
           onOpenSpot={onOpenSpot}
           onViewOnMap={onViewListOnMap}
-          onStartSession={onStartListSession}
+          onListContext={onListContext}
           showToast={showToast}
         />
       )}

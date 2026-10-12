@@ -229,7 +229,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, listFilter = null, onClearListFilter, onFiltersSnapshot, onOpenSpot, spotsRefresh = 0 }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, listFilter = null, onClearListFilter, onSetListFilter, onFiltersSnapshot, onOpenSpot, spotsRefresh = 0 }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -257,6 +257,55 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     if (openCard) setSelectedVenue(venue);
   }
   const [showFilters, setShowFilters] = useState(false);
+  // CUSTOM LISTS as a filter dimension (Oct 12, Mark: "on the map when
+  // selecting the filter we should see a dropdown Custom list") — picking
+  // one applies the same lens as View-on-map; composable with every other
+  // chip ("Sunday pubs, open now").
+  const [myLists, setMyLists] = useState(null);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: ls }, { data: mem }] = await Promise.all([
+        supabase
+          .from("venue_lists")
+          .select("id, name, emoji, owner_id")
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("venue_list_members")
+          .select("list_id")
+          .eq("user_id", userId),
+      ]);
+      if (cancelled) return;
+      const memberIds = new Set((mem || []).map((m) => m.list_id));
+      setMyLists(
+        (ls || []).filter(
+          (l) => l.owner_id === userId || memberIds.has(l.id)
+        )
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+  async function pickListFilter(l) {
+    if (listFilter?.id === l.id) {
+      onClearListFilter?.();
+      setShowFilters(false);
+      return;
+    }
+    const { data: items } = await supabase
+      .from("venue_list_items")
+      .select("venue_id")
+      .eq("list_id", l.id);
+    onSetListFilter?.({
+      id: l.id,
+      name: l.name,
+      emoji: l.emoji || "📍",
+      ids: new Set((items || []).map((i) => i.venue_id)),
+    });
+    setShowFilters(false);
+  }
   // Map-only filter state. Deliberately LOCAL to MapScreen and independent of
   // the App-level swipe/match filters — toggling these never touches the match
   // setup, and vice versa.
@@ -2031,6 +2080,31 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 py-2">
+                {(myLists || []).length > 0 && (
+                  <MapFilterSection
+                    title="Your lists"
+                    summary={listFilter ? listFilter.name : "Any"}
+                    accent={!!listFilter}
+                  >
+                    <div className="flex flex-wrap gap-1.5">
+                      {(myLists || []).map((l) => (
+                        <button
+                          key={l.id}
+                          type="button"
+                          onClick={() => pickListFilter(l)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                            listFilter?.id === l.id
+                              ? "border-[#455d3b] bg-[#edf2eb] text-[#455d3b]"
+                              : "border-neutral-200 bg-white text-neutral-600"
+                          }`}
+                        >
+                          {l.emoji || "📍"} {l.name}
+                        </button>
+                      ))}
+                    </div>
+                  </MapFilterSection>
+                )}
+
                 {areas.length > 0 && (
                   <MapFilterSection
                     title="Area"

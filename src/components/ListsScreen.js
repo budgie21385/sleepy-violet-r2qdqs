@@ -48,14 +48,15 @@ export function ListsScreen({
   onOpenProfile,
   onOpenSpot,
   onViewOnMap,
-  onStartSession,
+  onListContext,
   showToast,
 }) {
-  // One pill row for any venue list (Oct 12 side quest): see it on the
-  // map (filters keep working there), or seed a session with it.
+  // ONE humble inline button (Oct 12, Mark: "no floating bottom"; the
+  // session pills died — sessions start from the +, which knows the open
+  // list via onListContext and seeds the pool from it).
   const actionPills = (meta, ids) =>
     ids.length > 0 && (
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <div className="mb-3">
         <button
           type="button"
           onClick={() => onViewOnMap?.(meta, ids)}
@@ -63,24 +64,6 @@ export function ListsScreen({
         >
           🗺 View on map
         </button>
-        {ids.length > 1 && (
-          <>
-            <button
-              type="button"
-              onClick={() => onStartSession?.(ids, "concurrent")}
-              className="rounded-full border border-[#455d3b] px-3.5 py-2 text-xs font-medium text-[#455d3b] active:scale-95 transition"
-            >
-              Pick together
-            </button>
-            <button
-              type="button"
-              onClick={() => onStartSession?.(ids, "curated")}
-              className="rounded-full border border-[#455d3b] px-3.5 py-2 text-xs font-medium text-[#455d3b] active:scale-95 transition"
-            >
-              Send a shortlist
-            </button>
-          </>
-        )}
       </div>
     );
   const [list, setList] = useState(null); // null | "saved"|"been"|"not_been"|custom id (number)
@@ -308,6 +291,35 @@ export function ListsScreen({
     setCreating(false);
     setListsTick((n) => n + 1);
   }
+
+  // Tell the app which VENUE list is open (Oct 12) — the + reads this:
+  // its We-can't-decide wears the list and seeds the session pool from
+  // it. Spots and the index report nothing; cleared on unmount.
+  useEffect(() => {
+    let ctx = null;
+    if (list === "saved" || list === "been" || list === "not_been") {
+      const sys = {
+        saved: { name: "Saved", emoji: "🔖", rows: savedList },
+        been: { name: "Been", emoji: "✔️", rows: beenList },
+        not_been: { name: "Haven't Been", emoji: "⏳", rows: notBeenList },
+      }[list];
+      ctx = {
+        name: sys.name,
+        emoji: sys.emoji,
+        ids: sys.rows.map((v) => v.id),
+      };
+    } else if (typeof list === "number") {
+      const l = (customs || []).find((x) => x.id === list);
+      if (l)
+        ctx = {
+          name: l.name,
+          emoji: l.emoji || "📍",
+          ids: customItems.get(l.id) || [],
+        };
+    }
+    onListContext?.(ctx && ctx.ids.length > 0 ? ctx : null);
+  }, [list, customs, customItems, savedIds, beenData]);
+  useEffect(() => () => onListContext?.(null), []);
 
   const activeCustom =
     typeof list === "number" ? (customs || []).find((l) => l.id === list) : null;
