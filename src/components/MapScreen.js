@@ -2010,8 +2010,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
         <MapVenueSheet
           venue={selectedVenue}
           onClose={() => setSelectedVenue(null)}
-          // The map is literally behind this card — no mini map needed.
-          hideMap
+          // hideMap REMOVED (Oct 13, Mark: "you lose where you are") — the
+          // big map is behind the card but COVERED by it; the card's own
+          // mini map → full screen → ✕ is the only loop that returns here.
           savedIds={savedIds}
           onSave={onSave}
           onUnsave={onUnsave}
