@@ -358,6 +358,25 @@ export default function RestaurantSwipeMVP() {
   // setup; captured into the session's filters JSON so guests rebuild the
   // IDENTICAL deck (unanimity needs identical decks).
   const [mapViewPool, setMapViewPool] = useState(null); // {ids:Set, count}
+  // LIST → MAP + SESSIONS (Oct 12, Mark's side quest): any list can be
+  // viewed as a map lens, and can seed a session's pool the same way the
+  // map viewport does (mapViewPool → sessionFilters).
+  const [listMapFilter, setListMapFilter] = useState(null); // {name, emoji, ids:Set}
+  function viewListOnMap(meta, ids) {
+    setListMapFilter({
+      name: meta.name,
+      emoji: meta.emoji || "📍",
+      ids: new Set(ids),
+    });
+    setTab("map");
+  }
+  function startSessionFromList(ids, mode) {
+    setMapViewPool({ ids: new Set(ids), count: ids.length });
+    setMatchMode(mode);
+    setEventDate(null);
+    setScreen("filters");
+    setTab("matches");
+  }
   function carryMapFilters() {
     const f = mapFiltersRef.current;
     if (tab !== "map" || !f) return;
@@ -4806,6 +4825,8 @@ if (authLoading || guestLoading) {
           showToast={showToast}
           onCheckIn={handleCheckIn}
           onOpenThread={setThreadCheckin}
+          listFilter={listMapFilter}
+          onClearListFilter={() => setListMapFilter(null)}
           onOpenProfile={(uid) => setLookupUserId(uid)}
           userId={session?.user?.id}
           searchOpen={mapSearchOpen}
@@ -4853,6 +4874,8 @@ if (authLoading || guestLoading) {
           onOpenThread={setThreadCheckin}
           onOpenSession={(sid) => setNotifSessionId(sid)}
           onOpenSpot={(s) => setSpotSheet(s)}
+          onViewListOnMap={viewListOnMap}
+          onStartListSession={startSessionFromList}
         />
       )}
       {tab === "activity" && session?.user?.id && (
@@ -5493,6 +5516,8 @@ function ProfileTab({
   onOpenThread,
   onOpenSession,
   onOpenSpot,
+  onViewListOnMap,
+  onStartListSession,
 }) {
   const [showMyList, setShowMyList] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
@@ -5719,6 +5744,8 @@ function ProfileTab({
           onOpenThread={onOpenThread}
           onOpenProfile={onOpenProfile}
           onOpenSpot={onOpenSpot}
+          onViewOnMap={onViewListOnMap}
+          onStartSession={onStartListSession}
           showToast={showToast}
         />
       )}

@@ -229,7 +229,7 @@ function MapRef({ mapRef }) {
   return null;
 }
 
-export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, onFiltersSnapshot, onOpenSpot, spotsRefresh = 0 }) {
+export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckIn, onOpenThread, onOpenProfile, hiddenIds, areas = [], onVenueAdded, showToast, searchOpen, onSearchOpenChange, userId, personFilter = null, onPersonFilter, onClearPersonFilter, listFilter = null, onClearListFilter, onFiltersSnapshot, onOpenSpot, spotsRefresh = 0 }) {
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [mapFilter, setMapFilter] = useState("all");
   const [mapBounds, setMapBounds] = useState(null); // current Leaflet viewport
@@ -884,6 +884,19 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   }, [mapFilter, friendCheckins, matchesMapFilters]);
 
   const displayedPlottable = useMemo(() => {
+    // LIST LENS (Oct 12, Mark): a list viewed on the map — only its
+    // venues, and the normal filter chips keep working on top ("filter a
+    // custom list"). Takes precedence over every other lens until the
+    // chip's ✕ clears it.
+    if (listFilter) {
+      return (venues || []).filter(
+        (v) =>
+          listFilter.ids.has(v.id) &&
+          Number.isFinite(Number(v.latitude)) &&
+          Number.isFinite(Number(v.longitude)) &&
+          matchesMapFilters(v)
+      );
+    }
     if (mapFilter === "friends") return friendPins.map((g) => g.venue);
     const todayKey = getTodayDayKey();
     // Browse map stays curated even though venue READS are open now: pins are
@@ -913,7 +926,7 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     if (fAmenities.length > 0)
       list = list.filter((v) => venueMatchesAmenities(v, fAmenities));
     return list;
-  }, [plottable, mapFilter, myListLens, searchOwnBeen, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, friendPins]);
+  }, [plottable, mapFilter, myListLens, searchOwnBeen, savedIds, fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, friendPins, listFilter, venues, matchesMapFilters]);
 
   const toggleOccasion = (v) =>
     setFOccasions((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
@@ -1528,6 +1541,24 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
               Save some new spots to try next
             </p>
           </div>
+        </div>
+      )}
+      {/* LIST LENS CHIP (Oct 12) — the list's sticker face on the map;
+          ✕ returns to the normal lenses. */}
+      {listFilter && !personFilter && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-[2100]"
+          style={{ top: 120 }}
+        >
+          <button
+            type="button"
+            onClick={onClearListFilter}
+            className="flex items-center gap-2 rounded-full bg-white/95 border border-neutral-100 shadow-lg px-4 py-2 text-xs font-medium text-neutral-800 active:scale-95 transition"
+          >
+            <span>{listFilter.emoji}</span>
+            {listFilter.name} · {displayedPlottable.length}
+            <span className="text-neutral-400">✕</span>
+          </button>
         </div>
       )}
       {personFilter && (

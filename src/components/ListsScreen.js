@@ -47,8 +47,42 @@ export function ListsScreen({
   onOpenThread,
   onOpenProfile,
   onOpenSpot,
+  onViewOnMap,
+  onStartSession,
   showToast,
 }) {
+  // One pill row for any venue list (Oct 12 side quest): see it on the
+  // map (filters keep working there), or seed a session with it.
+  const actionPills = (meta, ids) =>
+    ids.length > 0 && (
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => onViewOnMap?.(meta, ids)}
+          className="rounded-full bg-[#455d3b] px-3.5 py-2 text-xs font-medium text-white active:scale-95 transition"
+        >
+          🗺 View on map
+        </button>
+        {ids.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => onStartSession?.(ids, "concurrent")}
+              className="rounded-full border border-[#455d3b] px-3.5 py-2 text-xs font-medium text-[#455d3b] active:scale-95 transition"
+            >
+              Pick together
+            </button>
+            <button
+              type="button"
+              onClick={() => onStartSession?.(ids, "curated")}
+              className="rounded-full border border-[#455d3b] px-3.5 py-2 text-xs font-medium text-[#455d3b] active:scale-95 transition"
+            >
+              Send a shortlist
+            </button>
+          </>
+        )}
+      </div>
+    );
   const [list, setList] = useState(null); // null | "saved"|"been"|"not_been"|custom id (number)
   const [selectedVenue, setSelectedVenue] = useState(null);
   // CUSTOM LISTS (Oct 12 — stage 1 solo): owned + member lists, their
@@ -776,6 +810,10 @@ export function ListsScreen({
                 </button>
               </div>
             )}
+            {actionPills(
+              { name: activeCustom.name, emoji: activeCustom.emoji },
+              customItems.get(activeCustom.id) || []
+            )}
             {members.length > 0 && (
               <div className="mb-3 flex items-center gap-2 px-1">
                 <span className="flex">
@@ -924,6 +962,10 @@ export function ListsScreen({
                 · {active.rows.length}
               </span>
             </h1>
+            {actionPills(
+              { name: active.name, emoji: active.emoji },
+              active.rows.map((v) => v.id)
+            )}
             {active.rows.map(row)}
             {active.rows.length === 0 && (
               <p className="py-8 text-center text-sm text-neutral-400">
