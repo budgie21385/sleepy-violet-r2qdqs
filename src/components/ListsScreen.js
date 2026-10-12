@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Plus, Bookmark } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { sendPush } from "../lib/push";
 import { FriendAvatar } from "./FriendAvatar";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { SPOT_CATEGORIES } from "./SpotSheet";
@@ -68,6 +69,14 @@ export function ListsScreen({
   // item") — the emoji IS the sticker: white tile, olive border, a tilt.
   const [stickering, setStickering] = useState(false);
   const [stickerDraft, setStickerDraft] = useState("");
+  // COLLABORATORS (Oct 12, stage 2 — "list with Tiff means they can both
+  // edit"): owner invites friends as members; members add/remove venues;
+  // the list appears in THEIR index too. Direct add + a push (no consent
+  // gate v1 — being on a list is low-stakes; revisit if it's ever not).
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [friendProfiles, setFriendProfiles] = useState(null);
+  const [members, setMembers] = useState([]); // profiles of activeCustom's members
+  const [memberBusy, setMemberBusy] = useState(false);
   const [deleteArm, setDeleteArm] = useState(false);
   const [listsTick, setListsTick] = useState(0);
   // My been venue ids (marks + own check-ins with counts).
@@ -281,6 +290,91 @@ export function ListsScreen({
       setListsTick((n) => n + 1);
     } else showToast?.("Couldn't rename");
   }
+  // Members of the open custom list (avatars + the invite sheet's state).
+  useEffect(() => {
+    setMembers([]);
+    if (!activeCustom) return;
+    let cancelled = false;
+    (async () => {
+      const { data: mem } = await supabase
+        .from("venue_list_members")
+        .select("user_id")
+        .eq("list_id", activeCustom.id);
+      const ids = (mem || []).map((m) => m.user_id);
+      if (ids.length === 0 || cancelled) return;
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url")
+        .in("id", ids);
+      if (!cancelled) setMembers(profs || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCustom?.id, listsTick]);
+
+  async function loadFriends() {
+    if (friendProfiles !== null) return;
+    const { data: fr } = await supabase
+      .from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+    const ids = Array.from(
+      new Set(
+        (fr || []).map((f) =>
+          f.requester_id === userId ? f.addressee_id : f.requester_id
+        )
+      )
+    );
+    if (ids.length === 0) {
+      setFriendProfiles([]);
+      return;
+    }
+    const { data: profs } = await supabase
+      .from("profiles")
+      .select("id, display_name, avatar_url")
+      .in("id", ids)
+      .order("display_name", { ascending: true });
+    setFriendProfiles(profs || []);
+  }
+
+  async function addMember(p) {
+    if (!activeCustom || memberBusy) return;
+    setMemberBusy(true);
+    const { error } = await supabase
+      .from("venue_list_members")
+      .insert({ list_id: activeCustom.id, user_id: p.id });
+    setMemberBusy(false);
+    if (error && error.code !== "23505") {
+      console.error("Invite failed:", error);
+      showToast?.("Couldn't add them");
+      return;
+    }
+    setMembers((prev) =>
+      prev.some((m) => m.id === p.id) ? prev : [...prev, p]
+    );
+    sendPush(
+      p.id,
+      "You're on a list 📍",
+      `${activeCustom.name}. You can both add places now`,
+      "/",
+      { kind: "list_invite" }
+    );
+  }
+
+  async function removeMember(p) {
+    if (!activeCustom || memberBusy) return;
+    setMemberBusy(true);
+    const { error } = await supabase
+      .from("venue_list_members")
+      .delete()
+      .eq("list_id", activeCustom.id)
+      .eq("user_id", p.id);
+    setMemberBusy(false);
+    if (!error) setMembers((prev) => prev.filter((m) => m.id !== p.id));
+  }
+
   async function saveSticker() {
     // Grab the first grapheme-ish chunk — enough for any emoji.
     const e = stickerDraft.trim().slice(0, 4);
@@ -664,11 +758,103 @@ export function ListsScreen({
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    loadFriends();
+                    setInviteOpen(true);
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-neutral-800 active:bg-neutral-50"
+                >
+                  Invite collaborators
+                </button>
+                <button
+                  type="button"
                   onClick={() => (deleteArm ? deleteList() : setDeleteArm(true))}
                   className="block w-full border-t border-neutral-50 px-4 py-3 text-left text-sm text-red-600 active:bg-neutral-50"
                 >
                   {deleteArm ? "Really delete this list?" : "Delete list"}
                 </button>
+              </div>
+            )}
+            {members.length > 0 && (
+              <div className="mb-3 flex items-center gap-2 px-1">
+                <span className="flex">
+                  {members.slice(0, 4).map((m, i) => (
+                    <span
+                      key={m.id}
+                      style={i > 0 ? { marginLeft: -8 } : undefined}
+                    >
+                      <FriendAvatar profile={m} small />
+                    </span>
+                  ))}
+                </span>
+                <span className="text-[11px] text-neutral-500">
+                  with{" "}
+                  {members
+                    .slice(0, 2)
+                    .map((m) => (m.display_name || "a friend").split(" ")[0])
+                    .join(", ")}
+                  {members.length > 2 ? ` +${members.length - 2}` : ""}
+                </span>
+              </div>
+            )}
+            {inviteOpen && (
+              <div className="mb-3 rounded-2xl border border-[#cfdcc9] bg-white p-3.5">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-neutral-800">
+                    Collaborators
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setInviteOpen(false)}
+                    className="text-xs text-neutral-400"
+                  >
+                    Done
+                  </button>
+                </div>
+                {members.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2.5 py-1.5">
+                    <FriendAvatar profile={m} small />
+                    <span className="min-w-0 flex-1 truncate text-sm text-neutral-800">
+                      {m.display_name || "Someone"}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={memberBusy}
+                      onClick={() => removeMember(m)}
+                      className="shrink-0 rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] text-neutral-500 active:scale-95 transition disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {friendProfiles === null && (
+                  <p className="py-1 text-xs text-neutral-400">
+                    Loading friends…
+                  </p>
+                )}
+                {(friendProfiles || [])
+                  .filter((f) => !members.some((m) => m.id === f.id))
+                  .map((f) => (
+                    <div key={f.id} className="flex items-center gap-2.5 py-1.5">
+                      <FriendAvatar profile={f} small />
+                      <span className="min-w-0 flex-1 truncate text-sm text-neutral-800">
+                        {f.display_name || "Someone"}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={memberBusy}
+                        onClick={() => addMember(f)}
+                        className="shrink-0 rounded-full bg-[#455d3b] px-3 py-1 text-[11px] font-medium text-white active:scale-95 transition disabled:opacity-50"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                <p className="mt-1.5 text-[10px] text-neutral-400">
+                  They can add and remove places. The list shows in their
+                  My Lists too
+                </p>
               </div>
             )}
             {stickering && (

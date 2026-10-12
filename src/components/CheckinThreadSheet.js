@@ -670,6 +670,58 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
   // stored. Drives the card's one variable line, the kicked-on wording,
   // and which settings rows render. Auto-ends at the 4am after the start.
   const tense = nightTense(thread.timestamp);
+
+  // NIGHT RATINGS (Oct 12, stage 3) — memory stars, per person on their
+  // own shard; the card wears the night's average. The unrated row also
+  // carries the honesty exit: "We didn't end up going" → reschedule
+  // (When editor) or Remove (leaveNight — the shard dies, Been stays
+  // clean). Requires night_rating.sql.
+  const [myRating, setMyRating] = useState(null);
+  const [avgRating, setAvgRating] = useState(null);
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const [didntGo, setDidntGo] = useState(false);
+  useEffect(() => {
+    setMyRating(null);
+    setAvgRating(null);
+    setDidntGo(false);
+    if (!clusterIds || clusterIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("activities")
+        .select("id, user_id, rating")
+        .in("id", clusterIds);
+      if (cancelled || !data) return;
+      const mine = data.find((r) => r.user_id === userId);
+      setMyRating(mine?.rating ?? null);
+      const rated = data.filter((r) => r.rating != null);
+      if (rated.length > 0) {
+        const avg =
+          rated.reduce((s, r) => s + r.rating, 0) / rated.length;
+        setAvgRating(Math.round(avg * 10) / 10);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterKey, uploadTargetId, userId]);
+  async function rateNight(n) {
+    const myShardId = isOwner ? thread.activityId : myActivityId;
+    if (!myShardId || ratingBusy) return;
+    setRatingBusy(true);
+    const prev = myRating;
+    setMyRating(n);
+    const { error } = await supabase
+      .from("activities")
+      .update({ rating: n })
+      .eq("id", myShardId);
+    setRatingBusy(false);
+    if (error) {
+      console.error("Rating failed:", error);
+      setMyRating(prev);
+      showToast?.("Couldn't save that");
+    }
+  }
   // (createAlbum() retired Oct 9 — the album births silently from the
   // first photo in addPhotos, or from minting the collect link.)
 
@@ -1626,7 +1678,18 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   className="block w-full text-left text-lg font-semibold tracking-tight leading-snug truncate"
                 >
                   {labelValue}
+                  {/* The night's AVERAGE rides the title (Oct 12 — each
+                      avatar's own stars come with the public-face pass). */}
+                  {avgRating != null && tense === "past" && (
+                    <span className="ml-1.5 text-sm font-semibold text-[#f4a820]">
+                      ★ {avgRating}
+                    </span>
+                  )}
                 </button>
+              ) : avgRating != null && tense === "past" ? (
+                <span className="text-sm font-semibold text-[#f4a820]">
+                  ★ {avgRating}
+                </span>
               ) : null}
               {/* "add a title" RESTORED as a quiet link (Oct 10, Mark: "if
                   you don't initially add a title there is no way to do
@@ -2278,6 +2341,84 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
         {/* PLAIN check-in (Aug 21, design A "receipt"): no grid at all —
             the album offer is one quiet row under the people, above the
             conversation. */}
+        {/* HOW WAS IT? (Oct 12, stage 3) — memory stars on your own past
+            night; the unrated row carries the honesty exit. */}
+        {view === "card" &&
+          tense === "past" &&
+          (isOwner ? thread.activityId : myActivityId) && (
+            <div className="px-5 pt-3">
+              {didntGo ? (
+                <div className="flex items-center gap-2 rounded-2xl bg-[#faf8f4] px-3.5 py-2.5">
+                  <span className="flex-1 text-xs font-medium text-neutral-700">
+                    Didn't happen?
+                  </span>
+                  {iAmRootOwner && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDidntGo(false);
+                        setWhenDraft(toLocalInput(thread.timestamp));
+                        setWhenEdit(true);
+                        setView("settings");
+                      }}
+                      className="shrink-0 rounded-full border border-[#455d3b] px-3 py-1.5 text-[11px] font-medium text-[#455d3b] active:scale-95 transition"
+                    >
+                      Pick a new date
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={leaving}
+                    onClick={leaveNight}
+                    className="shrink-0 rounded-full border border-red-200 px-3 py-1.5 text-[11px] font-medium text-red-600 active:scale-95 transition disabled:opacity-50"
+                  >
+                    {leaving ? "Removing…" : "Remove it"}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Never mind"
+                    onClick={() => setDidntGo(false)}
+                    className="shrink-0 text-xs text-neutral-400"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5 rounded-2xl bg-[#faf8f4] px-3.5 py-2">
+                  <span className="shrink-0 text-xs font-medium text-neutral-700">
+                    {myRating ? "Your rating" : "How was it?"}
+                  </span>
+                  <span className="flex flex-1 items-center gap-0.5">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        aria-label={`${n} star${n === 1 ? "" : "s"}`}
+                        disabled={ratingBusy}
+                        onClick={() => rateNight(n)}
+                        className={`text-lg leading-none active:scale-110 transition ${
+                          myRating && n <= myRating
+                            ? "text-[#f4a820]"
+                            : "text-neutral-300"
+                        }`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </span>
+                  {!myRating && (
+                    <button
+                      type="button"
+                      onClick={() => setDidntGo(true)}
+                      className="shrink-0 text-[10px] font-medium text-neutral-400 underline underline-offset-2"
+                    >
+                      We didn't end up going
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         {/* ADD PHOTOS (Oct 9 doctrine, Mark: "Add photos on one line").
             The text link IS the album ask — no box, no yes/no, no modal.
             The first photo creates the album (see addPhotos); declining is
