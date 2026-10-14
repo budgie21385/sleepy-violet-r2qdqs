@@ -14,6 +14,7 @@ import { sendPush } from "../lib/push";
 import { FriendAvatar } from "./FriendAvatar";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { SPOT_CATEGORIES } from "./SpotSheet";
+import { VenueHistory } from "./VenueHistory";
 
 function Thumb({ v }) {
   const raw = v.primary_image || null;
@@ -68,6 +69,11 @@ export function ListsScreen({
     );
   const [list, setList] = useState(null); // null | "saved"|"been"|"not_been"|custom id (number)
   const [selectedVenue, setSelectedVenue] = useState(null);
+  // THE ACCORDION (Oct 15): one row expanded at a time; chevron only on
+  // venues you've actually been to. Content = VenueHistory (address,
+  // Nights | Media, your visits only).
+  const [expandedVenueId, setExpandedVenueId] = useState(null);
+  const [upcomingByVenue, setUpcomingByVenue] = useState(new Map());
   // CUSTOM LISTS (Oct 12 — stage 1 solo): owned + member lists, their
   // items, create/rename/privacy/delete. Adding venues happens through
   // the bookmark grammar on any venue card (hold = straight to a list).
@@ -129,6 +135,19 @@ export function ListsScreen({
       for (const a of acts || []) {
         counts.set(a.venue_id, (counts.get(a.venue_id) || 0) + 1);
       }
+      // Upcoming nights per venue — the "going Fri ›" badge.
+      const { data: future } = await supabase
+        .from("activities")
+        .select("id, venue_id, label, created_at")
+        .eq("user_id", userId)
+        .eq("kind", "checkin")
+        .not("venue_id", "is", null)
+        .gt("created_at", new Date().toISOString())
+        .limit(50);
+      if (!cancelled)
+        setUpcomingByVenue(
+          new Map((future || []).map((a) => [a.venue_id, a]))
+        );
       const ids = new Set([
         ...(marks || []).map((m) => m.venue_id),
         ...counts.keys(),
@@ -489,52 +508,109 @@ export function ListsScreen({
     const beenCount =
       (beenData?.counts.get(v.id) || 0) || (beenIds.has(v.id) ? 1 : 0);
     const pals = (friendsAt.get(v.id) || []).slice(0, 3);
+    const upcoming = upcomingByVenue.get(v.id);
+    const expanded = expandedVenueId === v.id;
     return (
-      <button
+      <div
         key={v.id}
-        type="button"
-        onClick={() => setSelectedVenue(v)}
-        className="mb-2 flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-sm border border-neutral-100 active:scale-[0.99] transition"
+        className="mb-2 rounded-2xl bg-white p-3 shadow-sm border border-neutral-100"
       >
-        <Thumb v={v} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900">
-            <span className="truncate">{v.name}</span>
-            {beenCount > 0 && (
-              <span className="shrink-0 text-[10px] font-medium text-[#455d3b]">
-                Been{beenCount > 1 ? ` ×${beenCount}` : ""}
-              </span>
-            )}
-          </span>
-          <span className="block truncate text-[11px] text-neutral-500">
-            {[v.type, v.suburb, v.rating ? `★ ${v.rating}` : null]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </span>
-        {pals.length > 0 && (
-          <span className="flex shrink-0">
-            {pals.map((p, i) => (
-              <span key={p.id} style={i > 0 ? { marginLeft: -8 } : undefined}>
-                <FriendAvatar profile={p} small />
-              </span>
-            ))}
-          </span>
-        )}
-        {list === "saved" && (
-          <span
-            role="button"
-            aria-label="Remove from Saved"
-            onClick={(e) => {
-              e.stopPropagation();
-              onUnsave?.(v.id);
-            }}
-            className="shrink-0 p-1 text-[#455d3b]"
+        <div className="flex items-center gap-3">
+          {/* The BUSINESS part opens the venue card (with Plan) — only
+              the chevron expands (Oct 15, Mark's split). */}
+          <button
+            type="button"
+            onClick={() => setSelectedVenue(v)}
+            className="flex min-w-0 flex-1 items-center gap-3 text-left active:scale-[0.99] transition"
           >
-            <Bookmark size={16} fill="#455d3b" />
-          </span>
+            <Thumb v={v} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900">
+                <span className="truncate">{v.name}</span>
+                {beenCount > 0 && (
+                  <span className="shrink-0 text-[10px] font-medium text-[#455d3b]">
+                    Been{beenCount > 1 ? ` ×${beenCount}` : ""}
+                  </span>
+                )}
+              </span>
+              <span className="block truncate text-[11px] text-neutral-500">
+                {[v.type, v.suburb, v.rating ? `★ ${v.rating}` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+                {upcoming && (
+                  <span
+                    role="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenThread?.({
+                        activityId: upcoming.id,
+                        ownerId: userId,
+                        ownerName: "You",
+                        venueName: v.name,
+                        label: upcoming.label || null,
+                        venueObj: v,
+                        timestamp: upcoming.created_at,
+                      });
+                    }}
+                    className="font-semibold text-[#455d3b]"
+                  >
+                    {" "}
+                    · going{" "}
+                    {new Date(upcoming.created_at).toLocaleDateString(
+                      "en-AU",
+                      { weekday: "short" }
+                    )}{" "}
+                    ›
+                  </span>
+                )}
+              </span>
+            </span>
+          </button>
+          {pals.length > 0 && (
+            <span className="flex shrink-0">
+              {pals.map((p, i) => (
+                <span
+                  key={p.id}
+                  style={i > 0 ? { marginLeft: -8 } : undefined}
+                >
+                  <FriendAvatar profile={p} small />
+                </span>
+              ))}
+            </span>
+          )}
+          {list === "saved" && (
+            <button
+              type="button"
+              aria-label="Remove from Saved"
+              onClick={() => onUnsave?.(v.id)}
+              className="shrink-0 p-1 text-[#455d3b]"
+            >
+              <Bookmark size={16} fill="#455d3b" />
+            </button>
+          )}
+          {beenCount > 0 && (
+            <button
+              type="button"
+              aria-label={expanded ? "Collapse" : "Your history here"}
+              onClick={() =>
+                setExpandedVenueId(expanded ? null : v.id)
+              }
+              className={`shrink-0 p-1 text-sm ${
+                expanded ? "text-[#455d3b]" : "text-neutral-300"
+              }`}
+            >
+              {expanded ? "▾" : "▸"}
+            </button>
+          )}
+        </div>
+        {expanded && (
+          <VenueHistory
+            userId={userId}
+            venue={v}
+            onOpenThread={onOpenThread}
+          />
         )}
-      </button>
+      </div>
     );
   };
 

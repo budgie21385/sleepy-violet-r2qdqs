@@ -30,6 +30,7 @@ import {
 } from "./MapFilters";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { VenueNightsSheet } from "./VenueNightsSheet";
+import { VenueHistory } from "./VenueHistory";
 import { searchPlaces, addGooglePlace } from "../lib/venueSearch";
 import { ChevronLeft, MapPin, Plus, Minus, List, Map as MapIcon, Star } from "lucide-react";
 import { spotCategory } from "./SpotSheet";
@@ -257,6 +258,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     if (openCard) setSelectedVenue(venue);
   }
   const [showFilters, setShowFilters] = useState(false);
+  // Map list view accordion (Oct 15) — one venue's history open at a time.
+  const [expandedListVenue, setExpandedListVenue] = useState(null);
   // CUSTOM LISTS as a filter dimension (Oct 12, Mark: "on the map when
   // selecting the filter we should see a dropdown Custom list") — picking
   // one applies the same lens as View-on-map; composable with every other
@@ -1425,27 +1428,69 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 fields.some((f) =>
                   String(f || "").toLowerCase().includes(q)
                 );
-              const rowShell = (key, onClick, left, title, sub, right) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={onClick}
-                  className="flex w-full items-center gap-3 border-b border-neutral-100 py-3 text-left active:bg-neutral-50"
-                >
-                  {left}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14.5px] font-medium text-neutral-900">
-                      {title}
-                    </span>
-                    {sub && (
-                      <span className="block truncate text-[12.5px] text-neutral-500">
-                        {sub}
+              const rowShell = (key, onClick, left, title, sub, right, historyVenue = null) => {
+                // THE ACCORDION on the map's list view too (Oct 15, Mark) —
+                // chevron on venues YOU'VE been to; expansion = VenueHistory
+                // (address, Nights | Media, your visits only).
+                const canExpand =
+                  historyVenue && searchOwnBeen.has(historyVenue.id);
+                const isOpen = canExpand && expandedListVenue === historyVenue.id;
+                const rowBtn = (
+                  <button
+                    key={canExpand ? undefined : key}
+                    type="button"
+                    onClick={onClick}
+                    className="flex w-full min-w-0 flex-1 items-center gap-3 py-3 text-left active:bg-neutral-50"
+                  >
+                    {left}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14.5px] font-medium text-neutral-900">
+                        {title}
                       </span>
+                      {sub && (
+                        <span className="block truncate text-[12.5px] text-neutral-500">
+                          {sub}
+                        </span>
+                      )}
+                    </span>
+                    {right}
+                  </button>
+                );
+                if (!canExpand)
+                  return (
+                    <div key={key} className="border-b border-neutral-100">
+                      {rowBtn}
+                    </div>
+                  );
+                return (
+                  <div key={key} className="border-b border-neutral-100">
+                    <div className="flex items-center gap-1">
+                      {rowBtn}
+                      <button
+                        type="button"
+                        aria-label={isOpen ? "Collapse" : "Your history here"}
+                        onClick={() =>
+                          setExpandedListVenue(isOpen ? null : historyVenue.id)
+                        }
+                        className={`shrink-0 p-2 text-sm ${
+                          isOpen ? "text-[#455d3b]" : "text-neutral-300"
+                        }`}
+                      >
+                        {isOpen ? "▾" : "▸"}
+                      </button>
+                    </div>
+                    {isOpen && (
+                      <div className="pb-3">
+                        <VenueHistory
+                          userId={userId}
+                          venue={historyVenue}
+                          onOpenThread={onOpenThread}
+                        />
+                      </div>
                     )}
-                  </span>
-                  {right}
-                </button>
-              );
+                  </div>
+                );
+              };
               // Google photo refs need the key-adding proxy (same rule as the
               // hero); R2/storage URLs serve raw. Initial sits BEHIND the img
               // so a dead URL degrades to the letter, never a broken glyph.
@@ -1553,7 +1598,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                     venueThumb(g.venue),
                     g.venue.name,
                     [g.venue.cuisine_bucket, g.venue.suburb].filter(Boolean).join(" · "),
-                    ratingChip(g.venue)
+                    ratingChip(g.venue),
+                    g.venue
                   )
                 );
               }
@@ -1570,7 +1616,8 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                   venueThumb(v),
                   v.name,
                   [v.cuisine_bucket || v.type, v.suburb].filter(Boolean).join(" · "),
-                  ratingChip(v)
+                  ratingChip(v),
+                  v
                 )
               );
             })()}
