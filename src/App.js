@@ -2878,7 +2878,10 @@ loadAreas();
   const swipeQueue = useMemo(() => {
     let q;
     if (matchSource === "list" && sourceList) {
-      q = filteredVenues.filter((v) => sourceList.ids.has(v.id));
+      // A picked list IS the pool (Oct 15): bypass filteredVenues entirely.
+      // A collaborator's area/cuisine filters and verified-or-saved pool rule
+      // were silently trimming a shared list ("wasn't able to send all 15").
+      q = venues.filter((v) => sourceList.ids.has(v.id));
     } else if (matchMode === "solo") {
       q = filteredVenues.filter((v) => !savedVenueIds.has(v.id));
     } else {
@@ -2893,7 +2896,7 @@ loadAreas();
     // No cap: every filtered venue is available (Mark, July 31 evening).
     if (matchMode === "concurrent" && expectedOthers >= 2) q = orderGroupDeck(q);
     return q;
-  }, [filteredVenues, matchSource, sourceList, matchMode, savedVenueIds, expectedOthers, mapViewPool]);
+  }, [filteredVenues, venues, matchSource, sourceList, matchMode, savedVenueIds, expectedOthers, mapViewPool]);
 
   const guestQueueRaw = useMemo(() => {
     if (!isGuest || !guestSessionData) return [];
@@ -2916,6 +2919,10 @@ loadAreas();
     const viewSet = filters.viewVenueIds?.length
       ? new Set(filters.viewVenueIds)
       : null;
+    // List sessions (Oct 15): the list IS the pool — the host no longer
+    // narrows it with their setup filters, so guests must not either.
+    if (guestSessionData.source_type === "list")
+      return viewSet ? pool.filter((v) => viewSet.has(v.id)) : pool;
     const todayKey = getTodayDayKey();
     const sessionAreas = filters.selectedAreaIds && areas.length
       ? areas.filter((a) => filters.selectedAreaIds.includes(a.id))
