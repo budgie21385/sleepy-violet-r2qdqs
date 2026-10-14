@@ -3104,9 +3104,12 @@ loadAreas();
         selectedCuisines,
         selectedPrices,
         selectedAmenities,
-        // Viewport pool (Sep 6): guests must trim to the same on-screen set
-        // or the group deck diverges from the host's.
-        ...(mapViewPool
+        // Pool constraint (Sep 6 / Oct 15): guests build their deck from this
+        // row, so whatever trimmed the host's pool must ride along. A chosen
+        // list wins; otherwise the map-viewport carry (All source only).
+        ...(matchSource === "list" && sourceList
+          ? { viewVenueIds: Array.from(sourceList.ids) }
+          : mapViewPool
           ? { viewVenueIds: Array.from(mapViewPool.ids) }
           : {}),
       };
@@ -3128,7 +3131,9 @@ loadAreas();
           mode: matchMode,
           source_type: matchSource === "list" ? "list" : "filters",
           filters: sessionFilters,
-          list_id: null,
+          // Custom lists have a row id; system lists (Saved/Been/…) don't.
+          list_id:
+            (matchSource === "list" && sourceList?.id) || null,
           target_matches: matchMode === "curated" ? null : matchLimit || null,
           expected_others: matchMode === "concurrent" ? expectedOthers : null,
           event_at: eventDate ? eventDate.toISOString() : null,
