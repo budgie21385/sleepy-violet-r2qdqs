@@ -183,9 +183,13 @@ export default async function handler(req, res) {
     );
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  // NO stale-while-revalidate (Oct 15): browsers served guests a day-old
+  // shell pointing at bundle hashes purged by newer deploys — white screen
+  // on /s/ links until a hard refresh. The shell must never outlive a
+  // deploy; the edge may cache briefly (purged on deploy anyway).
   res.setHeader(
     "Cache-Control",
-    "public, max-age=0, s-maxage=600, stale-while-revalidate=86400"
+    "public, max-age=0, must-revalidate, s-maxage=300"
   );
   res.status(200).send(html);
 }

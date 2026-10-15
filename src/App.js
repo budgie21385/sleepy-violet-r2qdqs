@@ -4802,7 +4802,7 @@ if (authLoading || guestLoading) {
         )}
         
         {screen === "curated_results" && (
-          <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col pb-24">
+          <div className="fixed inset-0 lg:left-[84px] z-[2000] bg-[#fdf6f0] flex flex-col pb-24">
             <div className="bg-white border-b border-neutral-100 px-4 py-5 text-center">
               <p className="text-sm text-neutral-500">Everyone's picks</p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight">
@@ -4870,7 +4870,7 @@ if (authLoading || guestLoading) {
           }
           if (matchMode === "concurrent") {
             return (
-              <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex items-center justify-center p-6 pb-24">
+              <div className="fixed inset-0 lg:left-[84px] z-[2000] bg-[#fdf6f0] flex items-center justify-center p-6 pb-24">
                 <div className="w-full max-w-sm text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#edf2eb] text-[#455d3b]">
                     <Check size={28} />
@@ -4943,7 +4943,7 @@ if (authLoading || guestLoading) {
           }
 
           return (
-            <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col pb-24">
+            <div className="fixed inset-0 lg:left-[84px] z-[2000] bg-[#fdf6f0] flex flex-col pb-24">
               <div className="bg-white border-b border-neutral-100 px-4 py-5 text-center">
                 <p className="text-sm text-neutral-500">Game over</p>
                 <h1 className="mt-1 text-2xl font-semibold tracking-tight">
@@ -6405,7 +6405,7 @@ function MyListScreen({
   }, [venues, sourceIds]);
 
   return (
-    <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col">
+    <div className="fixed inset-0 lg:left-[84px] z-[2000] bg-[#fdf6f0] flex flex-col">
       <div className="bg-white border-b border-neutral-100 px-4 py-3 flex items-center gap-3">
         <button
           type="button"
@@ -6948,7 +6948,7 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
   }
 
   return (
-    <div className="fixed inset-0 z-[2000] bg-[#fdf6f0] flex flex-col">
+    <div className="fixed inset-0 lg:left-[84px] z-[2000] bg-[#fdf6f0] flex flex-col">
       <div className="bg-white border-b border-neutral-100 px-4 py-3 flex items-center gap-3">
         <button
           type="button"

@@ -334,6 +334,10 @@ export function SessionResultsView({
     <>
       {showConfetti && <ConfettiBurst />}
 
+      {/* One phone-width column, centered (Oct 15) — on desktop the board
+          sat under the left rail and its rows stretched the full window. */}
+      <div className="flex w-full max-w-md mx-auto flex-1 min-h-0 flex-col">
+
       {/* Participants strip */}
       <ParticipantsStrip
         participants={participants}
@@ -547,6 +551,7 @@ export function SessionResultsView({
             })}
           </ul>
         )}
+      </div>
       </div>
 
       {detailVenue && (
