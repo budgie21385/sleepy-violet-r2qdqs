@@ -522,5 +522,160 @@ html,body{margin:0;padding:0;background:#fdfbf9;}
   setTimeout(fit, 1500);
 })();
 </script>
+<!-- SIGN-IN MODAL (Oct 15, Mark: "the form can't just open on the homepage
+     and the state just update to /?signin=1" — it can, and now does). The
+     OTP flow runs right here in vanilla JS; the session supabase-js stores
+     lands in the SAME localStorage the app reads, so on success we set the
+     edge cookie and step into the app at "/". The React form at /?signin=1
+     stays as the fallback for direct loads of that URL. supabase-js and
+     Turnstile load lazily on first open; keys below are the public ones
+     already shipped in the app bundle. -->
+<div id="signin-overlay" style="display:none; position:fixed; inset:0; z-index:10000; background:rgba(26,48,37,.45); align-items:center; justify-content:center; padding:20px;">
+  <div style="width:100%; max-width:420px; background:#fdfbf9; border-radius:18px; padding:28px; box-shadow:0 10px 40px rgba(26,48,37,.25); font-family:'Atkinson Hyperlegible',sans-serif; color:#1a3025; position:relative;">
+    <button type="button" id="signin-close" aria-label="Close" style="position:absolute; top:14px; right:14px; width:32px; height:32px; border:none; background:transparent; color:#1a3025; opacity:.55; font-size:20px; cursor:pointer;">✕</button>
+    <p style="margin:0; font-family:'League Gothic',sans-serif; font-size:44px; line-height:1;">flanit</p>
+    <div id="signin-step-email">
+      <h2 style="margin:18px 0 6px; font-family:'League Spartan',sans-serif; font-size:22px; font-weight:700;">Sign up or in</h2>
+      <p style="margin:0 0 14px; font-size:14px; opacity:.75;">Pop in your email and we'll send you a 6-digit code.</p>
+      <form id="signin-email-form">
+        <input id="signin-email" type="email" required placeholder="you@example.com" autocomplete="email"
+          style="box-sizing:border-box; width:100%; padding:15px 16px; font-size:16px; border:1.5px solid rgba(26,48,37,.2); border-radius:13px; background:#fff; outline:none; font-family:inherit;">
+        <div id="signin-turnstile" style="margin:12px 0; display:flex; justify-content:center;"></div>
+        <button id="signin-send" type="submit"
+          style="box-sizing:border-box; width:100%; min-height:50px; border:none; cursor:pointer; background:#90f972; color:#1a3025; border-radius:13px; font-family:'League Gothic',sans-serif; font-size:24px; letter-spacing:.02em;">email me a code</button>
+      </form>
+    </div>
+    <div id="signin-step-code" style="display:none;">
+      <h2 style="margin:18px 0 6px; font-family:'League Spartan',sans-serif; font-size:22px; font-weight:700;">Enter your code</h2>
+      <p style="margin:0 0 14px; font-size:14px; opacity:.75;">We emailed a 6-digit code to <strong id="signin-email-echo"></strong>.</p>
+      <form id="signin-code-form">
+        <input id="signin-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"
+          style="box-sizing:border-box; width:100%; padding:15px 16px; font-size:18px; text-align:center; letter-spacing:.3em; border:1.5px solid rgba(26,48,37,.2); border-radius:13px; background:#fff; outline:none; font-family:inherit;">
+        <button id="signin-verify" type="submit"
+          style="box-sizing:border-box; width:100%; min-height:50px; margin-top:12px; border:none; cursor:pointer; background:#90f972; color:#1a3025; border-radius:13px; font-family:'League Gothic',sans-serif; font-size:24px; letter-spacing:.02em;">sign in</button>
+      </form>
+      <button type="button" id="signin-startover" style="display:block; width:100%; margin-top:12px; border:none; background:transparent; font-size:12px; opacity:.6; cursor:pointer; font-family:inherit; color:inherit;">Wrong email or no code? <strong>Start over</strong></button>
+    </div>
+    <p id="signin-msg" style="margin:12px 0 0; font-size:14px; text-align:center; display:none;"></p>
+  </div>
+</div>
+<script>
+(function () {
+  var SB_URL = "https://wpvntfxyaysebaxwvefh.supabase.co";
+  var SB_KEY = "sb_publishable_5xbrgknmRUMMyaUhp0_baA_Hnmm5qZ9";
+  var TS_KEY = "0x4AAAAAADTF1P7KXWBPldrU";
+  var overlay = document.getElementById("signin-overlay");
+  var sb = null, tsToken = null, tsWidget = null, loading = false;
+
+  function msg(t, isErr) {
+    var el = document.getElementById("signin-msg");
+    el.textContent = t || "";
+    el.style.display = t ? "block" : "none";
+    el.style.color = isErr ? "#b3261e" : "#1a3025";
+  }
+  function step(which) {
+    document.getElementById("signin-step-email").style.display = which === "email" ? "" : "none";
+    document.getElementById("signin-step-code").style.display = which === "code" ? "" : "none";
+    msg("");
+  }
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement("script");
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  function ensureDeps() {
+    if (loading) return loading;
+    loading = Promise.all([
+      window.supabase ? 0 : loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"),
+      window.turnstile ? 0 : loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"),
+    ]).then(function () {
+      if (!sb) sb = window.supabase.createClient(SB_URL, SB_KEY);
+      if (tsWidget === null && window.turnstile) {
+        tsWidget = window.turnstile.render(document.getElementById("signin-turnstile"), {
+          sitekey: TS_KEY,
+          appearance: "interaction-only",
+          callback: function (t) { tsToken = t; },
+          "expired-callback": function () { tsToken = null; },
+          "error-callback": function () { tsToken = null; },
+        });
+      }
+    });
+    return loading;
+  }
+  function openModal(push) {
+    overlay.style.display = "flex";
+    step("email");
+    if (push) history.pushState({ signin: 1 }, "", "/?signin=1");
+    ensureDeps().catch(function () {
+      // CDN hiccup: fall back to the app's own form at the same URL.
+      window.location.href = "/?signin=1";
+    });
+  }
+  function closeModal(fromPop) {
+    overlay.style.display = "none";
+    msg("");
+    if (!fromPop && history.state && history.state.signin) history.back();
+  }
+
+  // Every homepage CTA pointing at /?signin=1 opens the modal in place.
+  document.querySelectorAll('a[href="/?signin=1"]').forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      openModal(true);
+    });
+  });
+  document.getElementById("signin-close").addEventListener("click", function () { closeModal(false); });
+  overlay.addEventListener("click", function (e) { if (e.target === overlay) closeModal(false); });
+  window.addEventListener("popstate", function () {
+    if (overlay.style.display !== "none") closeModal(true);
+  });
+
+  document.getElementById("signin-email-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var email = document.getElementById("signin-email").value.trim();
+    if (!email || !sb) return;
+    if (!tsToken) { msg("One sec. Just finishing the security check.", false); return; }
+    var btn = document.getElementById("signin-send");
+    btn.textContent = "sending..."; btn.disabled = true;
+    sb.auth.signInWithOtp({
+      email: email,
+      options: { emailRedirectTo: window.location.origin, captchaToken: tsToken },
+    }).then(function (r) {
+      btn.textContent = "email me a code"; btn.disabled = false;
+      if (window.turnstile && tsWidget !== null) window.turnstile.reset(tsWidget);
+      tsToken = null;
+      if (r.error) { msg("Couldn't send the code. " + r.error.message, true); return; }
+      document.getElementById("signin-email-echo").textContent = email;
+      step("code");
+    });
+  });
+
+  document.getElementById("signin-code-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var email = document.getElementById("signin-email").value.trim();
+    var code = document.getElementById("signin-code").value.replace(/\D/g, "");
+    if (code.length < 6 || !sb) return;
+    var btn = document.getElementById("signin-verify");
+    btn.textContent = "checking..."; btn.disabled = true;
+    sb.auth.verifyOtp({ email: email, token: code, type: "email" }).then(function (r) {
+      if (!r.error) return r;
+      return sb.auth.verifyOtp({ email: email, token: code, type: "signup" });
+    }).then(function (r) {
+      btn.textContent = "sign in"; btn.disabled = false;
+      if (r.error) { msg("That code didn't work. Check it and try again.", true); return; }
+      // Signed in: the session is in localStorage where the app reads it.
+      document.cookie = "flanit_in=1; path=/; max-age=31536000; SameSite=Lax";
+      window.location.replace("/");
+    });
+  });
+
+  document.getElementById("signin-startover").addEventListener("click", function () {
+    document.getElementById("signin-code").value = "";
+    step("email");
+  });
+})();
+</script>
 </body>
 </html>
