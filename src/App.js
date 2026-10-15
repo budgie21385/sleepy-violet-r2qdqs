@@ -186,24 +186,9 @@ function SignInScreen({ inviteHandle }) {
         >
           <ArrowLeft size={16} /> back
         </a>
-        <div className="mb-7 text-center">
-          <p
-            style={{
-              fontFamily: "'League Gothic', sans-serif",
-              fontSize: 64,
-              lineHeight: 1,
-              letterSpacing: "0.01em",
-            }}
-          >
-            flanit
-          </p>
-          <p
-            className="mt-2 text-sm"
-            style={{ fontFamily: "'League Spartan', sans-serif", opacity: 0.75 }}
-          >
-            find a place, together
-          </p>
-        </div>
+        {/* No wordmark/logo here (Mark, Oct 15: "remove this random logo,
+            note not to be putting in random logos anywhere") — the form
+            speaks for itself; the homepage carries the brand. */}
         {inviteHandle && (
           <div
             className="mb-4 rounded-[13px] bg-white px-4 py-3 text-sm"

@@ -533,9 +533,10 @@ html,body{margin:0;padding:0;background:#fdfbf9;}
 <div id="signin-overlay" style="display:none; position:fixed; inset:0; z-index:10000; background:rgba(26,48,37,.45); align-items:center; justify-content:center; padding:20px;">
   <div style="width:100%; max-width:420px; background:#fdfbf9; border-radius:18px; padding:28px; box-shadow:0 10px 40px rgba(26,48,37,.25); font-family:'Atkinson Hyperlegible',sans-serif; color:#1a3025; position:relative;">
     <button type="button" id="signin-close" aria-label="Close" style="position:absolute; top:14px; right:14px; width:32px; height:32px; border:none; background:transparent; color:#1a3025; opacity:.55; font-size:20px; cursor:pointer;">✕</button>
-    <p style="margin:0; font-family:'League Gothic',sans-serif; font-size:44px; line-height:1;">flanit</p>
+    <!-- No wordmark/logo in here (Mark, Oct 15: "remove this random logo" —
+         the page behind the modal IS the brand; don't add logos anywhere). -->
     <div id="signin-step-email">
-      <h2 style="margin:18px 0 6px; font-family:'League Spartan',sans-serif; font-size:22px; font-weight:700;">Sign up or in</h2>
+      <h2 style="margin:4px 0 6px; font-family:'League Spartan',sans-serif; font-size:22px; font-weight:700;">Sign up or in</h2>
       <p style="margin:0 0 14px; font-size:14px; opacity:.75;">Pop in your email and we'll send you a 6-digit code.</p>
       <form id="signin-email-form">
         <input id="signin-email" type="email" required placeholder="you@example.com" autocomplete="email"
@@ -546,7 +547,7 @@ html,body{margin:0;padding:0;background:#fdfbf9;}
       </form>
     </div>
     <div id="signin-step-code" style="display:none;">
-      <h2 style="margin:18px 0 6px; font-family:'League Spartan',sans-serif; font-size:22px; font-weight:700;">Enter your code</h2>
+      <h2 style="margin:4px 0 6px; font-family:'League Spartan',sans-serif; font-size:22px; font-weight:700;">Enter your code</h2>
       <p style="margin:0 0 14px; font-size:14px; opacity:.75;">We emailed a 6-digit code to <strong id="signin-email-echo"></strong>.</p>
       <form id="signin-code-form">
         <input id="signin-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"
