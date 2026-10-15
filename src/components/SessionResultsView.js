@@ -79,7 +79,6 @@ export function SessionResultsView({
   participants = [],
   sessionId,
   sessionMatches,
-  myLikedIds,
   venues,
   userId,
   hostUserId,
@@ -100,6 +99,15 @@ export function SessionResultsView({
   const [view, setView] = useState("matches");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [detailVenue, setDetailVenue] = useState(null);
+  // THE LIKES TAB (Oct 15, Mark: "My likes should actually be Likes and we
+  // should be able to see who voted on what"). Everyone's likes from the
+  // aggregate RPC, one row per venue with like_count + liker_user_ids —
+  // which also sidesteps the own-rows fetch that left a guest's likes
+  // invisible when her swipes sat under another uid.
+  const [allLikes, setAllLikes] = useState(null);
+  // Liked venues missing from the viewer's local pool (list sessions, other
+  // people's imports): fetched by id so a like never silently drops a row.
+  const [extraVenues, setExtraVenues] = useState(new Map());
   // Host's final pick for this session ("We're going here") — reuses the same
   // decided_venue_id mechanism as the curated board.
   const [decidedVenueId, setDecidedVenueId] = useState(null);
@@ -124,6 +132,55 @@ export function SessionResultsView({
       cancelled = true;
     };
   }, [sessionId]);
+
+  // Everyone's likes (the Likes tab). get_session_likes is the same
+  // SECURITY DEFINER aggregate the timeout fallback uses: one row per liked
+  // venue, best supported first, with liker_user_ids for the name chips.
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    supabase
+      .rpc("get_session_likes", { p_session_id: sessionId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch session likes:", error);
+          setAllLikes([]);
+          return;
+        }
+        setAllLikes(data || []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  // Resolve liked venues the viewer's own pool doesn't carry (RLS hides
+  // other people's manual venues; list sessions roam outside the pool).
+  useEffect(() => {
+    if (!allLikes?.length) return;
+    const have = new Set(venues.map((v) => v.id));
+    const missing = allLikes
+      .map((l) => l.venue_id)
+      .filter((id) => !have.has(id) && !extraVenues.has(id));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    supabase
+      .from("venues")
+      .select("*")
+      .in("id", missing)
+      .then(({ data }) => {
+        if (cancelled || !data?.length) return;
+        setExtraVenues((prev) => {
+          const next = new Map(prev);
+          for (const v of data) next.set(v.id, v);
+          return next;
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allLikes, venues]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // THE SCHEDULER (Aug 1, Mark) — extracted to components/PlanScheduler.js
   // so the curated board runs the IDENTICAL flow (Mark, Aug: "Does the same
@@ -155,10 +212,11 @@ export function SessionResultsView({
     setDetailVenue(candidates[Math.floor(Math.random() * candidates.length)]);
   }
 
-  const venueById = useMemo(
-    () => new Map(venues.map((v) => [v.id, v])),
-    [venues]
-  );
+  const venueById = useMemo(() => {
+    const m = new Map(venues.map((v) => [v.id, v]));
+    for (const [id, v] of extraVenues) if (!m.has(id)) m.set(id, v);
+    return m;
+  }, [venues, extraVenues]);
   const matchedIdSet = new Set(
     (sessionMatches || []).map((m) => m.venue_id)
   );
@@ -176,7 +234,9 @@ export function SessionResultsView({
     ])
   );
   function likerNames(venueId) {
-    const m = (sessionMatches || []).find((x) => x.venue_id === venueId);
+    const m =
+      (allLikes || []).find((x) => x.venue_id === venueId) ||
+      (sessionMatches || []).find((x) => x.venue_id === venueId);
     if (!m?.liker_user_ids?.length) return null;
     const named = [];
     let unnamed = 0;
@@ -203,19 +263,19 @@ export function SessionResultsView({
       .filter(Boolean);
     emptyMessage = "No mutual matches in this session.";
   } else {
-    loading = myLikedIds === null;
-    rows = (myLikedIds || [])
-      .map((id) => {
-        const venue = venueById.get(id);
+    loading = allLikes === null;
+    rows = (allLikes || [])
+      .map((l) => {
+        const venue = venueById.get(l.venue_id);
         if (!venue) return null;
         return {
           venue,
-          likeCount: likeCountById.get(id) || 1,
-          isMatch: matchedIdSet.has(id),
+          likeCount: l.like_count || 1,
+          isMatch: matchedIdSet.has(l.venue_id),
         };
       })
       .filter(Boolean);
-    emptyMessage = "You didn't like any places in this session.";
+    emptyMessage = "No likes in this session yet.";
   }
 
   // THE PICK LEADS THE LIST (Aug 1, Mark: drawer tap should land on the
@@ -242,7 +302,7 @@ export function SessionResultsView({
     : null;
 
   const matchesCount = (sessionMatches || []).length;
-  const myLikesCount = (myLikedIds || []).length;
+  const likesCount = (allLikes || []).length;
 
   function toggleSelected(id) {
     setSelectedIds((prev) => {
@@ -316,7 +376,7 @@ export function SessionResultsView({
         </div>
       )}
 
-      {/* Matches / My likes pill toggle */}
+      {/* Matches / Likes pill toggle */}
       <div className="bg-white border-b border-neutral-100 px-4 py-3 flex justify-center">
         <div className="flex bg-neutral-100 rounded-full p-0.5">
           <button
@@ -332,14 +392,14 @@ export function SessionResultsView({
           </button>
           <button
             type="button"
-            onClick={() => setView("my_likes")}
+            onClick={() => setView("likes")}
             className={`rounded-full px-4 py-1.5 text-xs font-medium transition ${
-              view === "my_likes"
+              view === "likes"
                 ? "bg-white text-[#455d3b] shadow-sm"
                 : "text-neutral-500"
             }`}
           >
-            My likes ({myLikesCount})
+            Likes ({likesCount})
           </button>
         </div>
       </div>
@@ -435,12 +495,12 @@ export function SessionResultsView({
                     >
                       <div className="flex items-center gap-2">
                         <p className="font-medium truncate">{venue.name}</p>
-                        {/* WHO VOTED, on every row (Sep 3, Mark's option b:
-                            the ended board is the host's decision moment —
-                            "Raya · Resha" vs "Regulars · You" IS the
-                            information). Consensus keeps the olive pop;
-                            solo votes go quiet grey. */}
-                        {view === "matches" && likerNames(venue.id) && (
+                        {/* WHO VOTED, on every row in BOTH views (Sep 3
+                            option b, extended Oct 15,
+                            Mark: "we should be able to see who voted on
+                            what"). Consensus keeps the olive pop; solo
+                            votes go quiet grey. */}
+                        {likerNames(venue.id) && (
                           <span
                             className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 max-w-[140px] truncate ${
                               likeCount >= 2
@@ -451,7 +511,7 @@ export function SessionResultsView({
                             {likerNames(venue.id) || `×${likeCount}`}
                           </span>
                         )}
-                        {view === "my_likes" && isMatch && (
+                        {view === "likes" && isMatch && (
                           <span className="inline-flex items-center rounded-full bg-[#455d3b]/10 px-2 py-0.5 text-[10px] font-medium text-[#455d3b] shrink-0">
                             Matched
                           </span>

@@ -3202,7 +3202,10 @@ loadAreas();
 
   function nextCard() {
     const nextIndex = cardIndex + 1;
-    if (nextIndex >= filteredVenues.length) {
+    // End of the DECK, not of the filtered pool (Oct 15): list sessions
+    // bypass filteredVenues, so counting it ended the game early ("my
+    // session finished before I got to the end of the list").
+    if (nextIndex >= swipeQueue.length) {
       setScreen("matches");
       return;
     }
@@ -4950,7 +4953,6 @@ if (authLoading || guestLoading) {
                   participants={sessionParticipants}
                   sessionId={currentSessionId}
                   sessionMatches={sessionMatches}
-                  myLikedIds={markLikes}
                   venues={venues}
                   userId={session?.user?.id}
                   hostUserId={session?.user?.id}
@@ -7213,7 +7215,6 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
               participants={participants}
               sessionId={selectedSession.id}
               sessionMatches={sessionMatches}
-              myLikedIds={myLikedIds}
               venues={venues}
               userId={userId}
               hostUserId={selectedSession.host_user_id}
