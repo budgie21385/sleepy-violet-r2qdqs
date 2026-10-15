@@ -1909,10 +1909,11 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   : `${thread.ownerName}'s`}{" "}
                 friends see this
               </p>
-              {/* THE ADDRESS on future nights (Oct 15, Mark) — the plan is
-                  an invitation, so say where. Venue address only: an event's
-                  private place already renders its own gated 📍 line above. */}
-              {tense === "coming_up" && thread.venueObj?.address && (
+              {/* THE ADDRESS, every tense (Oct 15, Mark — first asked for
+                  future cards, then "why is it not showing on this one?" on
+                  a live card). Venue address only: an event's private place
+                  already renders its own gated 📍 line above. */}
+              {thread.venueObj?.address && (
                 <p className="mt-0.5 text-[11px] text-neutral-500">
                   📍 {thread.venueObj.address}
                 </p>
