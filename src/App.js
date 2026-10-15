@@ -3190,9 +3190,11 @@ loadAreas();
           mode: matchMode,
           source_type: matchSource === "list" ? "list" : "filters",
           filters: sessionFilters,
-          // Custom lists have a row id; system lists (Saved/Been/…) don't.
-          list_id:
-            (matchSource === "list" && sourceList?.id) || null,
+          // list_id stays null (Oct 16): the column is a legacy UUID and a
+          // venue_lists id is a bigint — writing it broke EVERY custom-list
+          // session at insert (22P02), caught by the e2e suite's first run.
+          // Provenance, if ever wanted, needs its own bigint column.
+          list_id: null,
           target_matches: matchMode === "curated" ? null : matchLimit || null,
           expected_others: matchMode === "concurrent" ? expectedOthers : null,
           event_at: eventDate ? eventDate.toISOString() : null,
