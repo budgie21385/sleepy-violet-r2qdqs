@@ -1,9 +1,10 @@
-// THE WHEN-SHEET (Oct 9 doctrine) — one + per tab, one question: "When?".
-// Four core options on every tab; each tab TILTS the deck toward its own
-// tense with a sage tint (fixed order, tint only — Mark's order question
-// held open, this is the reversible choice). Map adds "Map it out",
-// Profile adds "People". Contextual shortcuts elsewhere skip this sheet.
-// "We can't decide" expands IN PLACE to the two session starters.
+// THE WHEN-SHEET (Oct 9 doctrine; order RULED Oct 15) — one + per tab, one
+// question: "When?". Four core options on every tab; "Coming up" sits at
+// the TOP and wears the sage tint in ALL situations (Mark's Oct 15 ruling —
+// the per-tab tilt system is retired; planning ahead is the default act).
+// An open list hands the tint to "We can't decide" instead. Map adds "Map
+// it out", Profile adds "People". Contextual shortcuts elsewhere skip this
+// sheet. "We can't decide" expands IN PLACE to the two session starters.
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -18,13 +19,7 @@ import {
   ListChecks,
 } from "lucide-react";
 
-const TILT_BY_TAB = {
-  matches: "undecided",
-  map: "now",
-  events: "coming_up",
-  profile: "past",
-  // activity: no tilt — the unbiased sheet.
-};
+// TILT_BY_TAB retired (Oct 15): Coming up is the default everywhere.
 
 export function WhenSheet({
   tab,
@@ -41,7 +36,6 @@ export function WhenSheet({
 }) {
   // "We can't decide" swaps the core list for the two session starters.
   const [deciding, setDeciding] = useState(false);
-  const tilt = TILT_BY_TAB[tab];
 
   const pick = (fn) => () => {
     onClose();
@@ -97,10 +91,14 @@ export function WhenSheet({
         style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-200" />
+        {/* NO TITLE on the main sheet (Mark, Oct 15) — the four options
+            speak for themselves. The deciding sub-view keeps its label. */}
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">
-            {deciding ? "Make an unplanned plan" : "When?"}
-          </h2>
+          {deciding ? (
+            <h2 className="text-base font-semibold">Make an unplanned plan</h2>
+          ) : (
+            <span />
+          )}
           <button
             type="button"
             aria-label="Close"
@@ -145,20 +143,22 @@ export function WhenSheet({
           <>
             <div className="space-y-2">
               {row(
-                "now",
-                <MapPin size={16} />,
-                "Happening now",
-                "Friends can see it and join you",
-                pick(onNow),
-                tilt === "now"
-              )}
-              {row(
                 "coming_up",
                 <CalendarDays size={16} />,
                 "Coming up",
                 "Make the plan, invite people after",
                 pick(onComingUp),
-                tilt === "coming_up"
+                // The default everywhere (Oct 15 ruling) — unless an open
+                // list makes We-can't-decide THE contextual option.
+                !listContext
+              )}
+              {row(
+                "now",
+                <MapPin size={16} />,
+                "Happening now",
+                "Friends can see it and join you",
+                pick(onNow),
+                false
               )}
               {row(
                 "past",
@@ -166,18 +166,17 @@ export function WhenSheet({
                 "Already happened",
                 "Add it from the camera roll",
                 pick(onPast),
-                tilt === "past"
+                false
               )}
               {row(
                 "undecided",
                 <Shuffle size={16} />,
-                "We can't decide",
+                "Decide together",
                 listContext
                   ? `Pick from ${listContext.emoji} ${listContext.name} · ${listContext.ids.length} places`
                   : "Make an unplanned plan. The app helps pick",
                 () => setDeciding(true),
-                // An open list makes this THE contextual option.
-                listContext ? true : tilt === "undecided"
+                !!listContext
               )}
             </div>
 
