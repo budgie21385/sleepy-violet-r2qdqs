@@ -180,7 +180,7 @@ export function SessionResultsView({
     return () => {
       cancelled = true;
     };
-  }, [allLikes, venues]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allLikes, venues]);
 
   // THE SCHEDULER (Aug 1, Mark) — extracted to components/PlanScheduler.js
   // so the curated board runs the IDENTICAL flow (Mark, Aug: "Does the same
