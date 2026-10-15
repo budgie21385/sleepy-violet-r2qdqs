@@ -102,14 +102,15 @@ const TURNSTILE_SITE_KEY = "0x4AAAAAADTF1P7KXWBPldrU";
 // createEmojiIcon, MapResizer, MapScreen moved to ./components/MapScreen.js.
 
 function SignInScreen({ inviteHandle }) {
-  // "landing" = brand + tagline + Get started CTA
-  // "email"   = magic-link email form
-  // When inviteHandle is set we entered via /u/@handle — show that context on
-  // the landing card and use the current URL as the magic-link redirect so
-  // the user lands back on the same invite path post-confirmation. (Local-
-  // Storage is the real source of truth — see App-level URL parser — but the
-  // redirect helps the new-tab case too.)
-  const [view, setView] = useState("landing");
+  // ONE screen, NEW brand (Oct 15, Mark: "we should not see the old design
+  // or branding at all"). The old two-step (brand landing → email form) is
+  // dead: /home/ IS the landing now, so arriving here means "sign me in" —
+  // straight to the form, wearing the homepage's identity (#fdfbf9 paper,
+  // #1a3025 ink, #90f972 lime, League Gothic CTAs — fonts via styles.css
+  // from /home/'s assets).
+  // When inviteHandle is set we entered via /u/@handle — show that context
+  // and use the invite path as the magic-link redirect so the user lands
+  // back on it post-confirmation.
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState("");
@@ -163,65 +164,71 @@ function SignInScreen({ inviteHandle }) {
     }
     setVerifying(false);
     if (error) {
-      setMessage("That code didn't work — check it and try again.");
+      setMessage("That code didn't work. Check it and try again.");
     }
     // On success, onAuthStateChange signs them in and the app re-renders.
   }
 
-  if (view === "landing") {
-    return (
-      <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-6">
-        <div className="w-full max-w-sm text-center flex flex-col items-center">
-          {/* Logo lives at public/flanit-logo.svg and is served as a
-              static asset by the React app. */}
-          <img
-            src="/flanit-logo.svg"
-            alt="Flanit"
-            className="w-56 h-auto mb-10"
-          />
-          <h1 className="text-3xl font-semibold tracking-tight leading-tight max-w-[18rem]">
-            A place to discover your city with friends.
-          </h1>
-          {inviteHandle && (
-            <div className="mt-6 rounded-2xl bg-white border border-[#c5d4c2] px-4 py-3 text-sm text-neutral-700">
-              You're joining to connect with <span className="font-medium">@{inviteHandle}</span>.
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setView("email")}
-            className="mt-10 inline-flex items-center justify-center gap-2 rounded-full bg-[#455d3b] px-7 py-3.5 text-base font-medium text-white active:scale-[0.98] transition shadow-sm"
-          >
-            {inviteHandle ? "Sign up to continue →" : "Get started →"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // view === "email"
   return (
-    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-center justify-center p-4">
+    <div
+      className="min-h-screen flex items-center justify-center p-5"
+      style={{
+        background: "#fdfbf9",
+        color: "#1a3025",
+        fontFamily: "'Atkinson Hyperlegible', sans-serif",
+      }}
+    >
       <div className="w-full max-w-sm">
-        <button
-          type="button"
-          onClick={() => {
-            setView("landing");
-            setMessage("");
-            setCodeSent(false);
-            setCode("");
-          }}
-          className="mb-4 inline-flex items-center gap-1 text-sm text-neutral-600 hover:text-neutral-900"
+        <a
+          href="/"
+          className="mb-5 inline-flex items-center gap-1 text-sm"
+          style={{ color: "#1a3025", opacity: 0.65, textDecoration: "none" }}
         >
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div className="rounded-3xl bg-white p-5 shadow-sm border border-neutral-100">
+          <ArrowLeft size={16} /> back
+        </a>
+        <div className="mb-7 text-center">
+          <p
+            style={{
+              fontFamily: "'League Gothic', sans-serif",
+              fontSize: 64,
+              lineHeight: 1,
+              letterSpacing: "0.01em",
+            }}
+          >
+            flanit
+          </p>
+          <p
+            className="mt-2 text-sm"
+            style={{ fontFamily: "'League Spartan', sans-serif", opacity: 0.75 }}
+          >
+            find a place, together
+          </p>
+        </div>
+        {inviteHandle && (
+          <div
+            className="mb-4 rounded-[13px] bg-white px-4 py-3 text-sm"
+            style={{ border: "1.5px solid #90f972" }}
+          >
+            You're joining to connect with{" "}
+            <span className="font-bold">@{inviteHandle}</span>.
+          </div>
+        )}
+        <div
+          className="rounded-[18px] bg-white p-5"
+          style={{
+            border: "1px solid rgba(26,48,37,.12)",
+            boxShadow: "0 2px 10px rgba(26,48,37,.05)",
+          }}
+        >
           {!codeSent ? (
             <>
-              <h2 className="text-xl font-semibold tracking-tight mb-2">
-                Sign in
+              <h2
+                className="mb-2 text-xl font-bold tracking-tight"
+                style={{ fontFamily: "'League Spartan', sans-serif" }}
+              >
+                Sign up or in
               </h2>
-              <p className="text-sm text-neutral-600 mb-4">
+              <p className="mb-4 text-sm" style={{ opacity: 0.75 }}>
                 Pop in your email and we'll send you a 6-digit code.
               </p>
               <form onSubmit={sendMagicLink} className="space-y-3">
@@ -232,7 +239,11 @@ function SignInScreen({ inviteHandle }) {
                   placeholder="you@example.com"
                   disabled={sending}
                   required
-                  className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-base outline-none border border-neutral-100"
+                  className="w-full rounded-[13px] px-4 py-4 text-base outline-none"
+                  style={{
+                    border: "1.5px solid rgba(26,48,37,.2)",
+                    background: "#fdfbf9",
+                  }}
                 />
                 <div className="flex justify-center">
                   <Turnstile
@@ -247,23 +258,36 @@ function SignInScreen({ inviteHandle }) {
                 <button
                   type="submit"
                   disabled={sending || !email.trim() || !captchaToken}
-                  className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
+                  className="w-full py-3 disabled:opacity-40"
+                  style={{
+                    background: "#90f972",
+                    color: "#1a3025",
+                    borderRadius: 13,
+                    fontFamily: "'League Gothic', sans-serif",
+                    fontSize: 24,
+                    letterSpacing: "0.02em",
+                  }}
                 >
-                  {sending ? "Sending..." : "Email me a code"}
+                  {sending ? "sending..." : "email me a code"}
                 </button>
                 {message && (
-                  <p className="text-sm text-neutral-700 text-center">{message}</p>
+                  <p className="text-center text-sm" style={{ opacity: 0.8 }}>
+                    {message}
+                  </p>
                 )}
               </form>
             </>
           ) : (
             <>
-              <h2 className="text-xl font-semibold tracking-tight mb-2">
+              <h2
+                className="mb-2 text-xl font-bold tracking-tight"
+                style={{ fontFamily: "'League Spartan', sans-serif" }}
+              >
                 Enter your code
               </h2>
-              <p className="text-sm text-neutral-600 mb-4">
+              <p className="mb-4 text-sm" style={{ opacity: 0.75 }}>
                 We emailed a 6-digit code to{" "}
-                <span className="font-medium">{email.trim()}</span>.
+                <span className="font-bold">{email.trim()}</span>.
               </p>
               <form onSubmit={verifyCode} className="space-y-3">
                 <input
@@ -276,17 +300,29 @@ function SignInScreen({ inviteHandle }) {
                     setCode(e.target.value.replace(/\D/g, "").slice(0, 8));
                     if (message) setMessage("");
                   }}
-                  className="w-full rounded-2xl bg-neutral-50 px-4 py-4 text-center text-lg tracking-[0.3em] outline-none border border-neutral-100 focus:border-[#455d3b]"
+                  className="w-full rounded-[13px] px-4 py-4 text-center text-lg tracking-[0.3em] outline-none"
+                  style={{
+                    border: "1.5px solid rgba(26,48,37,.2)",
+                    background: "#fdfbf9",
+                  }}
                 />
                 <button
                   type="submit"
                   disabled={verifying || code.length < 6}
-                  className="w-full rounded-2xl bg-[#455d3b] py-4 font-medium text-white disabled:bg-neutral-300"
+                  className="w-full py-3 disabled:opacity-40"
+                  style={{
+                    background: "#90f972",
+                    color: "#1a3025",
+                    borderRadius: 13,
+                    fontFamily: "'League Gothic', sans-serif",
+                    fontSize: 24,
+                    letterSpacing: "0.02em",
+                  }}
                 >
-                  {verifying ? "Checking…" : "Confirm"}
+                  {verifying ? "checking..." : "sign in"}
                 </button>
                 {message && (
-                  <p className="text-sm text-red-600 text-center">{message}</p>
+                  <p className="text-center text-sm text-red-600">{message}</p>
                 )}
               </form>
               <button
@@ -296,9 +332,10 @@ function SignInScreen({ inviteHandle }) {
                   setCode("");
                   setMessage("");
                 }}
-                className="mt-3 w-full text-center text-xs text-neutral-500"
+                className="mt-3 w-full text-center text-xs"
+                style={{ opacity: 0.6 }}
               >
-                Wrong email or no code? <span className="font-medium text-[#455d3b]">Start over</span>
+                Wrong email or no code? <span className="font-bold">Start over</span>
               </button>
             </>
           )}
@@ -1532,8 +1569,21 @@ useEffect(() => {
   }, [matchMode]);
 
   useEffect(() => {
+    // EDGE COOKIE (Oct 15): the middleware that decides homepage-vs-app at
+    // "/" can't read localStorage, so the session's presence is mirrored
+    // into a cookie — set whenever a session exists (incl. anon guests
+    // mid-flow, who belong in the app), cleared when it ends.
+    const mirrorEdgeCookie = (s) => {
+      try {
+        document.cookie = s
+          ? "flanit_in=1; path=/; max-age=31536000; SameSite=Lax"
+          : "flanit_in=; path=/; max-age=0; SameSite=Lax";
+      } catch {}
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      mirrorEdgeCookie(session);
       setAuthLoading(false);
     });
 
@@ -1541,6 +1591,7 @@ useEffect(() => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
+      mirrorEdgeCookie(newSession);
     });
 
     return () => subscription.unsubscribe();

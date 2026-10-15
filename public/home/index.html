@@ -3,6 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- EDGE SERVING (Oct 15): this page now renders AT "/" via the edge
+     middleware rewrite, so every relative asset URL needs this base to
+     keep resolving into /home/. Absolute links (/?signin=1) unaffected. -->
+<base href="/home/">
+<script>
+  // One address: if someone lands on the literal /home/ path (old bookmark,
+  // old shared link), show "/" in the bar without a reload.
+  if (location.pathname.indexOf("/home") === 0) {
+    history.replaceState(null, "", "/" + location.search + location.hash);
+  }
+  // SELF-HEAL: a signed-in member whose edge cookie went missing (cleared
+  // cookies, pre-cookie session) gets the homepage by mistake — restore the
+  // cookie from their localStorage session and reload into the app. The
+  // cookie check guards against any reload loop.
+  try {
+    var hasSession = Object.keys(localStorage).some(function (k) {
+      return k.indexOf("sb-") === 0 && k.indexOf("auth-token") !== -1;
+    });
+    var hasCookie = /(?:^|;\s*)flanit_in=1(?:;|$)/.test(document.cookie);
+    if (hasSession && !hasCookie) {
+      document.cookie = "flanit_in=1; path=/; max-age=31536000; SameSite=Lax";
+      location.replace("/");
+    }
+  } catch (e) {}
+</script>
 <title>Flanit — Your City. Your Friends.</title>
 <meta name="description" content="Discover together, check in, collect the memories. Flanit is you and your friends, unfiltered. No ads, no doomscroll.">
 <link rel="icon" href="/favicon.ico">
