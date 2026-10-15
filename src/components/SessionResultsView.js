@@ -201,6 +201,18 @@ export function SessionResultsView({
     setSelectedIds(new Set());
   }, [view]);
 
+  // No matches? Land on Likes (Oct 15) — the Sep 3 "fill Matches with the
+  // votes" fallback is dead, so this is how an ended no-match board still
+  // opens with something to decide from. Once, on first data.
+  const autoViewRef = useRef(false);
+  useEffect(() => {
+    if (autoViewRef.current) return;
+    if (sessionMatches === null || allLikes === null) return;
+    autoViewRef.current = true;
+    if ((sessionMatches || []).length === 0 && (allLikes || []).length > 0)
+      setView("likes");
+  }, [sessionMatches, allLikes]);
+
   // Pick for us — random selector, relocated from the retired live end-of-game
   // wrapper (July 31, Mark: one board, in Sessions). Host-only, hidden once
   // decided: it's a decide tool, so it lives with "We're going here".
@@ -248,6 +260,35 @@ export function SessionResultsView({
     if (named.length === 0) return null;
     return unnamed > 0 ? `${named.join(", ")} +${unnamed}` : named.join(", ");
   }
+
+  // THE LIKES TAB, GROUPED BY PERSON (Oct 15, Mark's sketch: "resha / x, y
+  // · Mark / z"). One section per liker, their venues beneath; a venue both
+  // people liked appears under each, wearing the Matched badge.
+  const likeGroups = (() => {
+    if (!allLikes) return [];
+    const by = new Map(); // uid -> [{venue, likeCount, isMatch}]
+    for (const l of allLikes) {
+      const venue = venueById.get(l.venue_id);
+      if (!venue) continue;
+      for (const uid of l.liker_user_ids || []) {
+        if (!by.has(uid)) by.set(uid, []);
+        by.get(uid).push({
+          venue,
+          likeCount: l.like_count || 1,
+          isMatch: matchedIdSet.has(l.venue_id),
+        });
+      }
+    }
+    const groups = Array.from(by, ([uid, groupRows]) => ({
+      uid,
+      name: uid === userId ? "You" : nameByUid.get(uid) || "Someone",
+      rows: groupRows,
+    }));
+    groups.sort((a, b) =>
+      a.uid === userId ? -1 : b.uid === userId ? 1 : a.name.localeCompare(b.name)
+    );
+    return groups;
+  })();
 
   let rows;
   let loading;
@@ -451,8 +492,8 @@ export function SessionResultsView({
             {emptyMessage}
           </div>
         ) : (
-          <ul className="space-y-2">
-            {rows.map(({ venue, likeCount, isMatch }) => {
+          (() => {
+            const renderRow = ({ venue, likeCount, isMatch }) => {
               const isSelected = selectedIds.has(venue.id);
               return (
                 <li key={venue.id}>
@@ -499,12 +540,10 @@ export function SessionResultsView({
                     >
                       <div className="flex items-center gap-2">
                         <p className="font-medium truncate">{venue.name}</p>
-                        {/* WHO VOTED, on every row in BOTH views (Sep 3
-                            option b, extended Oct 15,
-                            Mark: "we should be able to see who voted on
-                            what"). Consensus keeps the olive pop; solo
-                            votes go quiet grey. */}
-                        {likerNames(venue.id) && (
+                        {/* WHO VOTED on Matches rows (Sep 3 option b). The
+                            Likes view groups by person instead (Oct 15),
+                            so the chip would just repeat the header. */}
+                        {view === "matches" && likerNames(venue.id) && (
                           <span
                             className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 max-w-[140px] truncate ${
                               likeCount >= 2
@@ -548,8 +587,24 @@ export function SessionResultsView({
                   </div>
                 </li>
               );
-            })}
-          </ul>
+            };
+            return view === "likes" ? (
+              // Grouped by person (Mark's sketch). A both-liked venue sits
+              // under each liker; its checkbox state is shared (same id).
+              <div className="space-y-5">
+                {likeGroups.map((g) => (
+                  <div key={g.uid}>
+                    <p className="mb-1.5 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                      {g.name} · {g.rows.length}
+                    </p>
+                    <ul className="space-y-2">{g.rows.map(renderRow)}</ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul className="space-y-2">{rows.map(renderRow)}</ul>
+            );
+          })()
         )}
       </div>
       </div>

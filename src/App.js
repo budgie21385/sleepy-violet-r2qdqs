@@ -3399,6 +3399,12 @@ if (authLoading || guestLoading) {
         ? (guestAtEnd || queueEmpty)
         : queueEmpty;
 
+      // A signed-in MEMBER swiping a friend's session keeps the app's nav
+      // (Oct 15, Mark: "bottom navigation is not present when a signed-in
+      // user is in a pick together session") — tabs exit to the main app.
+      // Anons stay in the clean room: they have no app to navigate to.
+      const guestIsMember = session?.user?.is_anonymous === false;
+
       return (
         <div className="min-h-screen bg-[#fdf6f0] text-[#111111] flex items-start justify-center p-4 pb-40">
           <div className="w-full max-w-sm">
@@ -3456,8 +3462,12 @@ if (authLoading || guestLoading) {
             ) : null}
           </div>
 
-          {/* Sticky action bar at bottom */}
-          <div className="fixed bottom-0 left-0 right-0 z-30 px-4 pb-6 pt-4 bg-gradient-to-t from-[#fdf6f0] via-[#fdf6f0] to-transparent">
+          {/* Sticky action bar — rides above the tab bar when a member has one */}
+          <div
+            className={`fixed left-0 right-0 z-30 px-4 pt-4 bg-gradient-to-t from-[#fdf6f0] via-[#fdf6f0] to-transparent ${
+              guestIsMember ? "bottom-16 pb-3" : "bottom-0 pb-6"
+            }`}
+          >
             <div className="w-full max-w-sm mx-auto">
               {!showAllDone && guestCurrentVenue && (
                 <div className="grid grid-cols-2 gap-3">
@@ -3488,6 +3498,7 @@ if (authLoading || guestLoading) {
                   submitted useEffect. */}
             </div>
           </div>
+          {guestIsMember && <BottomTabBar tab={null} setTab={goToMainApp} />}
         </div>
       );
     }
@@ -6875,7 +6886,16 @@ function SessionsScreen({ venues, userId, savedIds, onSave, onUnsave, onHide, on
         p_session_id: selectedSession.id,
       });
       if (cancelled) return;
-      setSessionMatches(likes || []);
+      // HONEST MATCHES (Oct 15, Mark: "we didn't get one match but it is
+      // showing as we did"): the Sep 3 fallback poured ALL likes into the
+      // matches list so an expired board wasn't empty — but the Likes tab
+      // owns that job now, so Matches keeps only the unanimous rows. The
+      // board auto-lands on Likes when there are none (SessionResultsView).
+      const rows = likes || [];
+      const voters = new Set(rows.flatMap((r) => r.liker_user_ids || [])).size;
+      setSessionMatches(
+        voters >= 2 ? rows.filter((r) => (r.like_count || 0) >= voters) : []
+      );
     })();
 
     // My likes (everything I personally swiped right on in this session).
