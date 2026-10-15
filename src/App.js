@@ -4211,7 +4211,12 @@ if (authLoading || guestLoading) {
   }
  
   return (
-    <div className="min-h-screen bg-[#fdf6f0] text-[#111111] lg:pl-[84px]">
+    // APP SHELL SCROLLS, THE BODY NEVER DOES (Oct 15): recent iOS makes
+    // position:fixed elements track BODY scroll in standalone PWAs — the tab
+    // bar rode up the screen on every body-scrolled tab. With the shell as a
+    // fixed inner-scroll container the document never scrolls, so the bug
+    // has nothing to grab. See 05-log.
+    <div className="fixed inset-0 overflow-y-auto overscroll-y-contain bg-[#fdf6f0] text-[#111111] lg:pl-[84px]">
       {tab === "matches" && (
           <div className="flex items-start justify-center p-4 pb-24">
             <div className="w-full max-w-sm">

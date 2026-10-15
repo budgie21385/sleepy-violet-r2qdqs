@@ -47,36 +47,6 @@ if (
   window.location.replace("/home/");
 }
 
-// TEMP DEBUG (Oct 15) — standalone-only overflow hunter for the panning
-// bottom bar. The bug only shows in the home-screen app, where the on-phone
-// console can't be opened, so this alerts whatever element hangs past the
-// screen edge 3s after load. REMOVE once the culprit is found.
-if (window.navigator.standalone) {
-  setTimeout(() => {
-    try {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const doc = document.documentElement;
-      const bad = Array.from(document.querySelectorAll("body *"))
-        .filter((e) => {
-          const r = e.getBoundingClientRect();
-          return r.right > w + 2 || r.bottom > h + 2;
-        })
-        .slice(0, 6)
-        .map((e) => {
-          const r = e.getBoundingClientRect();
-          return `${e.tagName}.${String(e.className).slice(0, 70)} [over bottom:${Math.round(
-            r.bottom - h
-          )} right:${Math.round(r.right - w)}]`;
-        });
-      window.alert(
-        `page ${doc.scrollWidth}x${doc.scrollHeight} / screen ${w}x${h}\n\n` +
-          (bad.length ? bad.join("\n\n") : "no overflowing elements found")
-      );
-    } catch (err) {}
-  }, 3000);
-}
-
 // Keep the push service worker alive across visits (push-only SW — it never
 // intercepts fetches, so it can't serve stale bundles).
 if ("serviceWorker" in navigator) {
