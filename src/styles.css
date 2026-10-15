@@ -4,37 +4,10 @@ body {
   font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
-/* NEW BRAND FONTS (Oct 15) — served from the static /home/ page's assets so
-   the sign-in screen can wear the homepage's identity (League Gothic CTAs,
-   League Spartan headings, Atkinson body). Latin subsets only. */
-@font-face {
-  font-family: 'League Gothic';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/home/2577c733-ead6-456c-8a5c-6776b24831fd.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'League Spartan';
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url('/home/34f6c230-f6c0-41bd-b396-3db4bc4d4cc1.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Atkinson Hyperlegible';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/home/ed7fa49e-00d4-490d-8940-ec8fab48650f.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Atkinson Hyperlegible';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/home/bbaed0f7-0965-4384-b651-e79dd92e0d7a.woff2') format('woff2');
-}
+/* NEW BRAND FONTS: the @font-face rules live in public/index.html, NOT here.
+   Webpack tries to resolve url('/home/...woff2') in bundled CSS as a module
+   and fails the build (caught by CI, Oct 15) — index.html is unprocessed, so
+   the browser resolves the /home/ asset URLs at runtime as intended. */
 
 .App {
   text-align: center;
