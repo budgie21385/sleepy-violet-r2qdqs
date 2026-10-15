@@ -4,7 +4,7 @@
 // Includes a one-shot confetti burst on the match reveal. Extracted from App.js.
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../supabaseClient";
-import { Check, Shuffle, CalendarDays } from "lucide-react";
+import { Check, Shuffle } from "lucide-react";
 import { ParticipantsStrip } from "./ParticipantsStrip";
 import { MapVenueSheet } from "./MapVenueSheet";
 import { PlanScheduler } from "./PlanScheduler";
@@ -391,6 +391,27 @@ export function SessionResultsView({
         voteSplit={voteSplit}
       />
 
+      {/* THE DECISION BANNER (Oct 15, Mark: "I like the shortlist one...
+          make it more of a banner that sits at the top") — same block the
+          curated board wears; the little per-row date strip retired. */}
+      {decidedVenueId && (
+        <div className="px-4 pt-3">
+          <div className="rounded-2xl bg-[#edf2eb] border border-[#cdd9c6] p-4 text-center">
+            <p className="text-xs uppercase tracking-wide text-[#455d3b]">
+              You're going to
+            </p>
+            <p className="mt-1 text-lg font-semibold text-[#2f3f29]">
+              {venueById.get(decidedVenueId)?.name || "your pick"}
+            </p>
+            {planWhen && (
+              <p className="mt-1 text-sm font-medium text-[#2f3f29]">
+                {planWhen}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* GUEST, MATCHED, PRE-LOCK (Mark, Aug 20): the board shows the match,
           but the plan isn't a plan until the host locks it — this banner
           holds the space, then the decide replaces it with the pinned pick
@@ -497,15 +518,8 @@ export function SessionResultsView({
               const isSelected = selectedIds.has(venue.id);
               return (
                 <li key={venue.id}>
-                  {/* Time and date over the pick (Aug 1, Mark) */}
-                  {decidedVenueId === venue.id && planWhen && (
-                    <div className="mb-1.5 flex items-center gap-2 rounded-xl bg-[#edf2eb] border border-[#c5d4c2] px-3 py-2">
-                      <CalendarDays size={15} className="text-[#455d3b] shrink-0" />
-                      <p className="text-sm font-medium text-[#2f4429] truncate">
-                        {planWhen}
-                      </p>
-                    </div>
-                  )}
+                  {/* The when moved to the top banner (Oct 15); the pick
+                      keeps its ring + Going ✓. */}
                   <div className={`flex items-start gap-3 rounded-2xl border bg-white p-3 ${
                     decidedVenueId === venue.id
                       ? "border-[#455d3b] ring-1 ring-[#455d3b]"
