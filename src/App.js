@@ -2504,6 +2504,15 @@ useEffect(() => {
 
   async function signOut() {
     await supabase.auth.signOut();
+    // Land on the HOMEPAGE, not the in-app sign-in form (Oct 15, Mark:
+    // "signing out brings me to this page... that doesn't seem correct").
+    // The edge decides homepage-vs-app per REQUEST, so sign-out must clear
+    // the cookie itself (don't race the auth listener) and hard-navigate —
+    // a fresh "/" with no cookie serves the homepage.
+    try {
+      document.cookie = "flanit_in=; path=/; max-age=0; SameSite=Lax";
+    } catch {}
+    window.location.replace("/");
   }
   // Check in = "I'm here now". Writes an activities row (kind='checkin');
   // accepted friends see it in their Activity tab via RLS. Guarded against
