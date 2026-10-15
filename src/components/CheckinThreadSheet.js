@@ -1880,7 +1880,17 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   </>
                 ) : tense === "coming_up" ? (
                   <>
-                    🗓 {whenLine(thread.timestamp)}
+                    {/* ABSOLUTE date + time on future nights (Oct 15, Mark:
+                        "not in 2 days, date and time") — a plan is an
+                        appointment, not a countdown. */}
+                    🗓{" "}
+                    {new Date(thread.timestamp).toLocaleString("en-AU", {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
                     {nightPerms?.showLive
                       ? " · on the live map when it starts"
                       : " · not on the live map"}
@@ -1899,6 +1909,14 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
                   : `${thread.ownerName}'s`}{" "}
                 friends see this
               </p>
+              {/* THE ADDRESS on future nights (Oct 15, Mark) — the plan is
+                  an invitation, so say where. Venue address only: an event's
+                  private place already renders its own gated 📍 line above. */}
+              {tense === "coming_up" && thread.venueObj?.address && (
+                <p className="mt-0.5 text-[11px] text-neutral-500">
+                  📍 {thread.venueObj.address}
+                </p>
+              )}
               {/* COVER LINE (Aug 21, Mark): in album mode, the night's first
                   comment doubles as the album's cover copy — the words that
                   were said become the caption of the memory. */}
