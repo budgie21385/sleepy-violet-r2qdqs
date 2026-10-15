@@ -20,6 +20,14 @@ import {
   venueMatchesPrice,
   venueMatchesAmenities,
 } from "./lib/venueLogic";
+// The deck grammar — ONE module builds session pools on both sides of the
+// wire (Oct 15; see lib/pool.js and src/lib/pool.test.js).
+import {
+  buildHostDeck,
+  sessionPoolIds,
+  buildGuestListDeck,
+  deckExhausted,
+} from "./lib/pool";
 import {
   MapFilterGroup,
   MapFilterChip,
@@ -2876,21 +2884,16 @@ loadAreas();
       : [...partnerLikes, ...partnerPasses];
  
   const swipeQueue = useMemo(() => {
-    let q;
-    if (matchSource === "list" && sourceList) {
-      // A picked list IS the pool (Oct 15): bypass filteredVenues entirely.
-      // A collaborator's area/cuisine filters and verified-or-saved pool rule
-      // were silently trimming a shared list ("wasn't able to send all 15").
-      q = venues.filter((v) => sourceList.ids.has(v.id));
-    } else if (matchMode === "solo") {
-      q = filteredVenues.filter((v) => !savedVenueIds.has(v.id));
-    } else {
-      q = filteredVenues;
-    }
-    // From-the-map viewport constraint: only what was on screen (Sep 6).
-    // Applies to the ALL source only — a picked list IS the pool.
-    if (mapViewPool && matchSource !== "list")
-      q = q.filter((v) => mapViewPool.ids.has(v.id));
+    // The deck grammar lives in lib/pool.js (Oct 15) — shared, pure, tested.
+    let q = buildHostDeck({
+      source: matchSource,
+      listIds: sourceList?.ids || null,
+      venues,
+      filteredPool: filteredVenues,
+      mode: matchMode,
+      savedIds: savedVenueIds,
+      viewIds: mapViewPool?.ids || null,
+    });
     // Groups of 3+ swipe the SAME deck in the SAME order (orderGroupDeck is
     // deterministic — guests apply the identical sort to the identical pool).
     // No cap: every filtered venue is available (Mark, July 31 evening).
@@ -2921,8 +2924,9 @@ loadAreas();
       : null;
     // List sessions (Oct 15): the list IS the pool — the host no longer
     // narrows it with their setup filters, so guests must not either.
+    // Shared grammar: lib/pool.js.
     if (guestSessionData.source_type === "list")
-      return viewSet ? pool.filter((v) => viewSet.has(v.id)) : pool;
+      return buildGuestListDeck({ pool, filters });
     const todayKey = getTodayDayKey();
     const sessionAreas = filters.selectedAreaIds && areas.length
       ? areas.filter((a) => filters.selectedAreaIds.includes(a.id))
@@ -3112,13 +3116,16 @@ loadAreas();
         selectedPrices,
         selectedAmenities,
         // Pool constraint (Sep 6 / Oct 15): guests build their deck from this
-        // row, so whatever trimmed the host's pool must ride along. A chosen
-        // list wins; otherwise the map-viewport carry (All source only).
-        ...(matchSource === "list" && sourceList
-          ? { viewVenueIds: Array.from(sourceList.ids) }
-          : mapViewPool
-          ? { viewVenueIds: Array.from(mapViewPool.ids) }
-          : {}),
+        // row, so whatever trimmed the host's pool must ride along — the
+        // list-wins-over-viewport rule lives in lib/pool.js.
+        ...(() => {
+          const ids = sessionPoolIds({
+            source: matchSource,
+            listIds: sourceList?.ids || null,
+            viewIds: mapViewPool?.ids || null,
+          });
+          return ids ? { viewVenueIds: ids } : {};
+        })(),
       };
 
       const sessionName = eventDate
@@ -3205,7 +3212,7 @@ loadAreas();
     // End of the DECK, not of the filtered pool (Oct 15): list sessions
     // bypass filteredVenues, so counting it ended the game early ("my
     // session finished before I got to the end of the list").
-    if (nextIndex >= swipeQueue.length) {
+    if (deckExhausted(nextIndex, swipeQueue)) {
       setScreen("matches");
       return;
     }

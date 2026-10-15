@@ -1,0 +1,29 @@
+# CI gate (Oct 15, 2026): every push runs the unit tests and the production
+# build. A red X on GitHub means don't trust that commit on flanit.co —
+# Vercel builds independently, so this is the early warning, not the gate
+# that physically blocks deploys. (Blocking would mean deploying via this
+# workflow instead of Vercel's git integration — a later step if wanted.)
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (deck grammar and friends)
+        run: npx react-scripts test --watchAll=false
+        env:
+          CI: "true"
+      - name: Production build
+        run: npm run build
+        env:
+          CI: "false" # CRA treats warnings as errors under CI=true; the build's own eslint errors still fail it
