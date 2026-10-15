@@ -46,6 +46,11 @@ test("list session: host and guest share the deck, likes land for both", async (
 
     // Filters screen → creates the session row.
     await page.getByRole("button", { name: "Start swiping" }).click();
+    // WAIT for the invite screen before clicking again — both clicks were
+    // landing on the filters button pre-rerender (first-run finding).
+    await expect(page.getByText("Share this link")).toBeVisible({
+      timeout: 20_000,
+    });
     // Invite screen → into the deck.
     await page.getByRole("button", { name: "Start swiping" }).click();
 
