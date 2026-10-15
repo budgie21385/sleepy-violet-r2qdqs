@@ -4407,6 +4407,11 @@ if (authLoading || guestLoading) {
                   <h2 className="mb-2 text-base font-semibold">
                     Pick from which list?
                   </h2>
+                  {/* Own scroll area (Oct 16, Mark: scrolling the sheet
+                      scrolled the page behind it) — capped height, scrolls
+                      itself, overscroll-contain stops the chain to the
+                      shell underneath. */}
+                  <div className="max-h-[60vh] overflow-y-auto overscroll-contain">
                   {systemSourceOptions().map((o) => (
                     <button
                       key={o.key}
@@ -4456,6 +4461,7 @@ if (authLoading || guestLoading) {
                       </span>
                     </button>
                   ))}
+                  </div>
                 </div>
               </div>
             )}
