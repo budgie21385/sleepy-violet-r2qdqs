@@ -4393,7 +4393,14 @@ if (authLoading || guestLoading) {
                 </button>
               </div>
             </div>
-            {sourcePicker && (
+            {sourcePicker &&
+              // PORTALED to body (Oct 16, Mark's phone: "the filters area is
+              // what scrolls when you move your finger") — rendered inside
+              // the app shell, iOS chained the sheet's touch scroll up the
+              // DOM into the shell's scroll container; overscroll-contain
+              // alone didn't hold. Same Aug 1 lesson as the tab bar: no
+              // scrollable ancestor, nothing to chain to.
+              createPortal(
               <div className="fixed inset-0 z-[3300]">
                 <button
                   type="button"
@@ -4465,7 +4472,8 @@ if (authLoading || guestLoading) {
                   ))}
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
             <div className="space-y-5">
               {/* WHO'S COMING — first input, above Suburbs (July 31, Mark).
