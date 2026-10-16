@@ -31,6 +31,9 @@ function Thumb({ v }) {
           src={src}
           alt=""
           loading="lazy"
+          // A dead image URL painted iOS's blue "?" box over the tile
+          // (Oct 16, Leonardo's) — hide the img and let the letter show.
+          onError={(e) => (e.currentTarget.style.display = "none")}
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}
@@ -475,15 +478,8 @@ export function ListsScreen({
       setListsTick((n) => n + 1);
     } else showToast?.("Couldn't delete");
   }
-  async function removeItem(venueId) {
-    if (!activeCustom) return;
-    await supabase
-      .from("venue_list_items")
-      .delete()
-      .eq("list_id", activeCustom.id)
-      .eq("venue_id", venueId);
-    setListsTick((n) => n + 1);
-  }
+  // removeItem retired (Oct 16) — per-row ✕ overlapped the chevron/avatars;
+  // removal lives in the bookmark manage sheet (one grammar everywhere).
 
   const vById = useMemo(
     () => new Map((venues || []).map((v) => [v.id, v])),
@@ -507,6 +503,10 @@ export function ListsScreen({
   const row = (v) => {
     const beenCount =
       (beenData?.counts.get(v.id) || 0) || (beenIds.has(v.id) ? 1 : 0);
+    // The accordion opens on NIGHTS, not bare been-marks (Oct 16, Mark:
+    // "no drop down unless there is a card or a card with media") — a mark
+    // without a night expanded into an empty history.
+    const nightCount = beenData?.counts.get(v.id) || 0;
     const pals = (friendsAt.get(v.id) || []).slice(0, 3);
     const upcoming = upcomingByVenue.get(v.id);
     const expanded = expandedVenueId === v.id;
@@ -588,7 +588,7 @@ export function ListsScreen({
               <Bookmark size={16} fill="#455d3b" />
             </button>
           )}
-          {beenCount > 0 && (
+          {nightCount > 0 && (
             <button
               type="button"
               aria-label={expanded ? "Collapse" : "Your history here"}
@@ -1016,22 +1016,13 @@ export function ListsScreen({
                 </button>
               </div>
             )}
+            {/* No per-row ✕ (Oct 16, Mark's cleanup — it sat ON TOP of the
+                chevron and avatars). Removal lives in the bookmark grammar:
+                row → venue card → filled bookmark → manage sheet toggle. */}
             {(customItems.get(activeCustom.id) || []).map((vid) => {
               const v = vById.get(vid) || extraVenues.get(vid);
               if (!v) return null;
-              return (
-                <div key={vid} className="relative">
-                  {row(v)}
-                  <button
-                    type="button"
-                    aria-label="Remove from this list"
-                    onClick={() => removeItem(vid)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full text-neutral-300"
-                  >
-                    ✕
-                  </button>
-                </div>
-              );
+              return row(v);
             })}
             {(customItems.get(activeCustom.id) || []).length === 0 && (
               <p className="py-8 text-center text-sm text-neutral-400">
