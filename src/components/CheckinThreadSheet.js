@@ -1302,11 +1302,15 @@ export function CheckinThreadSheet({ thread, userId, onClose, showToast, onOpenP
     }
   }
 
+  // Age clamped to past-only (Oct 16): a future plan's negative age passed
+  // the freshness window, offering "I'm here too" on a night not happening.
+  const threadAgeMs = Date.now() - new Date(thread.timestamp).getTime();
   const joinEligible =
     !!onCheckIn &&
     !!thread.venueObj &&
     thread.ownerId !== userId &&
-    Date.now() - new Date(thread.timestamp).getTime() < FRESH_MS;
+    threadAgeMs >= 0 &&
+    threadAgeMs < FRESH_MS;
 
   // "Am I part of this NIGHT?" — edge-based (July 23): my shard is whichever
   // check-in of MINE sits in this night's graph. An independent check-in at

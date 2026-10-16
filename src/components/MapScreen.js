@@ -70,9 +70,12 @@ const esc = (s) =>
 // One pin per venue: up to 3 stacked friend avatars + a "Name · 2h" label.
 // Fresh (<3h) check-ins get the olive ring; older-today pins fade.
 function createFriendsIcon(group) {
-  const fresh = group.entries.some(
-    (e) => Date.now() - new Date(e.created_at).getTime() < FRESH_MS
-  );
+  const fresh = group.entries.some((e) => {
+    // Age clamped to past-only (Oct 16): a FUTURE plan's negative age sailed
+    // under the window and lit the live ring for a night not yet happening.
+    const age = Date.now() - new Date(e.created_at).getTime();
+    return age >= 0 && age < FRESH_MS;
+  });
   const ring = fresh ? "#455d3b" : "#b5b2ab";
   const shown = group.entries.slice(0, 3);
   const avatars = shown

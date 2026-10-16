@@ -273,8 +273,14 @@ export function MapVenueSheet({
       // backdated to the ORIGINAL's exact timestamp, and without the tie-break
       // the bare backdated row could win and the thread "loses" its
       // comments/photos (Mark hit this July 17).
+      // FUTURE PLANS ARE NOT PRESENCE (Oct 16, Mark: "this future event is
+      // saying that we are here now") — a decided plan's created_at sits in
+      // the future, and now-minus-future is negative, which sailed under
+      // the freshness window. Future rows leave this strip entirely: they
+      // are neither "here now" nor "have been here".
+      const nowMs = Date.now();
       const all = (rows || [])
-        .slice()
+        .filter((r) => new Date(r.created_at).getTime() <= nowMs)
         .sort(
           (a, b) =>
             new Date(b.created_at) - new Date(a.created_at) || a.id - b.id
@@ -289,7 +295,7 @@ export function MapVenueSheet({
       const fresh = all.filter(
         (r) =>
           r.show_live !== false &&
-          Date.now() - new Date(r.created_at).getTime() < FRESH_MS
+          nowMs - new Date(r.created_at).getTime() < FRESH_MS
       );
       // Distinct people over all time (memory), newest first, self included.
       const seen = new Set();
