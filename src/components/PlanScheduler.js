@@ -17,7 +17,7 @@
 //
 // The parent owns: opening the venue card under the sheet, and applying the
 // decision to its own board state via onDecided(venueId, decidedForIso).
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "../supabaseClient";
 import { sendPush } from "../lib/push";
@@ -38,8 +38,38 @@ export function PlanScheduler({
   const [deciding, setDeciding] = useState(false);
 
   const venueName = venue?.name || "This spot";
+
+  // "Friends in session" means FRIENDS (Oct 16, Mark: "Why is Tono sitting
+  // here? He is not a member, he is anon") — the old filter only removed
+  // self, so anon guests got listed, pushed, and TAGGED on the born night.
+  // Anons and not-yet-friends stay session-side, as the doctrine always
+  // said; only accepted friendships make this list.
+  const [friendIds, setFriendIds] = useState(null);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    supabase
+      .from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setFriendIds(
+          new Set(
+            (data || []).map((r) =>
+              r.requester_id === userId ? r.addressee_id : r.requester_id
+            )
+          )
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   const friends = (participants || []).filter(
-    (p) => p.user_id && p.user_id !== userId
+    (p) => p.user_id && p.user_id !== userId && friendIds?.has(p.user_id)
   );
   const dateMissing = when === "date" && !dateTime;
 
