@@ -507,7 +507,7 @@ export function ListsScreen({
     // "no drop down unless there is a card or a card with media") — a mark
     // without a night expanded into an empty history.
     const nightCount = beenData?.counts.get(v.id) || 0;
-    const pals = (friendsAt.get(v.id) || []).slice(0, 3);
+    // pals (friendsAt) no longer rendered on rows — Oct 16 ruling.
     const upcoming = upcomingByVenue.get(v.id);
     const expanded = expandedVenueId === v.id;
     return (
@@ -566,18 +566,9 @@ export function ListsScreen({
               </span>
             </span>
           </button>
-          {pals.length > 0 && (
-            <span className="flex shrink-0">
-              {pals.map((p, i) => (
-                <span
-                  key={p.id}
-                  style={i > 0 ? { marginLeft: -8 } : undefined}
-                >
-                  <FriendAvatar profile={p} small />
-                </span>
-              ))}
-            </span>
-          )}
+          {/* Friend avatars REMOVED from rows (Oct 16, Mark: "I don't need
+              to know if someone else has been here") — friends' history
+              lives on the map's Friends lens and the venue card's strip. */}
           {list === "saved" && (
             <button
               type="button"

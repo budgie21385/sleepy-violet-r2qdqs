@@ -113,7 +113,7 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
                 : "text-neutral-500"
             }`}
           >
-            Nights
+            Visits
           </button>
           <button
             type="button"
@@ -149,14 +149,16 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
               className="flex w-full items-center gap-1.5 py-1.5 text-left"
             >
               <span className="min-w-0 flex-1 truncate text-xs text-neutral-800">
-                {n.label || "A night here"}
+                {/* Untitled visits lead with the date — no "A night here"
+                    placeholder (Oct 16, Mark: kill the night references). */}
+                {n.label || whenAgo(n.created_at)}
                 {n.rating != null && (
                   <span className="ml-1 text-[10px] text-[#f4a820]">
                     ★{n.rating}
                   </span>
                 )}
                 <span className="ml-1 text-[10px] text-neutral-400">
-                  · {whenAgo(n.created_at)}
+                  {n.label ? `· ${whenAgo(n.created_at)}` : ""}
                   {n.photoCount > 0 ? ` · ${n.photoCount} 📷` : ""}
                 </span>
               </span>
@@ -176,7 +178,7 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
           )}
           {media !== null && media.length === 0 && (
             <p className="py-1.5 text-[11px] text-neutral-400">
-              No photos from your nights here yet
+              No photos from your visits here yet
             </p>
           )}
           {media !== null && media.length > 0 && (
