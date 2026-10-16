@@ -249,6 +249,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   // openCard=false for the check-in-only flow — the CheckinSheet is the
   // destination there; a venue card lurking behind it is clutter.
   function flyToVenue(venue, { openCard = true } = {}) {
+    // Fly-to MEANS the map (Oct 16): picking or adding a place from search
+    // while the list view was open flew the map invisibly underneath it.
+    setListView(false);
     const lat = Number(venue.latitude);
     const lng = Number(venue.longitude);
     if (Number.isFinite(lat) && Number.isFinite(lng) && mapRef.current) {
