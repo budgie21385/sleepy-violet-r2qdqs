@@ -2790,11 +2790,13 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
   }
 
   if (item.kind === "tag_nudge") {
-    // Consent nudge: you appear on the tagger's check-in (their audience);
-    // accepting creates YOUR check-in, backdated to the original moment.
-    const fresh =
-      Date.now() - new Date(item.checkinTimestamp || item.timestamp).getTime() <
-      3 * 60 * 60 * 1000;
+    // Consent nudge, in the NIGHT'S TENSE (Oct 16, Mark: a decided plan's
+    // tag "comes across like a tag and not something is decided"). A tag on
+    // a FUTURE night is an invitation — "invited you", date and time, I'm
+    // in / Can't make it. A past/now tag keeps the check-in wording.
+    const tagWhen = new Date(item.checkinTimestamp || item.timestamp);
+    const isPlan = tagWhen.getTime() > Date.now();
+    const fresh = Date.now() - tagWhen.getTime() < 3 * 60 * 60 * 1000;
     return (
       <div className={`rounded-2xl ${bg} border border-neutral-100 p-3`}>
         <button
@@ -2805,15 +2807,32 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
           <FriendAvatar profile={item.profile} small />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-neutral-900">
-              <strong className="font-medium">{name}</strong> checked you in at{" "}
+              <strong className="font-medium">{name}</strong>{" "}
+              {isPlan ? "invited you to" : "checked you in at"}{" "}
               <strong className="font-medium">{item.venueName}</strong>
               {item.label ? ` · ${item.label}` : ""}
             </p>
+            {isPlan && (
+              <p className="text-[11px] font-medium text-[#455d3b]">
+                🗓{" "}
+                {tagWhen.toLocaleDateString("en-AU", {
+                  weekday: "short",
+                  day: "numeric",
+                  month: "short",
+                })}{" "}
+                ·{" "}
+                {tagWhen.toLocaleTimeString("en-AU", {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </p>
+            )}
           </div>
         </button>
         <p className="mb-2.5 px-0.5 text-[11px] text-neutral-500">
-          Accept and it's on your Been list too — add your photos and
-          videos. Decline takes your name off {name}'s check-in.
+          {isPlan
+            ? "Say you're in and the plan lands in your Next list."
+            : `Accept and it's on your Been list too. Add your photos and videos. Decline takes your name off ${name}'s check-in.`}
         </p>
         <div className="flex gap-2">
           <button
@@ -2822,7 +2841,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             onClick={onAcceptTag}
             className="flex-1 rounded-full bg-[#455d3b] text-white text-xs font-medium py-2 disabled:opacity-50"
           >
-            {fresh ? "Accept — I'm here" : "Accept"}
+            {isPlan ? "I'm in" : fresh ? "I'm here" : "Accept"}
           </button>
           <button
             type="button"
@@ -2830,7 +2849,7 @@ function ActivityItem({ item, isNew, acting, onAccept, onDecline, onAddFriend, o
             onClick={onRemoveTag}
             className="flex-1 rounded-full border border-neutral-300 text-xs font-medium py-2 disabled:opacity-50"
           >
-            Decline
+            {isPlan ? "Can't make it" : "Decline"}
           </button>
         </div>
       </div>

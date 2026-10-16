@@ -39,38 +39,40 @@ export function PlanScheduler({
 
   const venueName = venue?.name || "This spot";
 
-  // "Friends in session" means FRIENDS (Oct 16, Mark: "Why is Tono sitting
-  // here? He is not a member, he is anon") — the old filter only removed
-  // self, so anon guests got listed, pushed, and TAGGED on the born night.
-  // Anons and not-yet-friends stay session-side, as the doctrine always
-  // said; only accepted friendships make this list.
-  const [friendIds, setFriendIds] = useState(null);
+  // THE TWO POPULATIONS (Oct 16, Mark: "we have users and then we have anon
+  // users. Anon users can't be automatically told anything, they need to be
+  // sent a link"). Members are tellable in-app and ride the born night as
+  // tags; anons are PRESENTED with the link section by name, so the
+  // organiser knows exactly who the link is for. The anon flag lives in
+  // auth, so a definer RPC says who's who.
+  const [anonIds, setAnonIds] = useState(null); // null = loading
   useEffect(() => {
-    if (!userId) return;
+    if (!sessionId) return;
     let cancelled = false;
     supabase
-      .from("friendships")
-      .select("requester_id, addressee_id")
-      .eq("status", "accepted")
-      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`)
-      .then(({ data }) => {
+      .rpc("get_session_participant_kinds", { p_session_id: sessionId })
+      .then(({ data, error }) => {
         if (cancelled) return;
-        setFriendIds(
-          new Set(
-            (data || []).map((r) =>
-              r.requester_id === userId ? r.addressee_id : r.requester_id
-            )
-          )
+        if (error) {
+          console.error("participant kinds failed:", error);
+          setAnonIds(new Set()); // fail open: treat all as members
+          return;
+        }
+        setAnonIds(
+          new Set((data || []).filter((r) => r.is_anon).map((r) => r.user_id))
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [sessionId]);
 
   const friends = (participants || []).filter(
-    (p) => p.user_id && p.user_id !== userId && friendIds?.has(p.user_id)
+    (p) => p.user_id && p.user_id !== userId && anonIds && !anonIds.has(p.user_id)
   );
+  const anonNames = (participants || [])
+    .filter((p) => p.user_id && anonIds?.has(p.user_id))
+    .map((p) => (p.display_name || "A guest").trim().split(" ")[0]);
   const dateMissing = when === "date" && !dateTime;
 
   function whenText() {
@@ -304,6 +306,15 @@ export function PlanScheduler({
               <p className="text-xs font-medium text-neutral-500">
                 Share details with people not on Flanit
               </p>
+              {/* Anons in the session, BY NAME (Oct 16, Mark) — the link is
+                  the only way they find out, so say who it's for. */}
+              {anonNames.length > 0 && (
+                <p className="mt-1 text-xs text-[#455d3b]">
+                  {anonNames.join(", ")}{" "}
+                  {anonNames.length === 1 ? "isn't" : "aren't"} on Flanit.
+                  This link is how {anonNames.length === 1 ? "they find" : "they all find"} out.
+                </p>
+              )}
               <div className="mt-2 flex items-center gap-2">
                 <span className="flex-1 min-w-0 truncate rounded-full border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-xs text-neutral-500">
                   {planUrl().replace("https://", "")}
