@@ -13,6 +13,7 @@ import { MediaViewer } from "./MediaViewer";
 
 export function VenueHistory({ userId, venue, onOpenThread }) {
   const [nights, setNights] = useState(null); // [{id,label,created_at,rating,photoCount}]
+  const [ownActs, setOwnActs] = useState([]); // all own rows incl legs, with joined_from
   const [tab, setTab] = useState("nights");
   const [media, setMedia] = useState(null); // signed rows, lazily on Media tab
   const [lightbox, setLightbox] = useState(null);
@@ -31,6 +32,7 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
         .order("created_at", { ascending: false })
         .limit(30);
       if (cancelled) return;
+      setOwnActs(acts || []);
       const ids = new Set((acts || []).map((a) => a.id));
       const roots = (acts || []).filter(
         (a) => !a.joined_from || !ids.has(a.joined_from)
@@ -61,12 +63,51 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
     };
   }, [userId, venue?.id]);
 
-  // Media signs lazily — only when the tab is opened.
+  // Media signs lazily — only when the tab is opened. EVERYONE'S media on
+  // your nights (Oct 16, Mark: "I only see my media. We should see all
+  // media on the cards") — a shared night's photos hang on each person's
+  // shard, so walk the night graph: UP from your rows to the roots, then
+  // DOWN through every connected shard, and sign photos for the whole set.
+  // RLS still gates: only photos you could see on the card itself sign.
   useEffect(() => {
     if (tab !== "media" || media !== null || !nights) return;
     let cancelled = false;
     (async () => {
-      const rows = await fetchCheckinPhotosMany(nights.map((n) => n.id));
+      const all = new Set(ownActs.map((a) => a.id));
+      // Up: follow joined_from chains to the roots (bounded hops).
+      let up = ownActs
+        .map((a) => a.joined_from)
+        .filter((jf) => jf && !all.has(jf));
+      for (let hop = 0; hop < 4 && up.length > 0; hop++) {
+        const { data } = await supabase
+          .from("activities")
+          .select("id, joined_from")
+          .in("id", up);
+        if (cancelled) return;
+        up = [];
+        for (const r of data || []) {
+          if (!all.has(r.id)) all.add(r.id);
+          if (r.joined_from && !all.has(r.joined_from)) up.push(r.joined_from);
+        }
+      }
+      // Down: everyone who joined any node we know about.
+      let down = Array.from(all);
+      for (let hop = 0; hop < 4 && down.length > 0; hop++) {
+        const { data } = await supabase
+          .from("activities")
+          .select("id")
+          .in("joined_from", down)
+          .limit(300);
+        if (cancelled) return;
+        down = [];
+        for (const r of data || []) {
+          if (!all.has(r.id)) {
+            all.add(r.id);
+            down.push(r.id);
+          }
+        }
+      }
+      const rows = await fetchCheckinPhotosMany(Array.from(all));
       if (!cancelled)
         setMedia(
           [...rows].sort(
@@ -77,7 +118,7 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
     return () => {
       cancelled = true;
     };
-  }, [tab, media, nights]);
+  }, [tab, media, nights, ownActs]);
 
   const totalPhotos = (nights || []).reduce((s, n) => s + n.photoCount, 0);
 
@@ -124,7 +165,12 @@ export function VenueHistory({ userId, venue, onOpenThread }) {
                 : "text-neutral-500"
             }`}
           >
-            Media{totalPhotos > 0 ? ` · ${totalPhotos}` : ""}
+            {/* Count upgrades to the whole night's media once signed —
+                own-shard counts are just the preview. */}
+            Media
+            {(media ? media.length : totalPhotos) > 0
+              ? ` · ${media ? media.length : totalPhotos}`
+              : ""}
           </button>
         </div>
       </div>
