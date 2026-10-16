@@ -1133,14 +1133,19 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={() => setSearchUi(true)}
-              aria-label="Search places"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition lg:hidden"
-            >
-              <Search size={17} strokeWidth={1.8} />
-            </button>
+            {/* ONE SEARCH PER VIEW (Oct 16, Mark): in list view the
+                magnifier retires — narrowing lives in the list's own box,
+                global search behind its Search-everywhere row. */}
+            {!listView && (
+              <button
+                type="button"
+                onClick={() => setSearchUi(true)}
+                aria-label="Search places"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[#455d3b] shadow-[0_2px_10px_rgba(30,27,23,0.14)] active:scale-95 transition lg:hidden"
+              >
+                <Search size={17} strokeWidth={1.8} />
+              </button>
+            )}
           </div>
           <div className="mt-2.5 flex items-center gap-2 overflow-x-auto pb-1 pointer-events-auto">
             {(mapFilter === "friends" || mapFilter === "my_list") &&
@@ -1624,6 +1629,27 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                 )
               );
             })()}
+            {/* THE ESCAPE HATCH (Oct 16, Mark's one-search spec): local
+                narrowing above, global finding one tap away — carries the
+                query into the inline search (Flanit + Google, fly-to, Add). */}
+            <button
+              type="button"
+              onClick={() => {
+                setQ(listQuery.trim());
+                setSearchUi(true);
+              }}
+              className="mt-1 flex w-full items-center gap-3 border-t border-neutral-100 py-3 text-left"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#edf2eb] text-[#455d3b]">
+                <Search size={15} strokeWidth={1.8} />
+              </span>
+              <span className="flex-1 text-sm font-medium text-[#455d3b]">
+                {listQuery.trim()
+                  ? `Search everywhere for "${listQuery.trim()}"`
+                  : "Search everywhere"}
+              </span>
+              <span className="text-[#455d3b]">›</span>
+            </button>
           </div>
           {/* Readability wash for the floating controls (Sep 9, Mark) —
               rows fade out behind the +, filter and map-toggle buttons. */}
