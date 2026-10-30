@@ -118,6 +118,11 @@ export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null
   // the carousel is instant (the proxy + CDN cache the bytes; this just kicks
   // the fetches off ahead of the user tapping ›).
   useEffect(() => {
+    // RESET on venue change (Oct 30, Mark: "11/10 then 14/10 then 20/10") —
+    // the deck reuses this component, so the old venue's photo index
+    // survived into the next venue and overshot its array.
+    setImageIndex(0);
+    setIsFading(false);
     if (images.length <= 1) return;
     images.forEach((u) => {
       const img = new Image();
@@ -126,17 +131,22 @@ export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null
   }, [venue?.id]);
 
   if (!images.length) return null;
-  const currentImage = images[imageIndex];
+  // Clamp: a mid-transition venue swap can leave the index past the new
+  // array for one render; never show a blank hero or 11/10.
+  const safeIndex = Math.min(imageIndex, images.length - 1);
+  const currentImage = images[safeIndex];
   function changeImage(direction, e) {
     e.stopPropagation();
     if (images.length <= 1 || isFading) return;
     setIsFading(true);
     setTimeout(() => {
       setImageIndex((current) => {
+        // Inequalities, not equality (Oct 30): an out-of-range index could
+        // never hit the exact ===length-1 wrap and counted up forever.
         if (direction === "next") {
-          return current === images.length - 1 ? 0 : current + 1;
+          return current >= images.length - 1 ? 0 : current + 1;
         }
-        return current === 0 ? images.length - 1 : current - 1;
+        return current <= 0 ? images.length - 1 : current - 1;
       });
       setIsFading(false);
     }, 150);
@@ -201,12 +211,12 @@ export function VenueHeroCarousel({ venue, disableSwipe = false, beenPill = null
           {/* Bottom right (Sep 7, Mark) — the top corner belongs to the
               card's X now that the photo bleeds to the top. */}
           <div className="absolute right-4 bottom-4 z-10 rounded-full bg-black/50 backdrop-blur px-3 py-1 text-xs text-white">
-            {imageIndex + 1} / {images.length}
+            {safeIndex + 1} / {images.length}
           </div>
         </>
       )}
       {/* Google Places ToS — attribution for the currently-shown image. */}
-      <PhotoAttribution attribution={attributions[imageIndex]} />
+      <PhotoAttribution attribution={attributions[safeIndex]} />
       <div className="absolute bottom-0 left-0 right-0 p-5 text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]">
         <p className="text-sm text-white/80 mb-1">{venue.type}</p>
         <h2 className="text-[28px] font-semibold leading-tight mb-1">

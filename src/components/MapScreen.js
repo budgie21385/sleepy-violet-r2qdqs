@@ -20,6 +20,10 @@ import {
   venueMatchesAmenities,
   isVenueOpenNow,
   getTodayDayKey,
+  venueOpenAt,
+  timeStringToMinutes,
+  OPEN_AT_DAY_OPTIONS,
+  OPEN_AT_TIME_OPTIONS,
 } from "../lib/venueLogic";
 import {
   MapFilterGroup,
@@ -322,6 +326,9 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
   const [fCuisines, setFCuisines] = useState([]);
   const [fAreas, setFAreas] = useState([]); // [{ name, lat, lng }]
   const [fOpenNow, setFOpenNow] = useState(false);
+  // Open at a chosen day + time (Oct 30) — active only when BOTH are set.
+  const [fOpenDay, setFOpenDay] = useState("");
+  const [fOpenTime, setFOpenTime] = useState("");
   const [fMinRating, setFMinRating] = useState(0);
   const [fPrices, setFPrices] = useState([]); // price_level numbers 1..4
   const [fAmenities, setFAmenities] = useState([]); // amenity column keys
@@ -690,12 +697,18 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     if (fOccasions.length > 0 && !venueMatchesOccasions(v, fOccasions, todayKey))
       return false;
     if (fOpenNow && !isVenueOpenNow(v)) return false;
+    if (
+      fOpenDay &&
+      fOpenTime &&
+      !venueOpenAt(v, fOpenDay, timeStringToMinutes(fOpenTime))
+    )
+      return false;
     if (fMinRating > 0 && !(Number(v.rating) >= fMinRating)) return false;
     if (fPrices.length > 0 && !venueMatchesPrice(v, fPrices)) return false;
     if (fAmenities.length > 0 && !venueMatchesAmenities(v, fAmenities))
       return false;
     return true;
-  }, [fAreas, fCuisines, fOccasions, fOpenNow, fMinRating, fPrices, fAmenities, mapAreaExtents]);
+  }, [fAreas, fCuisines, fOccasions, fOpenNow, fOpenDay, fOpenTime, fMinRating, fPrices, fAmenities, mapAreaExtents]);
 
   // The two views over the same data. Friends/Past: only venues where a
   // FRIEND has a night or mark, pin faces friends-only. My List/Been: only
@@ -1028,6 +1041,23 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
     })),
     ...(fOpenNow
       ? [{ key: "open", label: "Open now", onRemove: () => setFOpenNow(false) }]
+      : []),
+    ...(fOpenDay && fOpenTime
+      ? [
+          {
+            key: "openat",
+            label: `Open ${
+              OPEN_AT_DAY_OPTIONS.find((d) => d.key === fOpenDay)?.label || ""
+            } ${
+              OPEN_AT_TIME_OPTIONS.find((t) => t.value === fOpenTime)?.label ||
+              fOpenTime
+            }`,
+            onRemove: () => {
+              setFOpenDay("");
+              setFOpenTime("");
+            },
+          },
+        ]
       : []),
     ...(fMinRating > 0
       ? [{ key: "rating", label: `${fMinRating}★+`, onRemove: () => setFMinRating(0) }]
@@ -2274,6 +2304,42 @@ export function MapScreen({ venues, savedIds, onSave, onUnsave, onHide, onCheckI
                         }`}
                       />
                     </button>
+                  </div>
+
+                  {/* OPEN AT (Oct 30, Mark: "opening hours as a filter...
+                      maybe in the advanced filters") — a specific day + time
+                      for planning ahead; Open now stays the live shortcut.
+                      Both selects set = active; Any on either = off. */}
+                  <div className="flex items-center justify-between pt-3">
+                    <span className="text-sm font-medium text-neutral-800">
+                      Open at
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <select
+                        value={fOpenDay}
+                        onChange={(e) => setFOpenDay(e.target.value)}
+                        className="appearance-none rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-base text-neutral-800 focus:outline-none"
+                      >
+                        <option value="">Any day</option>
+                        {OPEN_AT_DAY_OPTIONS.map((d) => (
+                          <option key={d.key} value={d.key}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={fOpenTime}
+                        onChange={(e) => setFOpenTime(e.target.value)}
+                        className="appearance-none rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-base text-neutral-800 focus:outline-none"
+                      >
+                        <option value="">Any time</option>
+                        {OPEN_AT_TIME_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
                   </div>
                 </div>
               </div>

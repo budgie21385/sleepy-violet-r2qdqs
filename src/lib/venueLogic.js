@@ -250,6 +250,56 @@ export function isVenueOpenNow(venue) {
   return false;
 }
 
+// Shared options for the Open-at control (map sheet + session filters stay
+// identical). Days display Mon-first; times run evening-heavy, 6am to 1:30am.
+export const OPEN_AT_DAY_OPTIONS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+].map((key) => ({ key, label: key.charAt(0).toUpperCase() + key.slice(1, 3) }));
+
+export const OPEN_AT_TIME_OPTIONS = (() => {
+  const out = [];
+  for (let h = 6; h <= 25; h++) {
+    for (const m of [0, 30]) {
+      if (h === 25 && m > 30) continue;
+      const hour24 = h % 24;
+      const value = `${String(hour24).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const hr12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+      const ampm = hour24 < 12 ? "am" : "pm";
+      out.push({ value, label: `${hr12}:${String(m).padStart(2, "0")} ${ampm}` });
+    }
+  }
+  return out;
+})();
+
+// Open at a SPECIFIC day + time (Oct 30, Mark: "opening hours as a filter
+// on all the filters — map, shortlist, pick together"). Mirrors
+// isVenueOpenNow — including the previous day's past-midnight tail — but
+// for any chosen moment. Venues with no hours data are filtered out while
+// the filter is active, same stance as Open now.
+export function venueOpenAt(venue, dayKey, minutes) {
+  if (!dayKey || !Number.isFinite(minutes)) return true; // filter not set
+  const intervals = venueDayIntervals(venue, dayKey);
+  if (intervals.some((r) => minutes >= r.start && minutes < r.end)) return true;
+  const idx = DAY_KEYS.indexOf(dayKey);
+  if (idx === -1) return false;
+  const prevValue = venue?.[`${DAY_KEYS[(idx + 6) % 7]}_hours`];
+  if (!prevValue || typeof prevValue !== "string") return false;
+  for (const part of prevValue.split(",")) {
+    const [s, e] = part.trim().split("-").map((t) => (t || "").trim());
+    const start = timeStringToMinutes(s);
+    const end = timeStringToMinutes(e);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    if (end < start && minutes >= 0 && minutes < end) return true;
+  }
+  return false;
+}
+
 export function venueMatchesVibe(venue, vibe, dayKey) {
   const type = (venue.type || "").toLowerCase();
   const cuisine = (venue.cuisine || "").toLowerCase();

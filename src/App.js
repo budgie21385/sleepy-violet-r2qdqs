@@ -19,6 +19,10 @@ import {
   venueMatchesOccasions,
   venueMatchesPrice,
   venueMatchesAmenities,
+  venueOpenAt,
+  timeStringToMinutes,
+  OPEN_AT_DAY_OPTIONS,
+  OPEN_AT_TIME_OPTIONS,
 } from "./lib/venueLogic";
 // The deck grammar — ONE module builds session pools on both sides of the
 // wire (Oct 15; see lib/pool.js and src/lib/pool.test.js).
@@ -374,6 +378,10 @@ export default function RestaurantSwipeMVP() {
   const [radiusKm, setRadiusKm] = useState(0);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [openNow, setOpenNow] = useState(false);
+  // Open at a chosen day + time (Oct 30, Mark) — advanced filter, active
+  // only when BOTH are set; rides the session row so guests match it too.
+  const [openAtDay, setOpenAtDay] = useState("");
+  const [openAtTime, setOpenAtTime] = useState("");
   const [selectedTimes, setSelectedTimes] = useState([]);
   // "What are you after?" — the merged Vibe + drink-amenity facet (July 9,
   // 2026 setup redesign). Old sessions' filters jsonb may still carry
@@ -2890,7 +2898,14 @@ loadAreas();
       if (!matchesCuisine) return false;
  
       if (openNow && !isVenueOpenNow(venue)) return false;
- 
+
+      if (
+        openAtDay &&
+        openAtTime &&
+        !venueOpenAt(venue, openAtDay, timeStringToMinutes(openAtTime))
+      )
+        return false;
+
       if (selectedTimes.length > 0) {
         const anyBandMatches = selectedTimes.some((label) => {
           const band = TIME_BANDS.find((b) => b.key === label);
@@ -2914,6 +2929,8 @@ loadAreas();
     areaExtents,
     selectedCuisines,
     openNow,
+    openAtDay,
+    openAtTime,
     selectedTimes,
     selectedOccasions,
     selectedPrices,
@@ -2997,6 +3014,13 @@ loadAreas();
       }
 
       if (filters.openNow && !isVenueOpenNow(venue)) return false;
+
+      if (
+        filters.openAtDay &&
+        filters.openAtTime &&
+        !venueOpenAt(venue, filters.openAtDay, timeStringToMinutes(filters.openAtTime))
+      )
+        return false;
 
       if (filters.selectedTimes && filters.selectedTimes.length > 0) {
         const anyBand = filters.selectedTimes.some((label) => {
@@ -3155,6 +3179,9 @@ loadAreas();
         selectedAreaIds: selectedAreas.map((a) => a.id),
         radiusKm,
         openNow,
+        // Open-at rides the row so guests trim by it too (Oct 30).
+        openAtDay: openAtDay || null,
+        openAtTime: openAtTime || null,
         selectedTimes,
         selectedOccasions,
         selectedCuisines,
@@ -4618,6 +4645,39 @@ if (authLoading || guestLoading) {
                       placeholder="Search cuisines"
                     />
                   </MapFilterSection>
+                  {/* OPEN AT (Oct 30, Mark) — plan-ahead hours filter, same
+                      control as the map sheet. Both set = active. */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-800">
+                      Open at
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <select
+                        value={openAtDay}
+                        onChange={(e) => setOpenAtDay(e.target.value)}
+                        className="appearance-none rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-base text-neutral-800 focus:outline-none"
+                      >
+                        <option value="">Any day</option>
+                        {OPEN_AT_DAY_OPTIONS.map((d) => (
+                          <option key={d.key} value={d.key}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={openAtTime}
+                        onChange={(e) => setOpenAtTime(e.target.value)}
+                        className="appearance-none rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-base text-neutral-800 focus:outline-none"
+                      >
+                        <option value="">Any time</option>
+                        {OPEN_AT_TIME_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  </div>
                   {/* MATCHES | RADIUS | TIME LIMIT as one segmented row
                       (July 31, Mark — three side-by-side dropdown pills ran
                       off the screen). Tap a segment, the options for it swap
